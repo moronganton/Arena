@@ -1,0 +1,271 @@
+generator client {
+  provider   = "prisma-client-js"
+  engineType = "library"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Auth models
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  password      String?
+  role          String    @default("OWNER")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts   Account[]
+  sessions   Session[]
+  properties Property[]
+  messages   Message[]  @relation("SentMessages")
+  aiSettings AiSettings?
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// Core PMS models
+model Property {
+  id          String   @id @default(cuid())
+  name        String
+  address     String
+  city        String
+  country     String
+  description String?
+  bedrooms    Int      @default(1)
+  bathrooms   Float    @default(1)
+  maxGuests   Int      @default(2)
+  basePrice   Float    @default(100)
+  currency    String   @default("EUR")
+  timezone    String   @default("UTC")
+  imageUrl    String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  ownerId String
+  owner   User   @relation(fields: [ownerId], references: [id])
+
+  reservations  Reservation[]
+  channels      ChannelConfig[]
+  pricingRules  PricingRule[]
+  calendarBlocks CalendarBlock[]
+  locks         SmartLock[]
+
+  @@index([ownerId])
+}
+
+model Guest {
+  id        String   @id @default(cuid())
+  name      String
+  email     String?
+  phone     String?
+  language  String   @default("en")
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  reservations Reservation[]
+}
+
+model Reservation {
+  id              String   @id @default(cuid())
+  confirmationCode String?
+  status          String   @default("CONFIRMED") // PENDING, CONFIRMED, CHECKED_IN, CHECKED_OUT, CANCELLED, NO_SHOW
+  source          String   @default("DIRECT")    // BOOKING, AIRBNB, VRBO, EXPEDIA, DIRECT
+  checkIn         DateTime
+  checkOut        DateTime
+  adults          Int      @default(1)
+  children        Int      @default(0)
+  totalAmount     Float?
+  currency        String   @default("EUR")
+  specialRequests String?
+  internalNotes   String?
+  externalId      String?  // ID from the OTA
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id])
+
+  guestId String
+  guest   Guest  @relation(fields: [guestId], references: [id])
+
+  messages     Message[]
+  accessCodes  AccessCode[]
+
+  @@index([propertyId])
+  @@index([guestId])
+  @@index([checkIn, checkOut])
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  body      String
+  direction String   @default("INBOUND")  // INBOUND, OUTBOUND
+  channel   String   @default("PLATFORM") // PLATFORM, EMAIL, SMS, INTERNAL
+  source    String?  // booking, airbnb, vrbo, expedia, direct
+  isAiGenerated Boolean @default(false)
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  reservationId String
+  reservation   Reservation @relation(fields: [reservationId], references: [id])
+
+  senderId String?
+  sender   User?   @relation("SentMessages", fields: [senderId], references: [id])
+
+  @@index([reservationId])
+}
+
+model ChannelConfig {
+  id         String  @id @default(cuid())
+  channel    String  // BOOKING, AIRBNB, VRBO, EXPEDIA
+  icalUrl    String? // iCal feed URL from the OTA
+  apiKey     String?
+  apiSecret  String?
+  listingId  String? // OTA property/listing ID
+  isActive   Boolean @default(true)
+  lastSyncAt DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id])
+
+  @@unique([propertyId, channel])
+}
+
+model PricingRule {
+  id         String   @id @default(cuid())
+  name       String
+  ruleType   String   @default("BASE")     // BASE, WEEKEND, SEASONAL, LAST_MINUTE, MINIMUM_STAY
+  startDate  DateTime?
+  endDate    DateTime?
+  daysOfWeek String?  // JSON array: [0,1,2,3,4,5,6] (Sun=0)
+  price      Float?
+  adjustment Float?   // percentage or fixed amount
+  adjType    String?  @default("PERCENT")  // PERCENT, FIXED
+  minNights  Int?     @default(1)
+  priority   Int      @default(0)
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id])
+
+  @@index([propertyId])
+}
+
+model CalendarBlock {
+  id        String   @id @default(cuid())
+  startDate DateTime
+  endDate   DateTime
+  reason    String?
+  createdAt DateTime @default(now())
+
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id])
+
+  @@index([propertyId])
+}
+
+// Smart Lock (TTLock)
+model SmartLock {
+  id         String  @id @default(cuid())
+  ttlockId   String  @unique // TTLock device ID
+  name       String
+  batteryLevel Int?
+  lockType   String  @default("PIN") // PIN, CARD, FINGERPRINT
+  isActive   Boolean @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id])
+
+  accessCodes AccessCode[]
+
+  @@index([propertyId])
+}
+
+model AccessCode {
+  id          String   @id @default(cuid())
+  code        String
+  codeType    String   @default("CUSTOM") // CUSTOM, PERIODIC
+  ttlockKeyId String?  // ID returned by TTLock after creation
+  validFrom   DateTime
+  validTo     DateTime
+  isActive    Boolean  @default(true)
+  sentToGuest Boolean  @default(false)
+  sentAt      DateTime?
+  createdAt   DateTime @default(now())
+
+  lockId String
+  lock   SmartLock @relation(fields: [lockId], references: [id])
+
+  reservationId String
+  reservation   Reservation @relation(fields: [reservationId], references: [id])
+
+  @@index([lockId])
+  @@index([reservationId])
+}
+
+// AI configuration
+model AiSettings {
+  id                  String  @id @default(cuid())
+  enabled             Boolean @default(true)
+  autoReplyEnabled    Boolean @default(true)
+  confidenceThreshold Float   @default(0.8)
+  language            String  @default("en")
+  customInstructions  String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id])
+
+  templates AiTemplate[]
+}
+
+model AiTemplate {
+  id         String   @id @default(cuid())
+  name       String
+  trigger    String   // keywords or intent that triggers this template
+  response   String
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  aiSettingsId String
+  aiSettings   AiSettings @relation(fields: [aiSettingsId], references: [id])
+}
