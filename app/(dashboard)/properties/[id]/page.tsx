@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, MapPin, Bed, Bath, Users, DollarSign, Wifi, Key } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
+import PropertyActions from "./PropertyActions";
 
 export default async function PropertyDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
@@ -64,9 +65,12 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
             <div className="p-6">
               <div className="flex items-start justify-between mb-2">
                 <h1 className="text-2xl font-bold text-slate-900">{property.name}</h1>
-                <span className={`text-xs px-2 py-1 rounded-full font-medium ${property.active ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"}`}>
-                  {property.active ? "Active" : "Inactive"}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className={`text-xs px-2 py-1 rounded-full font-medium ${property.active ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"}`}>
+                    {property.active ? "Active" : "Inactive"}
+                  </span>
+                  <PropertyActions id={property.id} />
+                </div>
               </div>
               <div className="flex items-center gap-1.5 text-slate-500 text-sm mb-4">
                 <MapPin className="w-4 h-4" />
