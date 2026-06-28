@@ -70,6 +70,7 @@ export async function POST(req: NextRequest) {
     },
     create: parsed.data,
     update: parsed.data,
+    include: { property: { select: { id: true, name: true } } },
   });
 
   return NextResponse.json(config, { status: 201 });
