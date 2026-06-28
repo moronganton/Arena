@@ -1,40 +1,26 @@
 import { NextResponse } from "next/server";
-import nodemailer from "nodemailer";
+import { Resend } from "resend";
 
 export async function GET() {
-  const config = {
-    host: process.env.SMTP_HOST,
-    port: parseInt(process.env.SMTP_PORT || "587"),
-    user: process.env.SMTP_USER,
-    from: process.env.SMTP_FROM,
-    passSet: !!process.env.SMTP_PASS,
-  };
+  if (!process.env.RESEND_API_KEY) {
+    return NextResponse.json({ success: false, error: "RESEND_API_KEY is not set in environment variables." }, { status: 500 });
+  }
+
+  const resend = new Resend(process.env.RESEND_API_KEY);
 
   try {
-    const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST || "smtp.gmail.com",
-      port: parseInt(process.env.SMTP_PORT || "587"),
-      secure: false,
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-      tls: { rejectUnauthorized: false },
-    });
-
-    await transporter.sendMail({
-      from: process.env.SMTP_FROM,
-      to: process.env.SMTP_USER,
+    const result = await resend.emails.send({
+      from: "StayHQ <onboarding@resend.dev>",
+      to: process.env.SMTP_USER || "test@example.com",
       subject: "StayHQ — Email Test",
-      html: `<h2>Email is working!</h2><p>Your SMTP configuration is set up correctly. PIN code emails will be delivered to guests.</p><p><small>Sent at ${new Date().toISOString()}</small></p>`,
+      html: `<h2>Email is working! ✅</h2><p>Your email configuration is set up correctly. PIN code emails will be delivered to guests.</p><p><small>Sent at ${new Date().toISOString()}</small></p>`,
     });
 
-    return NextResponse.json({ success: true, message: `Test email sent to ${process.env.SMTP_USER}`, config });
+    return NextResponse.json({ success: true, message: `Test email sent to ${process.env.SMTP_USER}`, id: result.data?.id });
   } catch (error: unknown) {
     return NextResponse.json({
       success: false,
       error: error instanceof Error ? error.message : String(error),
-      config,
     }, { status: 500 });
   }
 }

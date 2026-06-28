@@ -1,15 +1,7 @@
-import nodemailer from "nodemailer";
+import { Resend } from "resend";
 
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || "smtp.gmail.com",
-  port: parseInt(process.env.SMTP_PORT || "587"),
-  secure: false,
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-  tls: { rejectUnauthorized: false },
-});
+const resend = new Resend(process.env.RESEND_API_KEY);
+const FROM = process.env.SMTP_FROM || "StayHQ <onboarding@resend.dev>";
 
 interface AccessCodeEmailParams {
   guestName: string;
@@ -59,8 +51,8 @@ export async function sendAccessCodeEmail(params: AccessCodeEmailParams): Promis
     </html>
   `;
 
-  await transporter.sendMail({
-    from: process.env.SMTP_FROM,
+  await resend.emails.send({
+    from: FROM,
     to: guestEmail,
     subject: `Your access code for ${propertyName} — Check-in ${formatDate(validFrom)}`,
     html,
@@ -92,8 +84,8 @@ export async function sendMessageToGuest(params: MessageNotificationParams): Pro
     </html>
   `;
 
-  await transporter.sendMail({
-    from: process.env.SMTP_FROM,
+  await resend.emails.send({
+    from: FROM,
     to: guestEmail,
     subject: `Message from your host — ${propertyName}`,
     html,
