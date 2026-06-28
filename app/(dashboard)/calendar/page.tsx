@@ -100,7 +100,7 @@ export default function CalendarPage() {
   const dayNames = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 
   return (
-    <div className="p-8 max-w-7xl mx-auto">
+    <div className="p-4 md:p-8 max-w-7xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-slate-900">Calendar</h1>
         <div className="flex items-center gap-3">

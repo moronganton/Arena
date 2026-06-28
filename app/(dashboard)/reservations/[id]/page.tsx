@@ -32,7 +32,7 @@ export default async function ReservationDetailPage({
   const nights = nightsBetween(reservation.checkIn, reservation.checkOut);
 
   return (
-    <div className="p-8 max-w-6xl mx-auto">
+    <div className="p-4 md:p-8 max-w-6xl mx-auto">
       <div className="mb-6">
         <Link href="/reservations" className="inline-flex items-center gap-2 text-slate-500 hover:text-slate-700 text-sm mb-4">
           <ArrowLeft className="w-4 h-4" />

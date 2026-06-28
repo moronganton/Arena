@@ -39,24 +39,25 @@ export default async function ReservationsPage({
   const sources = ["BOOKING", "AIRBNB", "VRBO", "EXPEDIA", "DIRECT"];
 
   return (
-    <div className="p-8 max-w-7xl mx-auto">
+    <div className="p-4 md:p-8 max-w-7xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Reservations</h1>
+          <h1 className="text-xl md:text-2xl font-bold text-slate-900">Reservations</h1>
           <p className="text-slate-500 text-sm mt-0.5">{reservations.length} total</p>
         </div>
         <Link
           href="/reservations/new"
-          className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition"
+          className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-3 md:px-4 py-2.5 rounded-xl text-sm font-medium transition"
         >
           <Plus className="w-4 h-4" />
-          New Reservation
+          <span className="hidden sm:inline">New Reservation</span>
+          <span className="sm:hidden">New</span>
         </Link>
       </div>
 
       {/* Filters */}
-      <div className="bg-white rounded-2xl border border-slate-100 p-4 mb-6 flex flex-wrap gap-3">
-        <form className="flex items-center gap-2 flex-1 min-w-48">
+      <div className="bg-white rounded-2xl border border-slate-100 p-4 mb-6">
+        <form className="flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
@@ -66,37 +67,85 @@ export default async function ReservationsPage({
               className="w-full pl-9 pr-4 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </div>
-          <select
-            name="status"
-            defaultValue={params.status || ""}
-            className="text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          >
-            <option value="">All Statuses</option>
-            {statuses.map((s) => (
-              <option key={s} value={s}>{s}</option>
-            ))}
-          </select>
-          <select
-            name="source"
-            defaultValue={params.source || ""}
-            className="text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          >
-            <option value="">All Channels</option>
-            {sources.map((s) => (
-              <option key={s} value={s}>{SOURCE_LABELS[s]}</option>
-            ))}
-          </select>
-          <button
-            type="submit"
-            className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium transition"
-          >
-            Filter
-          </button>
+          <div className="flex gap-2">
+            <select
+              name="status"
+              defaultValue={params.status || ""}
+              className="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="">All Statuses</option>
+              {statuses.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+            <select
+              name="source"
+              defaultValue={params.source || ""}
+              className="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="">All Channels</option>
+              {sources.map((s) => (
+                <option key={s} value={s}>{SOURCE_LABELS[s]}</option>
+              ))}
+            </select>
+            <button
+              type="submit"
+              className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium transition"
+            >
+              <Filter className="w-4 h-4 sm:hidden" />
+              <span className="hidden sm:inline">Filter</span>
+            </button>
+          </div>
         </form>
       </div>
 
-      {/* Reservations Table */}
-      <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
+      {/* Mobile cards */}
+      <div className="md:hidden space-y-3">
+        {reservations.length === 0 && (
+          <div className="text-center text-slate-400 py-12 bg-white rounded-2xl border border-slate-100">
+            No reservations found
+          </div>
+        )}
+        {reservations.map((r) => (
+          <Link key={r.id} href={`/reservations/${r.id}`} className="block bg-white rounded-2xl border border-slate-100 p-4 hover:shadow-sm transition">
+            <div className="flex items-start justify-between mb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 bg-slate-100 rounded-full flex items-center justify-center text-slate-600 font-semibold text-sm flex-shrink-0">
+                  {r.guest.name[0].toUpperCase()}
+                </div>
+                <div>
+                  <p className="font-semibold text-slate-900 text-sm">{r.guest.name}</p>
+                  <p className="text-xs text-slate-500">{r.property.name}</p>
+                </div>
+              </div>
+              <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${STATUS_COLORS[r.status] || "bg-slate-100 text-slate-600"}`}>
+                {r.status}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-xs text-slate-500">
+              <span>{formatShortDate(r.checkIn)} → {formatShortDate(r.checkOut)}</span>
+              <div className="flex items-center gap-2">
+                <span className={`font-medium px-2 py-0.5 rounded-full ${SOURCE_COLORS[r.source] || "bg-slate-100 text-slate-600"}`}>
+                  {SOURCE_LABELS[r.source] || r.source}
+                </span>
+                {r.totalAmount && (
+                  <span className="font-semibold text-slate-900">{formatCurrency(r.totalAmount, r.currency)}</span>
+                )}
+              </div>
+            </div>
+            {r.messages.length > 0 && (
+              <div className="mt-2">
+                <span className="text-xs bg-rose-100 text-rose-600 px-2 py-0.5 rounded-full">
+                  {r.messages.length} unread message{r.messages.length > 1 ? "s" : ""}
+                </span>
+              </div>
+            )}
+          </Link>
+        ))}
+      </div>
+
+      {/* Desktop table */}
+      <div className="hidden md:block bg-white rounded-2xl border border-slate-100 overflow-hidden">
         <table className="w-full">
           <thead>
             <tr className="border-b border-slate-100">

@@ -44,7 +44,7 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
   };
 
   return (
-    <div className="p-8 max-w-6xl mx-auto">
+    <div className="p-4 md:p-8 max-w-6xl mx-auto">
       <Link href="/properties" className="inline-flex items-center gap-2 text-slate-500 hover:text-slate-700 text-sm mb-6">
         <ArrowLeft className="w-4 h-4" />
         Back to Properties

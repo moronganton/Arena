@@ -32,7 +32,7 @@ export default async function MessagesPage() {
   });
 
   return (
-    <div className="p-8 max-w-4xl mx-auto">
+    <div className="p-4 md:p-8 max-w-4xl mx-auto">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-900">Messages</h1>
         <p className="text-slate-500 text-sm mt-0.5">Unified inbox from all channels</p>
