@@ -1,7 +1,10 @@
 import { Resend } from "resend";
 
-const resend = new Resend(process.env.RESEND_API_KEY);
-const FROM = process.env.SMTP_FROM || "StayHQ <onboarding@resend.dev>";
+function getResend() {
+  return new Resend(process.env.RESEND_API_KEY);
+}
+
+const FROM = "StayHQ <onboarding@resend.dev>";
 
 interface AccessCodeEmailParams {
   guestName: string;
@@ -51,7 +54,7 @@ export async function sendAccessCodeEmail(params: AccessCodeEmailParams): Promis
     </html>
   `;
 
-  await resend.emails.send({
+  await getResend().emails.send({
     from: FROM,
     to: guestEmail,
     subject: `Your access code for ${propertyName} — Check-in ${formatDate(validFrom)}`,
@@ -84,7 +87,7 @@ export async function sendMessageToGuest(params: MessageNotificationParams): Pro
     </html>
   `;
 
-  await resend.emails.send({
+  await getResend().emails.send({
     from: FROM,
     to: guestEmail,
     subject: `Message from your host — ${propertyName}`,
