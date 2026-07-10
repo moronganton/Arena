@@ -59,6 +59,14 @@ export default function ReservationActions(props: Props) {
     const res = await fetch(`/api/reservations/${props.id}`, { method: "DELETE" });
     setBusy(false);
     if (res.ok) {
+      const data = await res.json();
+      if (data.lockErrors?.length) {
+        alert(
+          "Reservation cancelled, but there was a problem removing the code from the lock:\n\n" +
+          data.lockErrors.join("\n") +
+          "\n\nPlease check the TTLock app and remove the code manually if needed."
+        );
+      }
       setShowCancel(false);
       router.refresh();
     } else {

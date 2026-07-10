@@ -197,7 +197,12 @@ export async function deletePasscode(
     body: params.toString(),
   });
 
-  if (!res.ok) throw new Error(`Failed to delete passcode: ${res.status}`);
+  if (!res.ok) throw new Error(`Failed to delete passcode: HTTP ${res.status}`);
+  // TTLock returns HTTP 200 with an errcode on failure
+  const data = await res.json();
+  if (data.errcode !== 0) {
+    throw new Error(`TTLock delete error ${data.errcode}: ${data.errmsg || "unknown"}`);
+  }
 }
 
 // Generate a random 4-digit code

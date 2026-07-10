@@ -2,26 +2,61 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getValidAccessToken, deletePasscode } from "@/lib/ttlock";
+import { sendCancellationEmail } from "@/lib/notifications";
 
-// Deactivate all access codes for a reservation and remove them from the physical locks
+// Deactivate all access codes for a reservation and remove them from the physical locks.
+// Returns a report so failures can be surfaced to the UI instead of hidden.
 async function revokeAccessCodes(reservationId: string, ownerId: string) {
   const codes = await prisma.accessCode.findMany({
     where: { reservationId, isActive: true },
     include: { lock: true },
   });
-  if (codes.length === 0) return;
+  if (codes.length === 0) return { revoked: 0, lockErrors: [] as string[] };
 
   const accessToken = await getValidAccessToken(ownerId);
+  const lockErrors: string[] = [];
 
   for (const code of codes) {
-    if (accessToken && code.ttlockKeyId && code.lock.ttlockId) {
-      try {
-        await deletePasscode(accessToken, code.lock.ttlockId, code.ttlockKeyId);
-      } catch (err) {
-        console.error(`Failed to delete passcode ${code.id} from lock:`, err);
+    if (code.ttlockKeyId && code.lock.ttlockId) {
+      if (!accessToken) {
+        lockErrors.push(`Code ${code.code}: TTLock account not connected — code was NOT removed from the lock`);
+      } else {
+        try {
+          await deletePasscode(accessToken, code.lock.ttlockId, code.ttlockKeyId);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          lockErrors.push(`Code ${code.code} on "${code.lock.name}": ${msg}`);
+          console.error(`Failed to delete passcode ${code.id} from lock:`, err);
+        }
       }
+    } else if (code.lock.ttlockId && !code.ttlockKeyId) {
+      lockErrors.push(`Code ${code.code}: was never pushed to TTLock (no key ID stored), nothing to remove`);
     }
     await prisma.accessCode.update({ where: { id: code.id }, data: { isActive: false } });
+  }
+
+  return { revoked: codes.length, lockErrors };
+}
+
+// Notify the guest that their reservation was cancelled
+async function notifyGuestOfCancellation(reservationId: string, hadAccessCode: boolean) {
+  const reservation = await prisma.reservation.findUnique({
+    where: { id: reservationId },
+    include: { guest: true, property: true },
+  });
+  if (!reservation?.guest.email) return;
+
+  try {
+    await sendCancellationEmail({
+      guestName: reservation.guest.name,
+      guestEmail: reservation.guest.email,
+      propertyName: reservation.property.name,
+      checkIn: reservation.checkIn,
+      checkOut: reservation.checkOut,
+      hadAccessCode,
+    });
+  } catch (err) {
+    console.error("Failed to send cancellation email:", err);
   }
 }
 
@@ -70,9 +105,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     include: { guest: true, property: true },
   });
 
-  // If the reservation was cancelled, revoke its lock codes
+  // If the reservation was cancelled, revoke its lock codes and notify the guest
   if (body.status === "CANCELLED") {
-    await revokeAccessCodes(id, session!.user!.id!);
+    const result = await revokeAccessCodes(id, session!.user!.id!);
+    await notifyGuestOfCancellation(id, result.revoked > 0);
+    return NextResponse.json({ ...updated, lockErrors: result.lockErrors });
   }
 
   return NextResponse.json(updated);
@@ -93,7 +130,8 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     data: { status: "CANCELLED" },
   });
 
-  await revokeAccessCodes(id, session!.user!.id!);
+  const result = await revokeAccessCodes(id, session!.user!.id!);
+  await notifyGuestOfCancellation(id, result.revoked > 0);
 
-  return NextResponse.json({ success: true });
+  return NextResponse.json({ success: true, lockErrors: result.lockErrors });
 }
