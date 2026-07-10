@@ -200,6 +200,38 @@ export async function listPasscodes(
   return data.list || [];
 }
 
+// Change the validity period of an existing passcode (requires a gateway)
+export async function changePasscodePeriod(
+  accessToken: string,
+  lockId: string,
+  keyboardPwdId: string,
+  validFrom: Date,
+  validTo: Date
+): Promise<void> {
+  const params = new URLSearchParams({
+    clientId: CLIENT_ID,
+    accessToken,
+    lockId,
+    keyboardPwdId,
+    startDate: validFrom.getTime().toString(),
+    endDate: validTo.getTime().toString(),
+    changeType: "2", // 2 = via gateway
+    date: Date.now().toString(),
+  });
+
+  const res = await fetch(`${BASE_URL}/v3/keyboardPwd/change`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: params.toString(),
+  });
+
+  if (!res.ok) throw new Error(`Failed to change passcode period: HTTP ${res.status}`);
+  const data = await res.json();
+  if (data.errcode && data.errcode !== 0) {
+    throw new Error(`TTLock change error ${data.errcode}: ${data.errmsg || "unknown"}`);
+  }
+}
+
 // Delete a passcode
 export async function deletePasscode(
   accessToken: string,

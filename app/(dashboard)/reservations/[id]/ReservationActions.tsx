@@ -47,6 +47,14 @@ export default function ReservationActions(props: Props) {
     });
     setBusy(false);
     if (res.ok) {
+      const data = await res.json();
+      if (data.lockErrors?.length) {
+        alert(
+          "Changes saved, but updating the code on the lock failed:\n\n" +
+          data.lockErrors.join("\n") +
+          "\n\nPlease check the TTLock app."
+        );
+      }
       setShowEdit(false);
       router.refresh();
     } else {
@@ -170,8 +178,8 @@ export default function ReservationActions(props: Props) {
               </div>
             </div>
             <p className="text-xs text-slate-400 mt-3">
-              Note: changing dates does not update already-issued lock codes. Cancel and regenerate
-              the code if the dates change.
+              Changing the dates automatically adjusts the validity period of any door access
+              codes on the smart lock.
             </p>
             <div className="flex gap-3 mt-5">
               <button
