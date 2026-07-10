@@ -5,6 +5,7 @@ import { formatDate, formatCurrency, SOURCE_COLORS, SOURCE_LABELS, STATUS_COLORS
 import Link from "next/link";
 import { ArrowLeft, Key, MessageSquare, Edit3, Mail, Phone } from "lucide-react";
 import { MessageThread } from "@/components/messages/MessageThread";
+import ReservationActions from "./ReservationActions";
 
 export default async function ReservationDetailPage({
   params,
@@ -53,6 +54,16 @@ export default async function ReservationDetailPage({
               )}
             </div>
           </div>
+          <ReservationActions
+            id={reservation.id}
+            source={reservation.source}
+            status={reservation.status}
+            checkIn={reservation.checkIn.toISOString()}
+            checkOut={reservation.checkOut.toISOString()}
+            adults={reservation.adults}
+            children={reservation.children}
+            totalAmount={reservation.totalAmount}
+          />
         </div>
       </div>
 

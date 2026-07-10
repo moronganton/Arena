@@ -61,6 +61,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       status: body.status,
       checkIn: body.checkIn ? new Date(body.checkIn) : undefined,
       checkOut: body.checkOut ? new Date(body.checkOut) : undefined,
+      adults: body.adults,
+      children: body.children,
       totalAmount: body.totalAmount,
       specialRequests: body.specialRequests,
       internalNotes: body.internalNotes,
