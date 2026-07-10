@@ -144,7 +144,8 @@ export async function createPasscode(
   lockId: string,
   passcode: string,
   validFrom: Date,
-  validTo: Date
+  validTo: Date,
+  name?: string
 ): Promise<TTLockPasscode> {
   const params = new URLSearchParams({
     clientId: CLIENT_ID,
@@ -156,6 +157,8 @@ export async function createPasscode(
     endDate: validTo.getTime().toString(),
     date: Date.now().toString(),
   });
+  // Passcode name shown in the TTLock app (e.g. the guest's name)
+  if (name) params.set("keyboardPwdName", name.slice(0, 20));
 
   const res = await fetch(`${BASE_URL}/v3/keyboardPwd/add`, {
     method: "POST",
@@ -193,9 +196,9 @@ export async function deletePasscode(
   if (!res.ok) throw new Error(`Failed to delete passcode: ${res.status}`);
 }
 
-// Generate a random 6-digit code
+// Generate a random 4-digit code
 function generateRandomCode(): string {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  return Math.floor(1000 + Math.random() * 9000).toString();
 }
 
 // Main function: generate code + save to DB + email guest
@@ -233,7 +236,8 @@ export async function generateAccessCode(params: {
         lock.ttlockId,
         code,
         params.validFrom,
-        params.validTo
+        params.validTo,
+        reservation.guest.name
       );
       ttlockKeyId = result.keyboardPwdId.toString();
     } catch (err) {
