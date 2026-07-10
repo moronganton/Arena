@@ -172,8 +172,32 @@ export async function createPasscode(
 
   if (!res.ok) throw new Error(`Failed to create passcode: ${res.status}`);
   const data = await res.json();
-  if (data.errcode !== 0) throw new Error(`TTLock error: ${data.errmsg}`);
+  // Success responses contain keyboardPwdId and may omit errcode entirely;
+  // failure responses contain a non-zero errcode.
+  if (!data.keyboardPwdId) {
+    throw new Error(`TTLock error ${data.errcode ?? "?"}: ${data.errmsg || JSON.stringify(data)}`);
+  }
   return { keyboardPwdId: data.keyboardPwdId, keyboardPwd: passcode };
+}
+
+// List passcodes currently on a lock (used to find codes we lost track of)
+export async function listPasscodes(
+  accessToken: string,
+  lockId: string
+): Promise<Array<{ keyboardPwdId: number; keyboardPwd: string }>> {
+  const params = new URLSearchParams({
+    clientId: CLIENT_ID,
+    accessToken,
+    lockId,
+    pageNo: "1",
+    pageSize: "100",
+    date: Date.now().toString(),
+  });
+
+  const res = await fetch(`${BASE_URL}/v3/lock/listKeyboardPwd?${params}`);
+  if (!res.ok) throw new Error(`Failed to list passcodes: ${res.status}`);
+  const data = await res.json();
+  return data.list || [];
 }
 
 // Delete a passcode

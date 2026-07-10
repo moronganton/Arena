@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { getValidAccessToken, deletePasscode } from "@/lib/ttlock";
+import { getValidAccessToken, deletePasscode, listPasscodes } from "@/lib/ttlock";
 import { sendCancellationEmail } from "@/lib/notifications";
 
 // Deactivate all access codes for a reservation and remove them from the physical locks.
@@ -17,20 +17,28 @@ async function revokeAccessCodes(reservationId: string, ownerId: string) {
   const lockErrors: string[] = [];
 
   for (const code of codes) {
-    if (code.ttlockKeyId && code.lock.ttlockId) {
+    if (code.lock.ttlockId) {
       if (!accessToken) {
         lockErrors.push(`Code ${code.code}: TTLock account not connected — code was NOT removed from the lock`);
       } else {
         try {
-          await deletePasscode(accessToken, code.lock.ttlockId, code.ttlockKeyId);
+          let keyId = code.ttlockKeyId;
+          // Fallback: if we never stored the key ID, find the code on the lock by its digits
+          if (!keyId) {
+            const onLock = await listPasscodes(accessToken, code.lock.ttlockId);
+            const match = onLock.find((p) => p.keyboardPwd === code.code);
+            keyId = match ? String(match.keyboardPwdId) : null;
+          }
+          if (keyId) {
+            await deletePasscode(accessToken, code.lock.ttlockId, keyId);
+          }
+          // If not found on the lock, it was never pushed — nothing to remove
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           lockErrors.push(`Code ${code.code} on "${code.lock.name}": ${msg}`);
           console.error(`Failed to delete passcode ${code.id} from lock:`, err);
         }
       }
-    } else if (code.lock.ttlockId && !code.ttlockKeyId) {
-      lockErrors.push(`Code ${code.code}: was never pushed to TTLock (no key ID stored), nothing to remove`);
     }
     await prisma.accessCode.update({ where: { id: code.id }, data: { isActive: false } });
   }
