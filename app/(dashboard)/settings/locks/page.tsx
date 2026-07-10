@@ -1,6 +1,6 @@
 "use client";
-import { useState, useEffect } from "react";
-import { Plus, Key, Trash2, Battery, RefreshCw, Send } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Plus, Key, Trash2, Battery, RefreshCw, Link2, Unlink, Download, Check } from "lucide-react";
 
 interface Property {
   id: string;
@@ -16,6 +16,14 @@ interface SmartLock {
   isActive: boolean;
   property: { id: string; name: string };
   _count: { accessCodes: number };
+}
+
+interface CloudLock {
+  ttlockId: string;
+  name: string;
+  batteryLevel: number | null;
+  imported: boolean;
+  propertyId?: string;
 }
 
 interface Reservation {
@@ -42,18 +50,94 @@ export default function LocksPage() {
     lockType: "PIN",
   });
 
-  useEffect(() => {
-    Promise.all([
+  // TTLock account state
+  const [ttlock, setTtlock] = useState<{ connected: boolean; username: string | null }>({ connected: false, username: null });
+  const [creds, setCreds] = useState({ username: "", password: "" });
+  const [connecting, setConnecting] = useState(false);
+  const [connectError, setConnectError] = useState("");
+
+  // Import state
+  const [cloudLocks, setCloudLocks] = useState<CloudLock[] | null>(null);
+  const [loadingCloud, setLoadingCloud] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importMessage, setImportMessage] = useState("");
+
+  const loadData = useCallback(async () => {
+    const [props, lockData, resData, acct] = await Promise.all([
       fetch("/api/properties").then((r) => r.json()),
       fetch("/api/ttlock/locks").then((r) => r.json()),
       fetch("/api/reservations?status=CONFIRMED").then((r) => r.json()),
-    ]).then(([props, lockData, resData]) => {
-      setProperties(props);
-      setLocks(lockData);
-      setReservations(resData);
-      if (props.length > 0) setForm((f) => ({ ...f, propertyId: props[0].id }));
-    });
+      fetch("/api/ttlock/account").then((r) => r.json()),
+    ]);
+    setProperties(Array.isArray(props) ? props : []);
+    setLocks(Array.isArray(lockData) ? lockData : []);
+    setReservations(Array.isArray(resData) ? resData : []);
+    setTtlock({ connected: !!acct.connected, username: acct.username });
+    if (props.length > 0) setForm((f) => ({ ...f, propertyId: f.propertyId || props[0].id }));
   }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  async function connectAccount() {
+    setConnecting(true);
+    setConnectError("");
+    const res = await fetch("/api/ttlock/account", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(creds),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      setTtlock({ connected: true, username: data.username });
+      setCreds({ username: "", password: "" });
+    } else {
+      setConnectError(data.error || "Connection failed");
+    }
+    setConnecting(false);
+  }
+
+  async function disconnectAccount() {
+    if (!confirm("Disconnect your TTLock account? Codes will no longer be pushed to your physical locks.")) return;
+    await fetch("/api/ttlock/account", { method: "DELETE" });
+    setTtlock({ connected: false, username: null });
+    setCloudLocks(null);
+  }
+
+  async function fetchCloudLocks() {
+    setLoadingCloud(true);
+    setImportMessage("");
+    const res = await fetch("/api/ttlock/import");
+    const data = await res.json();
+    if (res.ok) {
+      const defaultProp = properties[0]?.id;
+      setCloudLocks(data.map((l: CloudLock) => ({ ...l, propertyId: defaultProp })));
+    } else {
+      setImportMessage(data.error || "Failed to fetch locks");
+    }
+    setLoadingCloud(false);
+  }
+
+  async function importLocks() {
+    if (!cloudLocks) return;
+    setImporting(true);
+    const toImport = cloudLocks.filter((l) => !l.imported);
+    const res = await fetch("/api/ttlock/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ locks: toImport }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      setImportMessage(`Imported ${data.imported} lock${data.imported === 1 ? "" : "s"}.`);
+      setCloudLocks(null);
+      await loadData();
+    } else {
+      setImportMessage(data.error || "Import failed");
+    }
+    setImporting(false);
+  }
 
   async function saveLock() {
     const res = await fetch("/api/ttlock/locks", {
@@ -62,9 +146,8 @@ export default function LocksPage() {
       body: JSON.stringify(form),
     });
     if (res.ok) {
-      const lock = await res.json();
-      setLocks((prev) => [...prev, lock]);
       setShowForm(false);
+      await loadData();
     }
   }
 
@@ -78,7 +161,7 @@ export default function LocksPage() {
     });
     if (res.ok) {
       const { code } = await res.json();
-      alert(`Access code generated: ${code}\nSent to guest via email (if email is on file).`);
+      alert(`Access code generated: ${code}\nPushed to the lock (if TTLock is connected) and emailed to the guest.`);
     }
     setGenerating(null);
   }
@@ -104,24 +187,143 @@ export default function LocksPage() {
           className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition"
         >
           <Plus className="w-4 h-4" />
-          Add Lock
+          Add Manually
         </button>
       </div>
 
-      {/* TTLock Setup Info */}
-      <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 mb-6 text-sm text-blue-800">
-        <strong>TTLock Setup:</strong> Register at{" "}
-        <a href="https://open.ttlock.com" target="_blank" rel="noopener" className="underline">
-          open.ttlock.com
-        </a>{" "}
-        to get your Client ID and Secret. Then add your lock's Device ID (found in the TTLock app).
-        Access codes will be automatically generated when a new reservation is received and sent to guests by email.
+      {/* TTLock Account Connection */}
+      <div className="bg-white rounded-2xl border border-slate-100 p-5 mb-6">
+        <h3 className="font-semibold text-slate-900 flex items-center gap-2 mb-1">
+          <Link2 className="w-4 h-4 text-slate-500" />
+          TTLock Account
+        </h3>
+
+        {ttlock.connected ? (
+          <div>
+            <div className="flex items-center justify-between mt-3">
+              <div className="flex items-center gap-2 text-sm">
+                <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                <span className="text-slate-700">
+                  Connected as <strong>{ttlock.username}</strong>
+                </span>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={fetchCloudLocks}
+                  disabled={loadingCloud}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-medium transition disabled:opacity-50"
+                >
+                  <Download className={`w-3.5 h-3.5 ${loadingCloud ? "animate-bounce" : ""}`} />
+                  {loadingCloud ? "Loading..." : "Import my locks"}
+                </button>
+                <button
+                  onClick={disconnectAccount}
+                  className="flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-lg text-xs font-medium transition"
+                >
+                  <Unlink className="w-3.5 h-3.5" />
+                  Disconnect
+                </button>
+              </div>
+            </div>
+
+            {/* Cloud locks import list */}
+            {cloudLocks && (
+              <div className="mt-4 border-t border-slate-100 pt-4">
+                {cloudLocks.length === 0 ? (
+                  <p className="text-sm text-slate-400">No locks found in your TTLock account. Add them in the TTLock mobile app first.</p>
+                ) : (
+                  <>
+                    <p className="text-xs font-semibold text-slate-500 uppercase mb-3">Locks in your TTLock account</p>
+                    <div className="space-y-2">
+                      {cloudLocks.map((cl, i) => (
+                        <div key={cl.ttlockId} className="flex items-center gap-3 text-sm">
+                          <Key className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                          <span className="font-medium text-slate-800 flex-1">{cl.name}</span>
+                          {cl.batteryLevel !== null && (
+                            <span className="text-xs text-slate-500">{cl.batteryLevel}% 🔋</span>
+                          )}
+                          {cl.imported ? (
+                            <span className="flex items-center gap-1 text-xs text-green-600">
+                              <Check className="w-3.5 h-3.5" /> Imported
+                            </span>
+                          ) : (
+                            <select
+                              value={cl.propertyId}
+                              onChange={(e) => {
+                                const next = [...cloudLocks];
+                                next[i] = { ...cl, propertyId: e.target.value };
+                                setCloudLocks(next);
+                              }}
+                              className="border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            >
+                              {properties.map((p) => (
+                                <option key={p.id} value={p.id}>{p.name}</option>
+                              ))}
+                            </select>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    {cloudLocks.some((l) => !l.imported) && (
+                      <button
+                        onClick={importLocks}
+                        disabled={importing}
+                        className="mt-4 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2 rounded-xl text-sm font-medium transition"
+                      >
+                        {importing ? "Importing..." : "Import selected locks"}
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+            {importMessage && (
+              <div className="mt-3 px-3 py-2 rounded-lg text-xs font-medium bg-green-50 text-green-700">{importMessage}</div>
+            )}
+          </div>
+        ) : (
+          <div className="mt-3">
+            <p className="text-sm text-slate-500 mb-4">
+              Connect the account you use in the TTLock mobile app. StayHQ will then push PIN codes
+              to your physical locks automatically for every reservation.
+            </p>
+            {connectError && (
+              <div className="mb-3 px-3 py-2 rounded-lg text-xs font-medium bg-red-50 text-red-700">{connectError}</div>
+            )}
+            <div className="flex gap-3 flex-wrap">
+              <input
+                value={creds.username}
+                onChange={(e) => setCreds({ ...creds, username: e.target.value })}
+                placeholder="TTLock username (email or phone)"
+                className="flex-1 min-w-52 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+              <input
+                type="password"
+                value={creds.password}
+                onChange={(e) => setCreds({ ...creds, password: e.target.value })}
+                placeholder="TTLock password"
+                className="flex-1 min-w-40 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+              <button
+                onClick={connectAccount}
+                disabled={connecting || !creds.username || !creds.password}
+                className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2 rounded-xl text-sm font-medium transition"
+              >
+                {connecting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Link2 className="w-4 h-4" />}
+                {connecting ? "Connecting..." : "Connect"}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Generate Code */}
       {locks.length > 0 && reservations.length > 0 && (
         <div className="bg-white rounded-2xl border border-slate-100 p-5 mb-6">
-          <h3 className="font-semibold text-slate-900 mb-4">Generate Access Code</h3>
+          <h3 className="font-semibold text-slate-900 mb-1">Generate Access Code Manually</h3>
+          <p className="text-xs text-slate-500 mb-4">
+            New reservations get codes automatically. Use this for existing reservations.
+          </p>
           <div className="flex gap-3 flex-wrap">
             <select
               value={selectedLock}
@@ -157,10 +359,10 @@ export default function LocksPage() {
         </div>
       )}
 
-      {/* Add Lock Form */}
+      {/* Add Lock Form (manual) */}
       {showForm && (
         <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-5 mb-6">
-          <h3 className="font-semibold text-slate-900 mb-4">Add Smart Lock</h3>
+          <h3 className="font-semibold text-slate-900 mb-4">Add Smart Lock Manually</h3>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Property</label>
@@ -228,6 +430,7 @@ export default function LocksPage() {
           <div className="text-center py-16">
             <Key className="w-10 h-10 text-slate-300 mx-auto mb-3" />
             <p className="text-slate-400 text-sm">No smart locks configured</p>
+            <p className="text-slate-400 text-xs mt-1">Connect your TTLock account above and import your locks</p>
           </div>
         ) : (
           <div className="divide-y divide-slate-50">

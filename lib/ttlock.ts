@@ -15,8 +15,8 @@ interface TTLockTokenResponse {
 interface TTLockLock {
   lockId: number;
   lockName: string;
-  batteryLevel: number;
   lockAlias: string;
+  electricQuantity?: number; // battery level %
 }
 
 interface TTLockPasscode {
@@ -28,7 +28,7 @@ interface TTLockPasscode {
 export async function getTTLockToken(
   username: string,
   password: string
-): Promise<TTLockTokenResponse> {
+): Promise<TTLockTokenResponse & { refresh_token: string; uid?: number }> {
   const params = new URLSearchParams({
     client_id: CLIENT_ID,
     client_secret: CLIENT_SECRET,
@@ -44,7 +44,82 @@ export async function getTTLockToken(
   });
 
   if (!res.ok) throw new Error(`TTLock auth failed: ${res.status}`);
-  return res.json();
+  const data = await res.json();
+  // TTLock returns HTTP 200 with an errcode on invalid credentials
+  if (!data.access_token) {
+    throw new Error(data.errmsg || data.error_description || `TTLock login failed (code ${data.errcode ?? "unknown"})`);
+  }
+  return data;
+}
+
+// Link a TTLock account to a StayHQ user: authenticate and store tokens
+export async function connectTTLockAccount(userId: string, username: string, password: string) {
+  const token = await getTTLockToken(username, password);
+
+  const account = await prisma.tTLockAccount.upsert({
+    where: { userId },
+    create: {
+      userId,
+      username,
+      accessToken: token.access_token,
+      refreshToken: token.refresh_token,
+      expiresAt: new Date(Date.now() + token.expires_in * 1000),
+      ttlockUid: token.uid ?? null,
+    },
+    update: {
+      username,
+      accessToken: token.access_token,
+      refreshToken: token.refresh_token,
+      expiresAt: new Date(Date.now() + token.expires_in * 1000),
+      ttlockUid: token.uid ?? null,
+    },
+  });
+
+  return account;
+}
+
+// Get a valid access token for a user, refreshing it if expired.
+// Returns null if the user has not connected a TTLock account.
+export async function getValidAccessToken(userId: string): Promise<string | null> {
+  const account = await prisma.tTLockAccount.findUnique({ where: { userId } });
+  if (!account) return null;
+
+  // Still valid for at least 5 more minutes
+  if (account.expiresAt.getTime() > Date.now() + 5 * 60 * 1000) {
+    return account.accessToken;
+  }
+
+  // Refresh
+  const params = new URLSearchParams({
+    client_id: CLIENT_ID,
+    client_secret: CLIENT_SECRET,
+    grant_type: "refresh_token",
+    refresh_token: account.refreshToken,
+  });
+
+  const res = await fetch(`${BASE_URL}/oauth2/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: params.toString(),
+  });
+
+  const data = await res.json();
+  if (!data.access_token) {
+    // Refresh failed — user needs to reconnect
+    console.error("TTLock token refresh failed:", data);
+    return null;
+  }
+
+  await prisma.tTLockAccount.update({
+    where: { userId },
+    data: {
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token || account.refreshToken,
+      expiresAt: new Date(Date.now() + data.expires_in * 1000),
+    },
+  });
+
+  return data.access_token;
 }
 
 // List all locks for an account
@@ -131,7 +206,10 @@ export async function generateAccessCode(params: {
   validTo: Date;
   accessToken?: string;
 }): Promise<string> {
-  const lock = await prisma.smartLock.findUnique({ where: { id: params.lockId } });
+  const lock = await prisma.smartLock.findUnique({
+    where: { id: params.lockId },
+    include: { property: { select: { ownerId: true } } },
+  });
   if (!lock) throw new Error("Lock not found");
 
   const reservation = await prisma.reservation.findUnique({
@@ -143,11 +221,15 @@ export async function generateAccessCode(params: {
   const code = generateRandomCode();
   let ttlockKeyId: string | undefined;
 
+  // Get an access token: either passed in, or from the owner's linked TTLock account
+  const accessToken =
+    params.accessToken || (await getValidAccessToken(lock.property.ownerId));
+
   // If TTLock is connected, push to the physical lock
-  if (params.accessToken && lock.ttlockId) {
+  if (accessToken && lock.ttlockId) {
     try {
       const result = await createPasscode(
-        params.accessToken,
+        accessToken,
         lock.ttlockId,
         code,
         params.validFrom,

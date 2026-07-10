@@ -24,6 +24,22 @@ model User {
   properties Property[]
   messages   Message[]  @relation("SentMessages")
   aiSettings AiSettings?
+  ttlockAccount TTLockAccount?
+}
+
+// Linked TTLock cloud account (stores OAuth tokens)
+model TTLockAccount {
+  id           String   @id @default(cuid())
+  username     String
+  accessToken  String
+  refreshToken String
+  expiresAt    DateTime
+  ttlockUid    Int?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Account {

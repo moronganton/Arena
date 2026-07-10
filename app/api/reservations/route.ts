@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { generateAccessCode } from "@/lib/ttlock";
 import { z } from "zod";
 
 const createSchema = z.object({
@@ -114,5 +115,25 @@ export async function POST(req: NextRequest) {
     include: { guest: true, property: true },
   });
 
-  return NextResponse.json(reservation, { status: 201 });
+  // Auto-generate access codes for any active smart locks on this property.
+  // Failures here must never block the reservation itself.
+  const locks = await prisma.smartLock.findMany({
+    where: { propertyId: data.propertyId, isActive: true },
+  });
+  const generatedCodes: string[] = [];
+  for (const lock of locks) {
+    try {
+      const code = await generateAccessCode({
+        lockId: lock.id,
+        reservationId: reservation.id,
+        validFrom: reservation.checkIn,
+        validTo: reservation.checkOut,
+      });
+      generatedCodes.push(code);
+    } catch (err) {
+      console.error(`Auto code generation failed for lock ${lock.id}:`, err);
+    }
+  }
+
+  return NextResponse.json({ ...reservation, generatedCodes }, { status: 201 });
 }
