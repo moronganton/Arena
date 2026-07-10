@@ -19,6 +19,40 @@ const config: Config = {
     },
     extend: {
       colors: {
+        // Anthropic-inspired terracotta replaces the default indigo accent
+        indigo: {
+          50: "#FBF5F1",
+          100: "#F6E8DF",
+          200: "#EDD0C0",
+          300: "#E4B49C",
+          400: "#DE9375",
+          500: "#D97757",
+          600: "#C15F3C",
+          700: "#A84F31",
+          800: "#8A4128",
+          900: "#703524",
+          950: "#3E1D13",
+        },
+        // Warm ivory/stone neutrals replace the default cool slate
+        slate: {
+          50: "#FAF9F5",
+          100: "#F0EEE6",
+          200: "#E3E0D5",
+          300: "#CDC9BB",
+          400: "#A6A296",
+          500: "#7D7A6F",
+          600: "#5E5B52",
+          700: "#45433B",
+          800: "#2E2C26",
+          900: "#1F1E1A",
+          950: "#141310",
+        },
+        // Warm clay replaces purple (used in gradient placeholders)
+        purple: {
+          500: "#B07C5A",
+          600: "#96633F",
+          700: "#7C5234",
+        },
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
