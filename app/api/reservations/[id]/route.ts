@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { getValidAccessToken, deletePasscode, listPasscodes, changePasscodePeriod } from "@/lib/ttlock";
+import { getValidAccessToken, deletePasscode, listPasscodes, changePasscodePeriod, createPasscode } from "@/lib/ttlock";
 import { sendCancellationEmail, sendDatesChangedEmail } from "@/lib/notifications";
 
 // Deactivate all access codes for a reservation and remove them from the physical locks.
@@ -60,6 +60,11 @@ async function updateAccessCodePeriods(
   });
   if (codes.length === 0) return [];
 
+  const reservation = await prisma.reservation.findUnique({
+    where: { id: reservationId },
+    include: { guest: true },
+  });
+
   const accessToken = await getValidAccessToken(ownerId);
   const lockErrors: string[] = [];
 
@@ -83,7 +88,29 @@ async function updateAccessCodePeriods(
           lockErrors.push(`Code ${code.code}: not found on lock "${code.lock.name}" — validity not updated`);
           continue;
         }
-        await changePasscodePeriod(accessToken, code.lock.ttlockId, keyId, validFrom, validTo);
+        try {
+          await changePasscodePeriod(accessToken, code.lock.ttlockId, keyId, validFrom, validTo);
+        } catch (err) {
+          // TTLock error -3008: a passcode never used on the lock can't be changed.
+          // Workaround: delete it and re-create the same digits with the new period.
+          if (err instanceof Error && err.message.includes("-3008")) {
+            await deletePasscode(accessToken, code.lock.ttlockId, keyId);
+            const recreated = await createPasscode(
+              accessToken,
+              code.lock.ttlockId,
+              code.code,
+              validFrom,
+              validTo,
+              reservation?.guest.name
+            );
+            await prisma.accessCode.update({
+              where: { id: code.id },
+              data: { ttlockKeyId: String(recreated.keyboardPwdId) },
+            });
+          } else {
+            throw err;
+          }
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         lockErrors.push(`Code ${code.code} on "${code.lock.name}": ${msg}`);
