@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getValidAccessToken, deletePasscode, listPasscodes, changePasscodePeriod } from "@/lib/ttlock";
-import { sendCancellationEmail } from "@/lib/notifications";
+import { sendCancellationEmail, sendDatesChangedEmail } from "@/lib/notifications";
 
 // Deactivate all access codes for a reservation and remove them from the physical locks.
 // Returns a report so failures can be surfaced to the UI instead of hidden.
@@ -186,6 +186,27 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       updated.checkIn,
       updated.checkOut
     );
+
+    // Notify the guest of the new dates (include their still-valid PIN if one exists)
+    if (updated.guest.email) {
+      const activeCode = await prisma.accessCode.findFirst({
+        where: { reservationId: id, isActive: true },
+        orderBy: { createdAt: "desc" },
+      });
+      try {
+        await sendDatesChangedEmail({
+          guestName: updated.guest.name,
+          guestEmail: updated.guest.email,
+          propertyName: updated.property.name,
+          checkIn: updated.checkIn,
+          checkOut: updated.checkOut,
+          accessCode: activeCode?.code,
+        });
+      } catch (err) {
+        console.error("Failed to send dates-changed email:", err);
+      }
+    }
+
     return NextResponse.json({ ...updated, lockErrors });
   }
 

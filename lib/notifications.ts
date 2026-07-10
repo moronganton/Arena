@@ -62,6 +62,62 @@ export async function sendAccessCodeEmail(params: AccessCodeEmailParams): Promis
   });
 }
 
+interface DatesChangedEmailParams {
+  guestName: string;
+  guestEmail: string;
+  propertyName: string;
+  checkIn: Date;
+  checkOut: Date;
+  accessCode?: string;
+}
+
+export async function sendDatesChangedEmail(params: DatesChangedEmailParams): Promise<void> {
+  const { guestName, guestEmail, propertyName, checkIn, checkOut, accessCode } = params;
+
+  const formatDate = (d: Date) =>
+    d.toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+      <h2 style="color: #1a1a2e;">Your stay dates have been updated — ${propertyName}</h2>
+      <p>Dear ${guestName},</p>
+      <p>The dates of your reservation at <strong>${propertyName}</strong> have changed. Here are your updated details:</p>
+
+      <table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
+        <tr>
+          <td style="padding: 8px; border-bottom: 1px solid #eee; color: #666;">New check-in</td>
+          <td style="padding: 8px; border-bottom: 1px solid #eee; font-weight: bold;">${formatDate(checkIn)}</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px; color: #666;">New check-out</td>
+          <td style="padding: 8px; font-weight: bold;">${formatDate(checkOut)}</td>
+        </tr>
+      </table>
+
+      ${accessCode ? `
+      <div style="background: #f0f4ff; border-radius: 12px; padding: 24px; text-align: center; margin: 24px 0;">
+        <p style="margin: 0; color: #666; font-size: 14px;">Your PIN code stays the same</p>
+        <h1 style="margin: 8px 0; color: #1a1a2e; font-size: 48px; letter-spacing: 8px; font-family: monospace;">${accessCode}</h1>
+        <p style="margin: 0; color: #666; font-size: 13px;">It is now valid for your new dates.</p>
+      </div>
+      ` : ""}
+
+      <p>If you have any questions about this change, please don't hesitate to reach out.</p>
+      <p>Safe travels!<br/>Your Host</p>
+    </body>
+    </html>
+  `;
+
+  await getResend().emails.send({
+    from: FROM,
+    to: guestEmail,
+    subject: `Updated stay dates — ${propertyName} (check-in ${formatDate(checkIn)})`,
+    html,
+  });
+}
+
 interface CancellationEmailParams {
   guestName: string;
   guestEmail: string;
