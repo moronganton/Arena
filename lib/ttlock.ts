@@ -341,6 +341,158 @@ export async function generateAccessCode(params: {
   return code;
 }
 
+// Generate access codes for every active lock on a property (used on new reservations)
+export async function autoGenerateCodesForReservation(
+  reservationId: string,
+  propertyId: string
+): Promise<{ codes: string[]; errors: string[] }> {
+  const reservation = await prisma.reservation.findUnique({ where: { id: reservationId } });
+  if (!reservation) return { codes: [], errors: ["Reservation not found"] };
+
+  const locks = await prisma.smartLock.findMany({
+    where: { propertyId, isActive: true },
+  });
+
+  const codes: string[] = [];
+  const errors: string[] = [];
+  for (const lock of locks) {
+    try {
+      const code = await generateAccessCode({
+        lockId: lock.id,
+        reservationId,
+        validFrom: reservation.checkIn,
+        validTo: reservation.checkOut,
+      });
+      codes.push(code);
+    } catch (err) {
+      errors.push(`Lock ${lock.name}: ${err instanceof Error ? err.message : String(err)}`);
+      console.error(`Auto code generation failed for lock ${lock.id}:`, err);
+    }
+  }
+  return { codes, errors };
+}
+
+// Deactivate all access codes for a reservation and remove them from the physical locks.
+// Returns a report so failures can be surfaced instead of hidden.
+export async function revokeAccessCodesForReservation(reservationId: string, ownerId: string) {
+  const codes = await prisma.accessCode.findMany({
+    where: { reservationId, isActive: true },
+    include: { lock: true },
+  });
+  if (codes.length === 0) return { revoked: 0, lockErrors: [] as string[] };
+
+  const accessToken = await getValidAccessToken(ownerId);
+  const lockErrors: string[] = [];
+
+  for (const code of codes) {
+    if (code.lock.ttlockId) {
+      if (!accessToken) {
+        lockErrors.push(`Code ${code.code}: TTLock account not connected — code was NOT removed from the lock`);
+      } else {
+        try {
+          let keyId = code.ttlockKeyId;
+          if (!keyId) {
+            const onLock = await listPasscodes(accessToken, code.lock.ttlockId);
+            const match = onLock.find((p) => p.keyboardPwd === code.code);
+            keyId = match ? String(match.keyboardPwdId) : null;
+          }
+          if (keyId) {
+            await deletePasscode(accessToken, code.lock.ttlockId, keyId);
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          lockErrors.push(`Code ${code.code} on "${code.lock.name}": ${msg}`);
+          console.error(`Failed to delete passcode ${code.id} from lock:`, err);
+        }
+      }
+    }
+    await prisma.accessCode.update({ where: { id: code.id }, data: { isActive: false } });
+  }
+
+  return { revoked: codes.length, lockErrors };
+}
+
+// Update the validity period of all active access codes for a reservation,
+// both on the physical locks and in the database.
+export async function updateAccessCodePeriodsForReservation(
+  reservationId: string,
+  ownerId: string,
+  validFrom: Date,
+  validTo: Date
+): Promise<string[]> {
+  const codes = await prisma.accessCode.findMany({
+    where: { reservationId, isActive: true },
+    include: { lock: true },
+  });
+  if (codes.length === 0) return [];
+
+  const reservation = await prisma.reservation.findUnique({
+    where: { id: reservationId },
+    include: { guest: true },
+  });
+
+  const accessToken = await getValidAccessToken(ownerId);
+  const lockErrors: string[] = [];
+
+  for (const code of codes) {
+    if (code.lock.ttlockId) {
+      if (!accessToken) {
+        lockErrors.push(`Code ${code.code}: TTLock account not connected — validity was NOT updated on the lock`);
+        continue;
+      }
+      try {
+        let keyId = code.ttlockKeyId;
+        if (!keyId) {
+          const onLock = await listPasscodes(accessToken, code.lock.ttlockId);
+          const match = onLock.find((p) => p.keyboardPwd === code.code);
+          keyId = match ? String(match.keyboardPwdId) : null;
+          if (keyId) {
+            await prisma.accessCode.update({ where: { id: code.id }, data: { ttlockKeyId: keyId } });
+          }
+        }
+        if (!keyId) {
+          lockErrors.push(`Code ${code.code}: not found on lock "${code.lock.name}" — validity not updated`);
+          continue;
+        }
+        try {
+          await changePasscodePeriod(accessToken, code.lock.ttlockId, keyId, validFrom, validTo);
+        } catch (err) {
+          // TTLock error -3008: a passcode never used on the lock can't be changed.
+          // Workaround: delete it and re-create the same digits with the new period.
+          if (err instanceof Error && err.message.includes("-3008")) {
+            await deletePasscode(accessToken, code.lock.ttlockId, keyId);
+            const recreated = await createPasscode(
+              accessToken,
+              code.lock.ttlockId,
+              code.code,
+              validFrom,
+              validTo,
+              reservation?.guest.name
+            );
+            await prisma.accessCode.update({
+              where: { id: code.id },
+              data: { ttlockKeyId: String(recreated.keyboardPwdId) },
+            });
+          } else {
+            throw err;
+          }
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        lockErrors.push(`Code ${code.code} on "${code.lock.name}": ${msg}`);
+        console.error(`Failed to update passcode period for ${code.id}:`, err);
+        continue;
+      }
+    }
+    await prisma.accessCode.update({
+      where: { id: code.id },
+      data: { validFrom, validTo },
+    });
+  }
+
+  return lockErrors;
+}
+
 // Simple MD5 for TTLock (they require this)
 function md5(str: string): string {
   // In production, use the `crypto` module or a proper md5 library

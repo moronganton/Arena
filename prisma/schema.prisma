@@ -25,6 +25,20 @@ model User {
   messages   Message[]  @relation("SentMessages")
   aiSettings AiSettings?
   ttlockAccount TTLockAccount?
+  beds24Account Beds24Account?
+}
+
+// Linked Beds24 account (channel manager bridge to Booking.com / Airbnb)
+model Beds24Account {
+  id           String   @id @default(cuid())
+  refreshToken String
+  token        String?
+  expiresAt    DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 // Linked TTLock cloud account (stores OAuth tokens)

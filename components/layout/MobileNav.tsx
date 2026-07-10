@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Building2, LayoutDashboard, CalendarDays, MessageSquare,
-  DollarSign, Home, BookOpen, Key, Bot, LogOut, Wifi, Menu, X,
+  DollarSign, Home, BookOpen, Key, Bot, LogOut, Wifi, Menu, X, RefreshCw,
 } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { cn } from "@/lib/utils";
@@ -20,6 +20,7 @@ const navItems = [
 
 const settingsItems = [
   { href: "/settings/channels", label: "Channels", icon: Wifi },
+  { href: "/settings/beds24", label: "Beds24", icon: RefreshCw },
   { href: "/settings/locks", label: "Smart Locks", icon: Key },
   { href: "/settings/ai", label: "AI Assistant", icon: Bot },
 ];
