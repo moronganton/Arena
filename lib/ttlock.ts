@@ -157,8 +157,12 @@ export async function createPasscode(
     endDate: validTo.getTime().toString(),
     date: Date.now().toString(),
   });
-  // Passcode name shown in the TTLock app (e.g. the guest's name)
-  if (name) params.set("keyboardPwdName", name.slice(0, 20));
+  // Passcode name shown in the TTLock app (e.g. the guest's name).
+  // Keep letters (incl. accents), digits, spaces, hyphens, apostrophes; strip emoji/symbols.
+  if (name) {
+    const safeName = name.replace(/[^\p{L}\p{N}\s'-]/gu, "").replace(/\s+/g, " ").trim().slice(0, 20);
+    if (safeName) params.set("keyboardPwdName", safeName);
+  }
 
   const res = await fetch(`${BASE_URL}/v3/keyboardPwd/add`, {
     method: "POST",
