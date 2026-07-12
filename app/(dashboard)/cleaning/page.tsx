@@ -267,15 +267,26 @@ export default function CleaningPage() {
         ) : (
           <>
             <p className="text-xs text-slate-400 mb-3">
-              Ordered by location — follow the list top to bottom to minimize travel.
+              Grouped by city — one list per cleaning team, ordered to minimize travel.
             </p>
+            {Array.from(new Set(checkouts.map((c) => c.property.city))).map((city) => {
+              const cityCheckouts = checkouts.filter((c) => c.property.city === city);
+              return (
+            <div key={city} className="mb-5 last:mb-0">
+              <div className="flex items-center gap-2 mb-2">
+                <MapPin className="w-4 h-4 text-indigo-500" />
+                <h4 className="font-semibold text-slate-800 text-sm">{city}</h4>
+                <span className="text-xs text-slate-400">
+                  {cityCheckouts.length} cleaning{cityCheckouts.length > 1 ? "s" : ""} · {cityCheckouts.filter((c) => c.urgency === "URGENT").length} urgent
+                </span>
+              </div>
             <div className="space-y-0">
-              {checkouts.map((c, i) => (
+              {cityCheckouts.map((c, i) => (
                 <div key={c.reservationId}>
                   {/* Travel time from the previous stop */}
                   {i > 0 && (
                     <div className="flex items-center gap-2 py-1.5 pl-10">
-                      <span className="text-xs text-slate-400">🚗 {travelEstimate(checkouts[i - 1], c)}</span>
+                      <span className="text-xs text-slate-400">🚗 {travelEstimate(cityCheckouts[i - 1], c)}</span>
                     </div>
                   )}
                   <div className={`border rounded-xl p-3 ${
@@ -339,6 +350,9 @@ export default function CleaningPage() {
                 </div>
               ))}
             </div>
+            </div>
+              );
+            })}
           </>
         )}
       </div>
@@ -394,41 +408,51 @@ export default function CleaningPage() {
             <p className="text-slate-400 text-xs mt-1">Create one for the next check-out</p>
           </div>
         ) : (
-          <div className="divide-y divide-slate-50">
-            {tasks.map((t) => (
-              <Link
-                key={t.id}
-                href={`/cleaning/${t.id}`}
-                className="flex items-center justify-between p-4 md:p-5 hover:bg-slate-50 transition-colors"
-              >
-                <div className="flex items-center gap-4 min-w-0">
-                  <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center flex-shrink-0">
-                    <Sparkles className="w-5 h-5 text-slate-500" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="font-semibold text-slate-900 text-sm truncate">{t.property.name}</p>
-                    <p className="text-xs text-slate-500">
-                      {new Date(t.scheduledDate).toLocaleDateString()}
-                      {t.notes ? ` · ${t.notes.slice(0, 40)}${t.notes.length > 40 ? "…" : ""}` : ""}
-                    </p>
-                  </div>
+          <div>
+            {Array.from(new Set(tasks.map((t) => t.property.city))).map((city) => (
+              <div key={city}>
+                <div className="flex items-center gap-2 px-4 md:px-5 pt-4 pb-1">
+                  <MapPin className="w-3.5 h-3.5 text-indigo-500" />
+                  <h4 className="font-semibold text-slate-700 text-xs uppercase tracking-wide">{city}</h4>
                 </div>
-                <div className="flex items-center gap-3 flex-shrink-0">
-                  {t._count.damageReports > 0 && (
-                    <span className="flex items-center gap-1 text-xs text-red-600">
-                      <AlertTriangle className="w-3.5 h-3.5" />
-                      {t._count.damageReports}
-                    </span>
-                  )}
-                  {(t.checkInAt || t.checkOutAt) && (
-                    <Camera className="w-4 h-4 text-slate-400" />
-                  )}
-                  <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${STATUS_STYLE[t.status] || "bg-slate-100 text-slate-600"}`}>
-                    {t.status.replace("_", " ")}
-                  </span>
-                  <ChevronRight className="w-4 h-4 text-slate-300" />
+                <div className="divide-y divide-slate-50">
+                  {tasks.filter((t) => t.property.city === city).map((t) => (
+                    <Link
+                      key={t.id}
+                      href={`/cleaning/${t.id}`}
+                      className="flex items-center justify-between p-4 md:p-5 hover:bg-slate-50 transition-colors"
+                    >
+                      <div className="flex items-center gap-4 min-w-0">
+                        <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                          <Sparkles className="w-5 h-5 text-slate-500" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="font-semibold text-slate-900 text-sm truncate">{t.property.name}</p>
+                          <p className="text-xs text-slate-500">
+                            {new Date(t.scheduledDate).toLocaleDateString()}
+                            {t.notes ? ` · ${t.notes.slice(0, 40)}${t.notes.length > 40 ? "…" : ""}` : ""}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3 flex-shrink-0">
+                        {t._count.damageReports > 0 && (
+                          <span className="flex items-center gap-1 text-xs text-red-600">
+                            <AlertTriangle className="w-3.5 h-3.5" />
+                            {t._count.damageReports}
+                          </span>
+                        )}
+                        {(t.checkInAt || t.checkOutAt) && (
+                          <Camera className="w-4 h-4 text-slate-400" />
+                        )}
+                        <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${STATUS_STYLE[t.status] || "bg-slate-100 text-slate-600"}`}>
+                          {t.status.replace("_", " ")}
+                        </span>
+                        <ChevronRight className="w-4 h-4 text-slate-300" />
+                      </div>
+                    </Link>
+                  ))}
                 </div>
-              </Link>
+              </div>
             ))}
           </div>
         )}
