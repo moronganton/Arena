@@ -115,8 +115,32 @@ model Property {
   cleaningTasks CleaningTask[]
   damageReports DamageReport[]
   checklistItems CleaningChecklistItem[]
+  expenses      Expense[]
 
   @@index([ownerId])
+}
+
+// Finance module: cost tracking per property
+model Expense {
+  id          String   @id @default(cuid())
+  category    String   // CLEANING, LAUNDRY, PLATFORM_FEES, ESSENTIALS, DAMAGES, INSURANCE, UTILITIES, MAINTENANCE, OTHER
+  description String
+  amount      Float
+  currency    String   @default("EUR")
+  date        DateTime
+  invoiceImage String? // uploaded invoice photo (data URL)
+  aiExtracted Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Optional: null means a portfolio-wide cost (e.g. insurance for all)
+  propertyId String?
+  property   Property? @relation(fields: [propertyId], references: [id])
+
+  ownerId String
+
+  @@index([propertyId])
+  @@index([ownerId, date])
 }
 
 // Housekeeping / cleaning module

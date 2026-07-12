@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Building2, LayoutDashboard, CalendarDays, MessageSquare,
-  DollarSign, Home, BookOpen, Key, Bot, LogOut, Wifi, Menu, X, RefreshCw, Sparkles,
+  DollarSign, Home, BookOpen, Key, Bot, LogOut, Wifi, Menu, X, RefreshCw, Sparkles, Wallet,
 } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { cn } from "@/lib/utils";
@@ -17,6 +17,7 @@ const navItems = [
   { href: "/pricing", label: "Pricing", icon: DollarSign },
   { href: "/properties", label: "Properties", icon: Home },
   { href: "/cleaning", label: "Cleaning", icon: Sparkles },
+  { href: "/finance", label: "Finance", icon: Wallet },
 ];
 
 const settingsItems = [
