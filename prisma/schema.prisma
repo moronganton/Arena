@@ -112,8 +112,69 @@ model Property {
   pricingRules  PricingRule[]
   calendarBlocks CalendarBlock[]
   locks         SmartLock[]
+  cleaningTasks CleaningTask[]
+  damageReports DamageReport[]
+  checklistItems CleaningChecklistItem[]
 
   @@index([ownerId])
+}
+
+// Housekeeping / cleaning module
+model CleaningTask {
+  id            String   @id @default(cuid())
+  status        String   @default("PENDING") // PENDING, IN_PROGRESS, COMPLETED
+  scheduledDate DateTime
+  notes         String?
+  // Cleaner arrival: timestamp + photos (JSON array of data URLs)
+  checkInAt     DateTime?
+  checkInPhotos String?
+  // Cleaner done: timestamp + photos
+  checkOutAt    DateTime?
+  checkOutPhotos String?
+  // Snapshot of the checklist: JSON [{ category, label, done }]
+  checklist     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id])
+
+  reservationId String?
+
+  damageReports DamageReport[]
+
+  @@index([propertyId])
+}
+
+model DamageReport {
+  id          String   @id @default(cuid())
+  description String
+  photos      String?  // JSON array of data URLs
+  status      String   @default("OPEN") // OPEN, RESOLVED
+  createdAt   DateTime @default(now())
+  resolvedAt  DateTime?
+
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id])
+
+  cleaningTaskId String?
+  cleaningTask   CleaningTask? @relation(fields: [cleaningTaskId], references: [id])
+
+  @@index([propertyId])
+}
+
+// Custom per-property checklist items (falls back to a default template)
+model CleaningChecklistItem {
+  id       String  @id @default(cuid())
+  category String
+  label    String
+  sortOrder Int    @default(0)
+  active   Boolean @default(true)
+
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id])
+
+  @@index([propertyId])
 }
 
 model Guest {

@@ -15,6 +15,7 @@ import {
   LogOut,
   Wifi,
   RefreshCw,
+  Sparkles,
   ChevronRight,
 } from "lucide-react";
 import { signOut } from "next-auth/react";
@@ -27,6 +28,7 @@ const navItems = [
   { href: "/messages", label: "Messages", icon: MessageSquare },
   { href: "/pricing", label: "Pricing", icon: DollarSign },
   { href: "/properties", label: "Properties", icon: Home },
+  { href: "/cleaning", label: "Cleaning", icon: Sparkles },
 ];
 
 const settingsItems = [
