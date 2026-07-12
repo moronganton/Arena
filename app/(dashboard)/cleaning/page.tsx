@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { Plus, Sparkles, AlertTriangle, Check, Camera, ChevronRight } from "lucide-react";
+import { Plus, Sparkles, AlertTriangle, Check, Camera, ChevronRight, MapPin, CalendarClock } from "lucide-react";
 
 interface Property {
   id: string;
@@ -28,6 +28,14 @@ interface DamageReport {
   property: { id: string; name: string };
 }
 
+interface Checkout {
+  reservationId: string;
+  guestName: string;
+  checkOut: string;
+  property: { id: string; name: string; address: string; city: string; country: string };
+  cleaningTask: { id: string; status: string } | null;
+}
+
 const STATUS_STYLE: Record<string, string> = {
   PENDING: "bg-amber-100 text-amber-700",
   IN_PROGRESS: "bg-blue-100 text-blue-700",
@@ -38,6 +46,9 @@ export default function CleaningPage() {
   const [tasks, setTasks] = useState<CleaningTask[]>([]);
   const [damages, setDamages] = useState<DamageReport[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
+  const [checkouts, setCheckouts] = useState<Checkout[]>([]);
+  const [day, setDay] = useState<"today" | "tomorrow">("today");
+  const [creatingFor, setCreatingFor] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({
@@ -61,6 +72,38 @@ export default function CleaningPage() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    fetch(`/api/cleaning/checkouts?day=${day}`)
+      .then((r) => r.json())
+      .then((d) => setCheckouts(Array.isArray(d) ? d : []));
+  }, [day]);
+
+  async function createTaskForCheckout(c: Checkout) {
+    setCreatingFor(c.reservationId);
+    const res = await fetch("/api/cleaning", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        propertyId: c.property.id,
+        reservationId: c.reservationId,
+        scheduledDate: c.checkOut,
+        notes: `After check-out of ${c.guestName}`,
+      }),
+    });
+    setCreatingFor(null);
+    if (res.ok) {
+      const task = await res.json();
+      setCheckouts((prev) =>
+        prev.map((x) =>
+          x.reservationId === c.reservationId
+            ? { ...x, cleaningTask: { id: task.id, status: task.status } }
+            : x
+        )
+      );
+      await loadData();
+    }
+  }
 
   async function createTask() {
     setCreating(true);
@@ -156,6 +199,89 @@ export default function CleaningPage() {
           </div>
         </div>
       )}
+
+      {/* Check-outs to clean */}
+      <div className="bg-white rounded-2xl border border-slate-100 p-5 mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-semibold text-slate-900 flex items-center gap-2">
+            <CalendarClock className="w-4 h-4 text-slate-500" />
+            Check-outs to Clean
+          </h3>
+          <div className="flex bg-slate-100 rounded-lg p-0.5">
+            <button
+              onClick={() => setDay("today")}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition ${
+                day === "today" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"
+              }`}
+            >
+              Today
+            </button>
+            <button
+              onClick={() => setDay("tomorrow")}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition ${
+                day === "tomorrow" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"
+              }`}
+            >
+              Tomorrow
+            </button>
+          </div>
+        </div>
+
+        {checkouts.length === 0 ? (
+          <p className="text-sm text-slate-400 text-center py-4">
+            No check-outs {day === "today" ? "today" : "tomorrow"} 🎉
+          </p>
+        ) : (
+          <>
+            <p className="text-xs text-slate-400 mb-3">
+              Ordered by location — follow the list top to bottom to minimize travel.
+            </p>
+            <div className="space-y-2">
+              {checkouts.map((c, i) => (
+                <div key={c.reservationId} className="flex items-center gap-3 border border-slate-100 rounded-xl p-3">
+                  <span className="w-7 h-7 bg-indigo-100 text-indigo-700 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0">
+                    {i + 1}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-slate-900 text-sm truncate">{c.property.name}</p>
+                    <p className="text-xs text-slate-500 flex items-center gap-1 truncate">
+                      <MapPin className="w-3 h-3 flex-shrink-0" />
+                      {c.property.address}, {c.property.city}
+                    </p>
+                    <p className="text-xs text-slate-400">Guest: {c.guestName}</p>
+                  </div>
+                  {c.cleaningTask ? (
+                    <Link
+                      href={`/cleaning/${c.cleaningTask.id}`}
+                      className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg font-medium transition flex-shrink-0 ${
+                        c.cleaningTask.status === "COMPLETED"
+                          ? "bg-green-50 text-green-700"
+                          : c.cleaningTask.status === "IN_PROGRESS"
+                          ? "bg-blue-50 text-blue-700"
+                          : "bg-amber-50 text-amber-700"
+                      }`}
+                    >
+                      {c.cleaningTask.status === "COMPLETED" ? (
+                        <><Check className="w-3.5 h-3.5" /> Done</>
+                      ) : (
+                        <>{c.cleaningTask.status === "IN_PROGRESS" ? "In progress" : "Open task"} <ChevronRight className="w-3.5 h-3.5" /></>
+                      )}
+                    </Link>
+                  ) : (
+                    <button
+                      onClick={() => createTaskForCheckout(c)}
+                      disabled={creatingFor === c.reservationId}
+                      className="text-xs bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-2.5 py-1.5 rounded-lg font-medium transition flex-shrink-0"
+                    >
+                      {creatingFor === c.reservationId ? "Creating..." : "Create task"}
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
 
       {/* Open damage reports */}
       {damages.length > 0 && (
