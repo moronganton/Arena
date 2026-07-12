@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { Plus, Sparkles, AlertTriangle, Check, Camera, ChevronRight, MapPin, CalendarClock } from "lucide-react";
+import { Plus, Sparkles, AlertTriangle, Check, Camera, ChevronRight, MapPin, CalendarClock, ListChecks } from "lucide-react";
 
 interface Property {
   id: string;
@@ -169,14 +169,23 @@ export default function CleaningPage() {
           <h1 className="text-xl md:text-2xl font-bold text-slate-900">Cleaning</h1>
           <p className="text-slate-500 text-sm mt-0.5">Housekeeping tasks and damage reports</p>
         </div>
-        <button
-          onClick={() => setShowForm(true)}
-          className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-3 md:px-4 py-2.5 rounded-xl text-sm font-medium transition"
-        >
-          <Plus className="w-4 h-4" />
-          <span className="hidden sm:inline">New Task</span>
-          <span className="sm:hidden">New</span>
-        </button>
+        <div className="flex gap-2">
+          <Link
+            href="/cleaning/checklists"
+            className="flex items-center gap-2 border border-slate-200 hover:bg-slate-50 text-slate-700 px-3 md:px-4 py-2.5 rounded-xl text-sm font-medium transition"
+          >
+            <ListChecks className="w-4 h-4" />
+            <span className="hidden sm:inline">Checklists</span>
+          </Link>
+          <button
+            onClick={() => setShowForm(true)}
+            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-3 md:px-4 py-2.5 rounded-xl text-sm font-medium transition"
+          >
+            <Plus className="w-4 h-4" />
+            <span className="hidden sm:inline">New Task</span>
+            <span className="sm:hidden">New</span>
+          </button>
+        </div>
       </div>
 
       {/* Create form */}
