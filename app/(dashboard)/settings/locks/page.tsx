@@ -177,12 +177,12 @@ export default function LocksPage() {
 
   // Edit lock state
   const [editingLock, setEditingLock] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState({ name: "", propertyId: "" });
+  const [editForm, setEditForm] = useState({ name: "", propertyId: "", isActive: true });
   const [savingEdit, setSavingEdit] = useState(false);
 
   function startEdit(lock: SmartLock) {
     setEditingLock(lock.id);
-    setEditForm({ name: lock.name, propertyId: lock.property.id });
+    setEditForm({ name: lock.name, propertyId: lock.property.id, isActive: lock.isActive });
   }
 
   async function saveEdit() {
@@ -191,7 +191,12 @@ export default function LocksPage() {
     const res = await fetch("/api/ttlock/locks", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: editingLock, name: editForm.name, propertyId: editForm.propertyId }),
+      body: JSON.stringify({
+        id: editingLock,
+        name: editForm.name,
+        propertyId: editForm.propertyId,
+        isActive: editForm.isActive,
+      }),
     });
     setSavingEdit(false);
     if (res.ok) {
@@ -524,6 +529,20 @@ export default function LocksPage() {
                           ))}
                         </select>
                       </div>
+                    </div>
+                    <div className="flex items-center gap-3 mt-3">
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={editForm.isActive}
+                          onChange={(e) => setEditForm({ ...editForm, isActive: e.target.checked })}
+                          className="sr-only peer"
+                        />
+                        <div className="w-10 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
+                      </label>
+                      <span className="text-sm text-slate-700">
+                        Lock is active <span className="text-xs text-slate-400">(inactive locks are skipped when generating codes)</span>
+                      </span>
                     </div>
                     <div className="flex gap-2 mt-3">
                       <button
