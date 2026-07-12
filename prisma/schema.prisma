@@ -116,8 +116,39 @@ model Property {
   damageReports DamageReport[]
   checklistItems CleaningChecklistItem[]
   expenses      Expense[]
+  recurringExpenses RecurringExpense[]
 
   @@index([ownerId])
+}
+
+// Monthly fixed costs (electricity, internet, building maintenance...).
+// Applied automatically to every month between startDate and endDate.
+model RecurringExpense {
+  id          String   @id @default(cuid())
+  category    String
+  description String
+  amount      Float
+  currency    String   @default("EUR")
+  startDate   DateTime // first month it applies to
+  endDate     DateTime? // null = still active
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  ownerId String
+  propertyId String?
+  property   Property? @relation(fields: [propertyId], references: [id])
+
+  @@index([ownerId])
+}
+
+// Commission percentage per booking channel (used to auto-compute platform fees)
+model PlatformFeeSetting {
+  id      String @id @default(cuid())
+  ownerId String
+  channel String // BOOKING, AIRBNB, VRBO, EXPEDIA
+  percent Float
+
+  @@unique([ownerId, channel])
 }
 
 // Finance module: cost tracking per property

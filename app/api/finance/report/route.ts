@@ -43,6 +43,22 @@ export async function GET(req: NextRequest) {
     },
   });
 
+  // Recurring monthly costs active in this month
+  const recurring = await prisma.recurringExpense.findMany({
+    where: {
+      ownerId: session.user.id,
+      startDate: { lt: end },
+      OR: [{ endDate: null }, { endDate: { gte: start } }],
+    },
+    include: { property: { select: { id: true, name: true } } },
+  });
+
+  // Platform fee settings (% per channel)
+  const feeSettings = await prisma.platformFeeSetting.findMany({
+    where: { ownerId: session.user.id },
+  });
+  const feePercentByChannel = new Map(feeSettings.map((f) => [f.channel, f.percent]));
+
   // Aggregate per property (amounts kept in native currency per property)
   const propertyMap = new Map<
     string,
@@ -101,6 +117,49 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // Apply recurring monthly costs
+  for (const r of recurring) {
+    if (r.propertyId && propertyMap.has(r.propertyId)) {
+      const entry = propertyMap.get(r.propertyId)!;
+      entry.costs += r.amount;
+      entry.costsByCategory[r.category] = (entry.costsByCategory[r.category] || 0) + r.amount;
+    } else if (r.propertyId) {
+      const prop = await prisma.property.findUnique({
+        where: { id: r.propertyId },
+        select: { id: true, name: true, city: true, currency: true },
+      });
+      if (prop) {
+        propertyMap.set(prop.id, {
+          id: prop.id, name: prop.name, city: prop.city, currency: prop.currency,
+          revenue: 0, reservationCount: 0, revenueBySource: {},
+          costs: r.amount, costsByCategory: { [r.category]: r.amount },
+        });
+      }
+    } else {
+      generalCosts[r.category] = (generalCosts[r.category] || 0) + r.amount;
+      generalCostTotal += r.amount;
+    }
+  }
+
+  // Auto-compute platform fees (% of channel revenue per property)
+  const platformFees: Array<{ channel: string; percent: number; base: number; fee: number }> = [];
+  const feeTotalsByChannel: Record<string, { base: number; fee: number; percent: number }> = {};
+  for (const entry of propertyMap.values()) {
+    for (const [src, revenue] of Object.entries(entry.revenueBySource)) {
+      const percent = feePercentByChannel.get(src);
+      if (!percent || percent <= 0) continue;
+      const fee = Math.round(revenue * percent) / 100;
+      entry.costs += fee;
+      entry.costsByCategory["PLATFORM_FEES"] = (entry.costsByCategory["PLATFORM_FEES"] || 0) + fee;
+      if (!feeTotalsByChannel[src]) feeTotalsByChannel[src] = { base: 0, fee: 0, percent };
+      feeTotalsByChannel[src].base += revenue;
+      feeTotalsByChannel[src].fee += fee;
+    }
+  }
+  for (const [channel, v] of Object.entries(feeTotalsByChannel)) {
+    platformFees.push({ channel, percent: v.percent, base: Math.round(v.base * 100) / 100, fee: Math.round(v.fee * 100) / 100 });
+  }
+
   const properties = Array.from(propertyMap.values()).map((p) => ({
     ...p,
     net: p.revenue - p.costs,
@@ -137,6 +196,15 @@ export async function GET(req: NextRequest) {
     revenueBySource,
     costsByCategory,
     generalCosts: { total: generalCostTotal, byCategory: generalCosts },
+    platformFees,
+    recurringCosts: recurring.map((r) => ({
+      id: r.id,
+      category: r.category,
+      description: r.description,
+      amount: r.amount,
+      currency: r.currency,
+      property: r.property,
+    })),
     properties: properties.sort((a, b) => b.net - a.net),
   });
 }

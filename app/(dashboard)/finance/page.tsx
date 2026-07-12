@@ -34,11 +34,22 @@ interface Expense {
   property?: { id: string; name: string } | null;
 }
 
+interface RecurringCost {
+  id: string;
+  category: string;
+  description: string;
+  amount: number;
+  currency: string;
+  property?: { id: string; name: string } | null;
+}
+
 interface Report {
   month: string;
   summary: { grossRevenue: number; totalCosts: number; netIncome: number; margin: number | null; reservations: number };
   revenueBySource: Record<string, number>;
   costsByCategory: Record<string, number>;
+  platformFees: Array<{ channel: string; percent: number; base: number; fee: number }>;
+  recurringCosts: RecurringCost[];
   properties: Array<{
     id: string; name: string; city: string; currency: string;
     revenue: number; costs: number; net: number; margin: number | null; reservationCount: number;
@@ -72,7 +83,10 @@ const emptyForm = {
   propertyId: "",
   invoiceImage: "",
   aiExtracted: false,
+  recurring: false,
 };
+
+const FEE_CHANNELS = ["BOOKING", "AIRBNB", "VRBO", "EXPEDIA"];
 
 export default function FinancePage() {
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
@@ -84,16 +98,25 @@ export default function FinancePage() {
   const [extracting, setExtracting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [extractNote, setExtractNote] = useState("");
+  const [feeSettings, setFeeSettings] = useState<Record<string, string>>({});
+  const [savingFees, setSavingFees] = useState(false);
+  const [showFeeSettings, setShowFeeSettings] = useState(false);
 
   const loadData = useCallback(async () => {
-    const [rep, exp, props] = await Promise.all([
+    const [rep, exp, props, fees] = await Promise.all([
       fetch(`/api/finance/report?month=${month}`).then((r) => r.json()),
       fetch(`/api/expenses?month=${month}`).then((r) => r.json()),
       fetch("/api/properties").then((r) => r.json()),
+      fetch("/api/platform-fees").then((r) => r.json()),
     ]);
     setReport(rep);
     setExpenses(Array.isArray(exp) ? exp : []);
     setProperties(Array.isArray(props) ? props : []);
+    if (Array.isArray(fees)) {
+      const map: Record<string, string> = {};
+      for (const f of fees) map[f.channel] = String(f.percent);
+      setFeeSettings(map);
+    }
   }, [month]);
 
   useEffect(() => {
@@ -125,6 +148,7 @@ export default function FinancePage() {
           propertyId: data.propertyId || "",
           invoiceImage: image,
           aiExtracted: true,
+          recurring: false,
         });
         setExtractNote(
           `AI extracted with ${Math.round((data.confidence || 0.5) * 100)}% confidence — please verify before saving.`
@@ -138,11 +162,17 @@ export default function FinancePage() {
 
   async function saveExpense() {
     setSaving(true);
-    const res = await fetch("/api/expenses", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
-    });
+    const res = form.recurring
+      ? await fetch("/api/recurring-expenses", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...form, startMonth: month }),
+        })
+      : await fetch("/api/expenses", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(form),
+        });
     setSaving(false);
     if (res.ok) {
       setShowForm(false);
@@ -154,6 +184,42 @@ export default function FinancePage() {
 
   async function deleteExpense(id: string) {
     await fetch(`/api/expenses?id=${id}`, { method: "DELETE" });
+    await loadData();
+  }
+
+  async function modifyRecurring(r: RecurringCost) {
+    const input = prompt(
+      `New monthly amount for "${r.description}" (effective from ${month}):`,
+      String(r.amount)
+    );
+    if (input === null) return;
+    const amount = parseFloat(input);
+    if (isNaN(amount) || amount < 0) return alert("Invalid amount");
+    await fetch("/api/recurring-expenses", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: r.id, amount, effectiveMonth: month }),
+    });
+    await loadData();
+  }
+
+  async function endRecurring(r: RecurringCost) {
+    if (!confirm(`Stop "${r.description}" from ${month} onward? Past months keep it.`)) return;
+    await fetch(`/api/recurring-expenses?id=${r.id}&month=${month}`, { method: "DELETE" });
+    await loadData();
+  }
+
+  async function saveFeeSettings() {
+    setSavingFees(true);
+    await fetch("/api/platform-fees", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fees: FEE_CHANNELS.map((c) => ({ channel: c, percent: parseFloat(feeSettings[c] || "0") || 0 })),
+      }),
+    });
+    setSavingFees(false);
+    setShowFeeSettings(false);
     await loadData();
   }
 
@@ -382,14 +448,35 @@ export default function FinancePage() {
                   {["EUR", "RON", "CZK", "USD", "GBP", "CHF"].map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
-              <div className="col-span-2">
-                <label className="block text-xs font-medium text-slate-500 mb-1">Date</label>
-                <input
-                  type="date"
-                  value={form.date}
-                  onChange={(e) => setForm({ ...form, date: e.target.value })}
-                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
+              {!form.recurring && (
+                <div className="col-span-2">
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Date</label>
+                  <input
+                    type="date"
+                    value={form.date}
+                    onChange={(e) => setForm({ ...form, date: e.target.value })}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              )}
+              <div className="col-span-2 flex items-start gap-3 bg-slate-50 rounded-xl p-3">
+                <label className="relative inline-flex items-center cursor-pointer mt-0.5">
+                  <input
+                    type="checkbox"
+                    checked={form.recurring}
+                    onChange={(e) => setForm({ ...form, recurring: e.target.checked })}
+                    className="sr-only peer"
+                  />
+                  <div className="w-10 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                </label>
+                <div className="text-xs">
+                  <p className="font-medium text-slate-700">Recurring monthly cost</p>
+                  <p className="text-slate-500 mt-0.5">
+                    {form.recurring
+                      ? `Will appear automatically every month starting ${month} (electricity, internet, building fees...). You can modify or stop it later.`
+                      : "One-off cost for the selected date only (e.g. yearly insurance, a repair, a bill recalculation)."}
+                  </p>
+                </div>
               </div>
             </div>
 
@@ -412,13 +499,117 @@ export default function FinancePage() {
         </div>
       )}
 
+      {/* Platform fees (auto) */}
+      <div className="bg-white rounded-2xl border border-slate-100 p-5 mb-4">
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="font-semibold text-slate-900 text-sm">Platform Fees (automatic)</h3>
+          <button
+            onClick={() => setShowFeeSettings(!showFeeSettings)}
+            className="text-xs text-indigo-600 hover:underline"
+          >
+            {showFeeSettings ? "Close" : "Set commission %"}
+          </button>
+        </div>
+        <p className="text-xs text-slate-400 mb-3">
+          Calculated automatically as a percentage of each channel&apos;s revenue this month.
+        </p>
+
+        {showFeeSettings && (
+          <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-3 mb-3">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {FEE_CHANNELS.map((c) => (
+                <div key={c}>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">{SOURCE_LABELS[c]}</label>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number" min="0" max="50" step="0.1"
+                      value={feeSettings[c] || ""}
+                      onChange={(e) => setFeeSettings({ ...feeSettings, [c]: e.target.value })}
+                      placeholder="e.g. 15"
+                      className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                    <span className="text-xs text-slate-500">%</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button
+              onClick={saveFeeSettings}
+              disabled={savingFees}
+              className="mt-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-1.5 rounded-lg text-xs font-medium transition"
+            >
+              {savingFees ? "Saving..." : "Save percentages"}
+            </button>
+          </div>
+        )}
+
+        {report && report.platformFees.length > 0 ? (
+          <div className="space-y-1.5">
+            {report.platformFees.map((f) => (
+              <div key={f.channel} className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-2">
+                <span className="text-slate-600">
+                  {SOURCE_LABELS[f.channel] || f.channel} · {f.percent}% of {fmt(f.base)}
+                </span>
+                <span className="font-semibold text-slate-900">{fmt(f.fee)}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-slate-400">
+            {Object.values(feeSettings).some((v) => parseFloat(v) > 0)
+              ? "No channel revenue this month."
+              : "No commission percentages set — click \"Set commission %\" to enable automatic fees."}
+          </p>
+        )}
+      </div>
+
+      {/* Recurring monthly costs */}
+      {report && report.recurringCosts.length > 0 && (
+        <div className="bg-white rounded-2xl border border-indigo-200 p-5 mb-4">
+          <h3 className="font-semibold text-slate-900 text-sm mb-1 flex items-center gap-2">
+            <RefreshCw className="w-3.5 h-3.5 text-indigo-500" />
+            Recurring Monthly Costs
+          </h3>
+          <p className="text-xs text-slate-400 mb-3">
+            Applied automatically every month. Modify when a price changes — history stays intact.
+          </p>
+          <div className="space-y-1.5">
+            {report.recurringCosts.map((r) => (
+              <div key={r.id} className="flex items-center justify-between bg-indigo-50/50 border border-indigo-100 rounded-lg px-3 py-2">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-slate-900 truncate">{r.description}</p>
+                  <p className="text-xs text-slate-500">
+                    {CATEGORY_LABELS[r.category]} · {r.property?.name || "General"}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <span className="text-sm font-semibold text-slate-900">{r.amount.toLocaleString()} {r.currency}/mo</span>
+                  <button
+                    onClick={() => modifyRecurring(r)}
+                    className="text-xs bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 px-2 py-1 rounded-lg transition"
+                  >
+                    Modify
+                  </button>
+                  <button
+                    onClick={() => endRecurring(r)}
+                    className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Expense list */}
       <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
         <div className="px-5 py-4 border-b border-slate-100">
-          <h3 className="font-semibold text-slate-900 text-sm">Costs in {month}</h3>
+          <h3 className="font-semibold text-slate-900 text-sm">One-off Costs in {month}</h3>
         </div>
         {expenses.length === 0 ? (
-          <p className="text-center text-slate-400 text-sm py-10">No costs recorded this month</p>
+          <p className="text-center text-slate-400 text-sm py-10">No one-off costs recorded this month</p>
         ) : (
           <div className="divide-y divide-slate-50">
             {expenses.map((e) => (
