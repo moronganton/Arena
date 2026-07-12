@@ -32,9 +32,42 @@ interface Checkout {
   reservationId: string;
   guestName: string;
   checkOut: string;
+  nextCheckIn: string | null;
+  urgency: "URGENT" | "SOON" | "FLEXIBLE";
   property: { id: string; name: string; address: string; city: string; country: string };
   cleaningTask: { id: string; status: string } | null;
 }
+
+// Rough driving times between known cities; same-city hops default to 15 min.
+const CITY_TRAVEL_HOURS: Record<string, number> = {
+  "bratislava|prague": 3.5,
+  "bratislava|oradea": 5.5,
+  "oradea|prague": 7.5,
+  "oradea|sinteu": 0.8,
+  "bratislava|sinteu": 5,
+  "prague|sinteu": 7.5,
+};
+
+function travelEstimate(a: Checkout, b: Checkout): string {
+  if (a.property.id === b.property.id) return "same building";
+  const cityA = a.property.city.trim().toLowerCase();
+  const cityB = b.property.city.trim().toLowerCase();
+  if (cityA === cityB) {
+    return a.property.address === b.property.address ? "same street" : "~15 min drive";
+  }
+  const key = [cityA, cityB].sort().join("|");
+  const hours = CITY_TRAVEL_HOURS[key];
+  if (hours) {
+    return hours < 1 ? `~${Math.round(hours * 60)} min drive` : `~${hours} h drive`;
+  }
+  return "long trip — different city";
+}
+
+const URGENCY_STYLE: Record<string, { badge: string; label: string }> = {
+  URGENT: { badge: "bg-red-100 text-red-700", label: "URGENT — same-day check-in" },
+  SOON: { badge: "bg-amber-100 text-amber-700", label: "Guest arrives tomorrow" },
+  FLEXIBLE: { badge: "bg-green-100 text-green-700", label: "Flexible — no arrival soon" },
+};
 
 const STATUS_STYLE: Record<string, string> = {
   PENDING: "bg-amber-100 text-amber-700",
@@ -236,46 +269,73 @@ export default function CleaningPage() {
             <p className="text-xs text-slate-400 mb-3">
               Ordered by location — follow the list top to bottom to minimize travel.
             </p>
-            <div className="space-y-2">
+            <div className="space-y-0">
               {checkouts.map((c, i) => (
-                <div key={c.reservationId} className="flex items-center gap-3 border border-slate-100 rounded-xl p-3">
-                  <span className="w-7 h-7 bg-indigo-100 text-indigo-700 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0">
-                    {i + 1}
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-slate-900 text-sm truncate">{c.property.name}</p>
-                    <p className="text-xs text-slate-500 flex items-center gap-1 truncate">
-                      <MapPin className="w-3 h-3 flex-shrink-0" />
-                      {c.property.address}, {c.property.city}
-                    </p>
-                    <p className="text-xs text-slate-400">Guest: {c.guestName}</p>
-                  </div>
-                  {c.cleaningTask ? (
-                    <Link
-                      href={`/cleaning/${c.cleaningTask.id}`}
-                      className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg font-medium transition flex-shrink-0 ${
-                        c.cleaningTask.status === "COMPLETED"
-                          ? "bg-green-50 text-green-700"
-                          : c.cleaningTask.status === "IN_PROGRESS"
-                          ? "bg-blue-50 text-blue-700"
-                          : "bg-amber-50 text-amber-700"
-                      }`}
-                    >
-                      {c.cleaningTask.status === "COMPLETED" ? (
-                        <><Check className="w-3.5 h-3.5" /> Done</>
-                      ) : (
-                        <>{c.cleaningTask.status === "IN_PROGRESS" ? "In progress" : "Open task"} <ChevronRight className="w-3.5 h-3.5" /></>
-                      )}
-                    </Link>
-                  ) : (
-                    <button
-                      onClick={() => createTaskForCheckout(c)}
-                      disabled={creatingFor === c.reservationId}
-                      className="text-xs bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-2.5 py-1.5 rounded-lg font-medium transition flex-shrink-0"
-                    >
-                      {creatingFor === c.reservationId ? "Creating..." : "Create task"}
-                    </button>
+                <div key={c.reservationId}>
+                  {/* Travel time from the previous stop */}
+                  {i > 0 && (
+                    <div className="flex items-center gap-2 py-1.5 pl-10">
+                      <span className="text-xs text-slate-400">🚗 {travelEstimate(checkouts[i - 1], c)}</span>
+                    </div>
                   )}
+                  <div className={`border rounded-xl p-3 ${
+                    c.urgency === "URGENT" ? "border-red-200 bg-red-50/40" : "border-slate-100"
+                  }`}>
+                    <div className="flex items-center gap-3">
+                      <span className="w-7 h-7 bg-indigo-100 text-indigo-700 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0">
+                        {i + 1}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="font-medium text-slate-900 text-sm truncate">{c.property.name}</p>
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${URGENCY_STYLE[c.urgency].badge}`}>
+                            {URGENCY_STYLE[c.urgency].label}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-500 flex items-center gap-1 truncate">
+                          <MapPin className="w-3 h-3 flex-shrink-0" />
+                          {c.property.address}, {c.property.city}
+                        </p>
+                        <p className="text-xs text-slate-400">
+                          {c.guestName} leaves by 11:00
+                          {c.nextCheckIn && (
+                            <>
+                              {" · next guest "}
+                              {new Date(c.nextCheckIn).toDateString() === new Date(c.checkOut).toDateString()
+                                ? "TODAY at 15:00"
+                                : `${new Date(c.nextCheckIn).toLocaleDateString(undefined, { month: "short", day: "numeric" })} at 15:00`}
+                            </>
+                          )}
+                        </p>
+                      </div>
+                      {c.cleaningTask ? (
+                        <Link
+                          href={`/cleaning/${c.cleaningTask.id}`}
+                          className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg font-medium transition flex-shrink-0 ${
+                            c.cleaningTask.status === "COMPLETED"
+                              ? "bg-green-50 text-green-700"
+                              : c.cleaningTask.status === "IN_PROGRESS"
+                              ? "bg-blue-50 text-blue-700"
+                              : "bg-amber-50 text-amber-700"
+                          }`}
+                        >
+                          {c.cleaningTask.status === "COMPLETED" ? (
+                            <><Check className="w-3.5 h-3.5" /> Done</>
+                          ) : (
+                            <>{c.cleaningTask.status === "IN_PROGRESS" ? "In progress" : "Open task"} <ChevronRight className="w-3.5 h-3.5" /></>
+                          )}
+                        </Link>
+                      ) : (
+                        <button
+                          onClick={() => createTaskForCheckout(c)}
+                          disabled={creatingFor === c.reservationId}
+                          className="text-xs bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-2.5 py-1.5 rounded-lg font-medium transition flex-shrink-0"
+                        >
+                          {creatingFor === c.reservationId ? "Creating..." : "Create task"}
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>

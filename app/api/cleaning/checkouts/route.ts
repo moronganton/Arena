@@ -44,13 +44,39 @@ export async function GET(req: NextRequest) {
   });
   const taskByReservation = new Map(tasks.map((t) => [t.reservationId, t]));
 
-  return NextResponse.json(
-    checkouts.map((r) => ({
+  // For urgency: find the next arrival at each property after its checkout
+  const propertyIds = Array.from(new Set(checkouts.map((r) => r.property.id)));
+  const upcomingArrivals = await prisma.reservation.findMany({
+    where: {
+      propertyId: { in: propertyIds },
+      status: { notIn: ["CANCELLED", "NO_SHOW"] },
+      checkIn: { gte: start },
+    },
+    select: { propertyId: true, checkIn: true },
+    orderBy: { checkIn: "asc" },
+  });
+
+  const dayMs = 86400000;
+  const enriched = checkouts.map((r) => {
+    const next = upcomingArrivals.find(
+      (a) => a.propertyId === r.property.id && a.checkIn.getTime() >= r.checkOut.getTime()
+    );
+    let urgency: "URGENT" | "SOON" | "FLEXIBLE" = "FLEXIBLE";
+    if (next) {
+      const daysUntil = Math.round((next.checkIn.getTime() - r.checkOut.getTime()) / dayMs);
+      if (daysUntil <= 0) urgency = "URGENT"; // same-day turnover
+      else if (daysUntil === 1) urgency = "SOON"; // guest arrives tomorrow
+    }
+    return {
       reservationId: r.id,
       guestName: r.guest.name,
       checkOut: r.checkOut,
+      nextCheckIn: next?.checkIn ?? null,
+      urgency,
       property: r.property,
       cleaningTask: taskByReservation.get(r.id) || null,
-    }))
-  );
+    };
+  });
+
+  return NextResponse.json(enriched);
 }
