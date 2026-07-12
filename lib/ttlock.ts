@@ -372,6 +372,7 @@ export async function autoGenerateCodesForReservation(
   const locks = await prisma.smartLock.findMany({
     where: { propertyId, isActive: true },
   });
+  console.log(`[codes] property ${propertyId}: found ${locks.length} active lock(s) for reservation ${reservationId}`);
 
   const codes: string[] = [];
   const errors: string[] = [];

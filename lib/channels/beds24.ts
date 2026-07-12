@@ -136,6 +136,7 @@ export async function syncBeds24Bookings(userId: string): Promise<{
   // Automation (PIN + guest emails) can be disabled while testing
   const account = await prisma.beds24Account.findUnique({ where: { userId } });
   const automationEnabled = account?.automationEnabled ?? false;
+  console.log(`[beds24-sync] starting for user ${userId}, automationEnabled=${automationEnabled}`);
 
   // Property mappings are stored as ChannelConfig rows with channel=BEDS24
   const mappings = await prisma.channelConfig.findMany({
@@ -226,7 +227,15 @@ export async function syncBeds24Bookings(userId: string): Promise<{
 
             // Same automation as manually created reservations: PIN + email
             if (status === "CONFIRMED" && automationEnabled) {
-              await autoGenerateCodesForReservation(reservation.id, mapping.propertyId);
+              const gen = await autoGenerateCodesForReservation(reservation.id, mapping.propertyId);
+              console.log(
+                `[beds24-sync] booking ${b.id}: generated ${gen.codes.length} code(s)` +
+                (gen.errors.length ? `, errors: ${gen.errors.join("; ")}` : "")
+              );
+            } else {
+              console.log(
+                `[beds24-sync] booking ${b.id}: skipped code generation (status=${status}, automation=${automationEnabled})`
+              );
             }
           } else {
             const checkIn = new Date(b.arrival);
