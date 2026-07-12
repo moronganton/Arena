@@ -338,6 +338,26 @@ export async function generateAccessCode(params: {
     });
   }
 
+  // Also post the code into the reservation's message thread
+  const fmt = (d: Date) =>
+    d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  try {
+    await prisma.message.create({
+      data: {
+        reservationId: params.reservationId,
+        direction: "OUTBOUND",
+        channel: "EMAIL",
+        body:
+          `Hi ${reservation.guest.name}! Your door access code for ${reservation.property.name} is: ${code}\n` +
+          `It is valid from ${fmt(params.validFrom)} until ${fmt(params.validTo)}. ` +
+          `Please don't share it with others. Safe travels!`,
+        isRead: true,
+      },
+    });
+  } catch (err) {
+    console.error("Failed to post access code message:", err);
+  }
+
   return code;
 }
 
