@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
-import { Plus, Key, Trash2, Battery, RefreshCw, Link2, Unlink, Download, Check } from "lucide-react";
+import { Plus, Key, Trash2, Battery, RefreshCw, Link2, Unlink, Download, Check, Pencil } from "lucide-react";
 
 interface Property {
   id: string;
@@ -173,6 +173,33 @@ export default function LocksPage() {
       body: JSON.stringify({ id, isActive: false }),
     });
     setLocks((prev) => prev.filter((l) => l.id !== id));
+  }
+
+  // Edit lock state
+  const [editingLock, setEditingLock] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({ name: "", propertyId: "" });
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  function startEdit(lock: SmartLock) {
+    setEditingLock(lock.id);
+    setEditForm({ name: lock.name, propertyId: lock.property.id });
+  }
+
+  async function saveEdit() {
+    if (!editingLock) return;
+    setSavingEdit(true);
+    const res = await fetch("/api/ttlock/locks", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: editingLock, name: editForm.name, propertyId: editForm.propertyId }),
+    });
+    setSavingEdit(false);
+    if (res.ok) {
+      setEditingLock(null);
+      await loadData();
+    } else {
+      alert("Failed to update lock.");
+    }
   }
 
   return (
@@ -435,34 +462,86 @@ export default function LocksPage() {
         ) : (
           <div className="divide-y divide-slate-50">
             {locks.map((lock) => (
-              <div key={lock.id} className="flex items-center justify-between p-5 hover:bg-slate-50 transition-colors">
-                <div className="flex items-center gap-4">
-                  <div className="w-11 h-11 bg-slate-100 rounded-xl flex items-center justify-center">
-                    <Key className="w-5 h-5 text-slate-500" />
-                  </div>
-                  <div>
-                    <p className="font-semibold text-slate-900">{lock.name}</p>
-                    <p className="text-xs text-slate-500">{lock.property.name} · {lock.lockType} · ID: {lock.ttlockId}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-4">
-                  {lock.batteryLevel !== null && lock.batteryLevel !== undefined && (
-                    <div className="flex items-center gap-1.5 text-sm">
-                      <Battery className={`w-4 h-4 ${lock.batteryLevel < 20 ? "text-red-500" : "text-green-500"}`} />
-                      <span className="text-slate-600">{lock.batteryLevel}%</span>
+              <div key={lock.id} className="p-5 hover:bg-slate-50 transition-colors">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="w-11 h-11 bg-slate-100 rounded-xl flex items-center justify-center">
+                      <Key className="w-5 h-5 text-slate-500" />
                     </div>
-                  )}
-                  <span className="text-xs text-slate-500">{lock._count.accessCodes} codes</span>
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${lock.isActive ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"}`}>
-                    {lock.isActive ? "Active" : "Inactive"}
-                  </span>
-                  <button
-                    onClick={() => deleteLock(lock.id)}
-                    className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                    <div>
+                      <p className="font-semibold text-slate-900">{lock.name}</p>
+                      <p className="text-xs text-slate-500">{lock.property.name} · {lock.lockType} · ID: {lock.ttlockId}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    {lock.batteryLevel !== null && lock.batteryLevel !== undefined && (
+                      <div className="flex items-center gap-1.5 text-sm">
+                        <Battery className={`w-4 h-4 ${lock.batteryLevel < 20 ? "text-red-500" : "text-green-500"}`} />
+                        <span className="text-slate-600">{lock.batteryLevel}%</span>
+                      </div>
+                    )}
+                    <span className="text-xs text-slate-500">{lock._count.accessCodes} codes</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${lock.isActive ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"}`}>
+                      {lock.isActive ? "Active" : "Inactive"}
+                    </span>
+                    <button
+                      onClick={() => (editingLock === lock.id ? setEditingLock(null) : startEdit(lock))}
+                      className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition"
+                      title="Edit lock"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => deleteLock(lock.id)}
+                      className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
+
+                {/* Inline edit form */}
+                {editingLock === lock.id && (
+                  <div className="mt-4 ml-15 bg-indigo-50 border border-indigo-200 rounded-xl p-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-600 mb-1">Lock Name</label>
+                        <input
+                          value={editForm.name}
+                          onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-600 mb-1">Property</label>
+                        <select
+                          value={editForm.propertyId}
+                          onChange={(e) => setEditForm({ ...editForm, propertyId: e.target.value })}
+                          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        >
+                          {properties.map((p) => (
+                            <option key={p.id} value={p.id}>{p.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                    <div className="flex gap-2 mt-3">
+                      <button
+                        onClick={saveEdit}
+                        disabled={savingEdit}
+                        className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition"
+                      >
+                        {savingEdit ? "Saving..." : "Save"}
+                      </button>
+                      <button
+                        onClick={() => setEditingLock(null)}
+                        className="bg-white hover:bg-slate-50 text-slate-700 px-4 py-1.5 rounded-lg text-sm font-medium border border-slate-200 transition"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>

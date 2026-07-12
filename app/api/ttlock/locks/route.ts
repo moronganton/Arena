@@ -64,9 +64,26 @@ export async function PATCH(req: NextRequest) {
   });
   if (!lock) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
+  // If remapping to another property, verify the target belongs to this user
+  if (data.propertyId && data.propertyId !== lock.propertyId) {
+    const target = await prisma.property.findFirst({
+      where: { id: data.propertyId, ownerId: session!.user!.id },
+    });
+    if (!target) return NextResponse.json({ error: "Target property not found" }, { status: 404 });
+  }
+
   const updated = await prisma.smartLock.update({
     where: { id },
-    data: { name: data.name, isActive: data.isActive, batteryLevel: data.batteryLevel },
+    data: {
+      name: data.name,
+      isActive: data.isActive,
+      batteryLevel: data.batteryLevel,
+      propertyId: data.propertyId,
+    },
+    include: {
+      property: { select: { id: true, name: true } },
+      _count: { select: { accessCodes: true } },
+    },
   });
 
   return NextResponse.json(updated);
