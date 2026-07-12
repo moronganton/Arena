@@ -22,6 +22,7 @@ interface Beds24Booking {
   numAdult?: number;
   numChild?: number;
   price?: number;
+  currency?: string;
   referer?: string;
   channel?: string;
   apiSource?: string;
@@ -86,15 +87,22 @@ export async function getBeds24Token(userId: string): Promise<string | null> {
   return data.token;
 }
 
+async function fetchBeds24Properties(token: string): Promise<Array<{ id: string; name: string; currency?: string }>> {
+  const res = await fetch(`${BASE_URL}/properties`, { headers: { token } });
+  const data = await res.json();
+  const list = Array.isArray(data) ? data : data.data || [];
+  return list.map((p: { id: number; name: string; currency?: string }) => ({
+    id: String(p.id),
+    name: p.name,
+    currency: p.currency,
+  }));
+}
+
 // List properties in the Beds24 account (for mapping to StayHQ properties)
 export async function listBeds24Properties(userId: string): Promise<Array<{ id: string; name: string }>> {
   const token = await getBeds24Token(userId);
   if (!token) throw new Error("Beds24 account not connected");
-
-  const res = await fetch(`${BASE_URL}/properties`, { headers: { token } });
-  const data = await res.json();
-  const list = Array.isArray(data) ? data : data.data || [];
-  return list.map((p: { id: number; name: string }) => ({ id: String(p.id), name: p.name }));
+  return fetchBeds24Properties(token);
 }
 
 function mapSource(b: Beds24Booking): string {
@@ -140,6 +148,17 @@ export async function syncBeds24Bookings(userId: string): Promise<{
 
   const result = { imported: 0, updated: 0, cancelled: 0, errors: [] as string[] };
 
+  // Beds24 booking prices are in the Beds24 property's currency — fetch it
+  // so imported amounts show the currency the booking was actually made in.
+  const currencyByBeds24Property: Record<string, string> = {};
+  try {
+    for (const p of await fetchBeds24Properties(token)) {
+      if (p.currency) currencyByBeds24Property[p.id] = p.currency.toUpperCase();
+    }
+  } catch (err) {
+    console.error("Could not fetch Beds24 property currencies:", err);
+  }
+
   // Look back 90 days so recent stays and modifications are covered
   const arrivalFrom = new Date(Date.now() - 90 * 86400000).toISOString().split("T")[0];
 
@@ -164,6 +183,10 @@ export async function syncBeds24Bookings(userId: string): Promise<{
           if (!status) continue; // skip blocks/inquiries
 
           const externalId = `beds24-${b.id}`;
+          const bookingCurrency =
+            b.currency?.toUpperCase() ||
+            currencyByBeds24Property[mapping.listingId] ||
+            mapping.property.currency;
           const guestName = `${b.firstName || ""} ${b.lastName || ""}`.trim() || "Guest";
           const guestEmail = b.email || undefined;
           const guestPhone = b.phone || b.mobile || undefined;
@@ -193,7 +216,7 @@ export async function syncBeds24Bookings(userId: string): Promise<{
                 adults: b.numAdult ?? 1,
                 children: b.numChild ?? 0,
                 totalAmount: b.price ?? undefined,
-                currency: mapping.property.currency,
+                currency: bookingCurrency,
                 source: mapSource(b),
                 status,
                 specialRequests: b.comments || undefined,
@@ -222,6 +245,7 @@ export async function syncBeds24Bookings(userId: string): Promise<{
                 adults: b.numAdult ?? existing.adults,
                 children: b.numChild ?? existing.children,
                 totalAmount: b.price ?? existing.totalAmount,
+                currency: bookingCurrency,
               },
             });
 
