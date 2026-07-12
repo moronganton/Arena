@@ -17,9 +17,11 @@ export async function POST(req: NextRequest) {
   const results = [];
   for (const account of accounts) {
     try {
-      results.push(await syncBeds24Bookings(account.userId));
+      const r = await syncBeds24Bookings(account.userId);
+      console.log(`[beds24-webhook] sync for user ${account.userId}:`, JSON.stringify(r));
+      results.push(r);
     } catch (err) {
-      console.error("Beds24 webhook sync failed:", err);
+      console.error("[beds24-webhook] sync failed:", err);
       results.push({ error: err instanceof Error ? err.message : String(err) });
     }
   }
