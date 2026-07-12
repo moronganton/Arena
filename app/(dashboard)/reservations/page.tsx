@@ -7,7 +7,7 @@ import { Plus, Search, Filter, ArrowRight } from "lucide-react";
 export default async function ReservationsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; source?: string; q?: string }>;
+  searchParams: Promise<{ status?: string; source?: string; q?: string; sort?: string }>;
 }) {
   const session = await auth();
   const params = await searchParams;
@@ -24,6 +24,13 @@ export default async function ReservationsPage({
     ];
   }
 
+  const SORT_OPTIONS: Record<string, { field: "checkIn" | "createdAt"; dir: "asc" | "desc" }> = {
+    checkin: { field: "checkIn", dir: "asc" },
+    newest: { field: "createdAt", dir: "desc" },
+    oldest: { field: "createdAt", dir: "asc" },
+  };
+  const sort = SORT_OPTIONS[params.sort || "checkin"] || SORT_OPTIONS.checkin;
+
   const reservations = await prisma.reservation.findMany({
     where,
     include: {
@@ -32,7 +39,7 @@ export default async function ReservationsPage({
       messages: { where: { isRead: false, direction: "INBOUND" }, select: { id: true } },
       accessCodes: { where: { isActive: true }, select: { code: true }, take: 1 },
     },
-    orderBy: { checkIn: "asc" },
+    orderBy: { [sort.field]: sort.dir },
   });
 
   const statuses = ["PENDING", "CONFIRMED", "CHECKED_IN", "CHECKED_OUT", "CANCELLED"];
@@ -88,6 +95,15 @@ export default async function ReservationsPage({
                 <option key={s} value={s}>{SOURCE_LABELS[s]}</option>
               ))}
             </select>
+            <select
+              name="sort"
+              defaultValue={params.sort || "checkin"}
+              className="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="checkin">By check-in date</option>
+              <option value="newest">Newest bookings first</option>
+              <option value="oldest">Oldest bookings first</option>
+            </select>
             <button
               type="submit"
               className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium transition"
@@ -122,6 +138,9 @@ export default async function ReservationsPage({
                 {r.status}
               </span>
             </div>
+            <div className="flex items-center justify-between text-xs text-slate-500 mb-1">
+              <span>Booked {formatShortDate(r.createdAt)}</span>
+            </div>
             <div className="flex items-center justify-between text-xs text-slate-500">
               <span>{formatShortDate(r.checkIn)} → {formatShortDate(r.checkOut)}</span>
               <div className="flex items-center gap-2">
@@ -152,6 +171,7 @@ export default async function ReservationsPage({
               <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wide px-6 py-4">Guest</th>
               <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wide px-6 py-4">Property</th>
               <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wide px-6 py-4">Dates</th>
+              <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wide px-6 py-4">Booked</th>
               <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wide px-6 py-4">Channel</th>
               <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wide px-6 py-4">Amount</th>
               <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wide px-6 py-4">Status</th>
@@ -161,7 +181,7 @@ export default async function ReservationsPage({
           <tbody>
             {reservations.length === 0 && (
               <tr>
-                <td colSpan={7} className="text-center text-slate-400 py-12">
+                <td colSpan={8} className="text-center text-slate-400 py-12">
                   No reservations found
                 </td>
               </tr>
@@ -190,6 +210,12 @@ export default async function ReservationsPage({
                 <td className="px-6 py-4">
                   <p className="text-sm text-slate-700">{formatShortDate(r.checkIn)}</p>
                   <p className="text-xs text-slate-500">→ {formatShortDate(r.checkOut)}</p>
+                </td>
+                <td className="px-6 py-4">
+                  <p className="text-sm text-slate-700">{formatShortDate(r.createdAt)}</p>
+                  <p className="text-xs text-slate-500">
+                    {new Date(r.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  </p>
                 </td>
                 <td className="px-6 py-4">
                   <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${SOURCE_COLORS[r.source] || "bg-slate-100 text-slate-600"}`}>
