@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { Plus, Sparkles, AlertTriangle, Check, Camera, ChevronRight, MapPin, CalendarClock, ListChecks } from "lucide-react";
+import { Plus, Sparkles, AlertTriangle, Check, Camera, ChevronRight, MapPin, CalendarClock, ListChecks, BarChart3 } from "lucide-react";
 
 interface Property {
   id: string;
@@ -170,6 +170,13 @@ export default function CleaningPage() {
           <p className="text-slate-500 text-sm mt-0.5">Housekeeping tasks and damage reports</p>
         </div>
         <div className="flex gap-2">
+          <Link
+            href="/cleaning/report"
+            className="flex items-center gap-2 border border-slate-200 hover:bg-slate-50 text-slate-700 px-3 md:px-4 py-2.5 rounded-xl text-sm font-medium transition"
+          >
+            <BarChart3 className="w-4 h-4" />
+            <span className="hidden sm:inline">Report</span>
+          </Link>
           <Link
             href="/cleaning/checklists"
             className="flex items-center gap-2 border border-slate-200 hover:bg-slate-50 text-slate-700 px-3 md:px-4 py-2.5 rounded-xl text-sm font-medium transition"
