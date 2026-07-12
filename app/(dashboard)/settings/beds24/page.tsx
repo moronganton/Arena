@@ -33,6 +33,7 @@ export default function Beds24Page() {
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<string>("");
   const [copied, setCopied] = useState(false);
+  const [automation, setAutomation] = useState(false);
 
   const loadProperties = useCallback(async () => {
     setLoadingProps(true);
@@ -57,9 +58,19 @@ export default function Beds24Page() {
       .then((r) => r.json())
       .then((d) => {
         setConnected(!!d.connected);
+        setAutomation(!!d.automationEnabled);
         if (d.connected) loadProperties();
       });
   }, [loadProperties]);
+
+  async function toggleAutomation(enabled: boolean) {
+    setAutomation(enabled);
+    await fetch("/api/beds24/account", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ automationEnabled: enabled }),
+    });
+  }
 
   async function connect() {
     setConnecting(true);
@@ -237,9 +248,31 @@ export default function Beds24Page() {
           <div className="bg-white rounded-2xl border border-slate-100 p-5 mb-6">
             <h3 className="font-semibold text-slate-900 mb-1">Import Reservations</h3>
             <p className="text-sm text-slate-500 mb-4">
-              Pulls all bookings (arrivals in the last 90 days and future) from Beds24. New confirmed
-              bookings automatically get a door PIN and the guest is emailed — same as manual reservations.
+              Pulls all bookings (arrivals in the last 90 days and future) from Beds24.
             </p>
+
+            {/* Automation toggle */}
+            <div className={`flex items-start gap-3 rounded-xl border p-3 mb-4 ${automation ? "bg-green-50 border-green-200" : "bg-amber-50 border-amber-200"}`}>
+              <label className="relative inline-flex items-center cursor-pointer mt-0.5">
+                <input
+                  type="checkbox"
+                  checked={automation}
+                  onChange={(e) => toggleAutomation(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-10 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
+              </label>
+              <div className="text-sm">
+                <p className="font-medium text-slate-800">
+                  PIN codes &amp; guest emails: {automation ? "ON" : "OFF (testing mode)"}
+                </p>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {automation
+                    ? "Imported confirmed bookings will push a PIN to your smart lock and email the guest."
+                    : "Imported bookings only create reservations in StayHQ — no lock codes, no guest emails. Turn on when you go live."}
+                </p>
+              </div>
+            </div>
             <button
               onClick={syncNow}
               disabled={syncing}

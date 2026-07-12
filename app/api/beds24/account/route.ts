@@ -9,10 +9,28 @@ export async function GET() {
 
   const account = await prisma.beds24Account.findUnique({
     where: { userId: session.user.id },
-    select: { createdAt: true },
+    select: { createdAt: true, automationEnabled: true },
   });
 
-  return NextResponse.json({ connected: !!account, connectedAt: account?.createdAt ?? null });
+  return NextResponse.json({
+    connected: !!account,
+    connectedAt: account?.createdAt ?? null,
+    automationEnabled: account?.automationEnabled ?? false,
+  });
+}
+
+// PATCH — update settings (automation toggle)
+export async function PATCH(req: NextRequest) {
+  const session = await auth();
+  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { automationEnabled } = await req.json();
+  const account = await prisma.beds24Account.update({
+    where: { userId: session.user.id },
+    data: { automationEnabled: !!automationEnabled },
+  });
+
+  return NextResponse.json({ automationEnabled: account.automationEnabled });
 }
 
 export async function POST(req: NextRequest) {
