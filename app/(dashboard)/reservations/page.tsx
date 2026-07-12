@@ -29,7 +29,7 @@ export default async function ReservationsPage({
     newest: { field: "createdAt", dir: "desc" },
     oldest: { field: "createdAt", dir: "asc" },
   };
-  const sort = SORT_OPTIONS[params.sort || "checkin"] || SORT_OPTIONS.checkin;
+  const sort = SORT_OPTIONS[params.sort || "newest"] || SORT_OPTIONS.newest;
 
   const reservations = await prisma.reservation.findMany({
     where,
@@ -97,12 +97,12 @@ export default async function ReservationsPage({
             </select>
             <select
               name="sort"
-              defaultValue={params.sort || "checkin"}
+              defaultValue={params.sort || "newest"}
               className="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
             >
-              <option value="checkin">By check-in date</option>
               <option value="newest">Newest bookings first</option>
               <option value="oldest">Oldest bookings first</option>
+              <option value="checkin">By check-in date</option>
             </select>
             <button
               type="submit"
