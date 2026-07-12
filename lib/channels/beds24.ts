@@ -173,6 +173,11 @@ export async function syncBeds24Bookings(userId: string): Promise<{
         arrivalFrom,
         page: String(page),
       });
+      // Beds24 excludes cancelled bookings by default — request all statuses
+      // so cancellations propagate to StayHQ (and revoke lock codes).
+      for (const s of ["confirmed", "new", "request", "cancelled"]) {
+        params.append("status", s);
+      }
       const res = await fetch(`${BASE_URL}/bookings?${params}`, { headers: { token } });
       const data = await res.json();
       const bookings: Beds24Booking[] = Array.isArray(data) ? data : data.data || [];
