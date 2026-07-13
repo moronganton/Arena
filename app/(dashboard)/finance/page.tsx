@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   Plus, Trash2, TrendingUp, TrendingDown, Wallet, Camera,
-  RefreshCw, Sparkles, X,
+  RefreshCw, Sparkles, X, Receipt,
 } from "lucide-react";
 
 const CATEGORIES = [
@@ -101,6 +101,7 @@ export default function FinancePage() {
   const [feeSettings, setFeeSettings] = useState<Record<string, string>>({});
   const [savingFees, setSavingFees] = useState(false);
   const [showFeeSettings, setShowFeeSettings] = useState(false);
+  const [viewingInvoice, setViewingInvoice] = useState<Expense | null>(null);
 
   const loadData = useCallback(async () => {
     const [rep, exp, props, fees] = await Promise.all([
@@ -627,6 +628,15 @@ export default function FinancePage() {
                   <span className="text-sm font-semibold text-slate-900">
                     {e.amount.toLocaleString()} {e.currency}
                   </span>
+                  {e.invoiceImage && (
+                    <button
+                      onClick={() => setViewingInvoice(e)}
+                      title="View invoice"
+                      className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition"
+                    >
+                      <Receipt className="w-4 h-4" />
+                    </button>
+                  )}
                   <button
                     onClick={() => deleteExpense(e.id)}
                     className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
@@ -639,6 +649,49 @@ export default function FinancePage() {
           </div>
         )}
       </div>
+
+      {/* Invoice viewer */}
+      {viewingInvoice && viewingInvoice.invoiceImage && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          onClick={() => setViewingInvoice(null)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
+              <div className="min-w-0">
+                <p className="font-semibold text-slate-900 text-sm truncate">{viewingInvoice.description}</p>
+                <p className="text-xs text-slate-500">
+                  {viewingInvoice.amount.toLocaleString()} {viewingInvoice.currency} ·{" "}
+                  {new Date(viewingInvoice.date).toLocaleDateString()} ·{" "}
+                  {viewingInvoice.property?.name || "General"}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <a
+                  href={viewingInvoice.invoiceImage}
+                  download={`invoice-${new Date(viewingInvoice.date).toISOString().slice(0, 10)}.jpg`}
+                  className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg font-medium transition"
+                >
+                  Download
+                </a>
+                <button
+                  onClick={() => setViewingInvoice(null)}
+                  className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+            <div className="overflow-auto p-4">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={viewingInvoice.invoiceImage} alt="Invoice" className="w-full rounded-xl" />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
