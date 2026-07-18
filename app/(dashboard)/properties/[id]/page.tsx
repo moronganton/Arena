@@ -2,7 +2,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, MapPin, Bed, Bath, Users, DollarSign, Wifi, Key } from "lucide-react";
+import { ArrowLeft, MapPin, Bed, Bath, Users, DollarSign, Wifi, Key, BookOpen } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import PropertyActions from "./PropertyActions";
 
@@ -116,6 +116,19 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
 
         {/* Right Sidebar */}
         <div className="space-y-4">
+          {/* Knowledge Base */}
+          <div className="bg-white rounded-2xl border border-slate-100 p-5">
+            <h3 className="font-semibold text-slate-900 flex items-center gap-2 mb-2">
+              <BookOpen className="w-4 h-4 text-slate-500" />
+              Knowledge Base
+            </h3>
+            <p className="text-xs text-slate-500 mb-3">
+              WiFi, parking, house rules, local tips — the AI assistant answers guests from these facts.
+            </p>
+            <Link href={`/properties/${property.id}/knowledge`} className="text-sm text-indigo-600 hover:underline">
+              Manage knowledge →
+            </Link>
+          </div>
           {/* Pricing */}
           <div className="bg-white rounded-2xl border border-slate-100 p-5">
             <h3 className="font-semibold text-slate-900 flex items-center gap-2 mb-4">

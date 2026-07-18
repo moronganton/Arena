@@ -119,8 +119,27 @@ model Property {
   checklistItems CleaningChecklistItem[]
   expenses      Expense[]
   recurringExpenses RecurringExpense[]
+  knowledge     PropertyKnowledge[]
 
   @@index([ownerId])
+}
+
+// Per-property knowledge base entries — the AI assistant answers guest
+// questions from these facts.
+model PropertyKnowledge {
+  id        String   @id @default(cuid())
+  category  String   // e.g. WiFi, Check-in & Check-out, Parking, House Rules...
+  title     String   // short label, e.g. "WiFi password"
+  content   String   // the actual knowledge, e.g. "Network: LoftNet, password: ..."
+  active    Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id])
+
+  @@index([propertyId])
 }
 
 // Monthly fixed costs (electricity, internet, building maintenance...).
