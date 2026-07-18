@@ -8,6 +8,7 @@ interface Message {
   body: string;
   direction: string;
   channel: string;
+  source?: string | null;
   isAiGenerated: boolean;
   createdAt: Date | string;
   senderId: string | null;
@@ -110,6 +111,13 @@ export function MessageThread({
                   <div className="flex items-center gap-1.5 mb-1 justify-end mr-1">
                     <span className="text-xs text-indigo-500">AI Reply</span>
                     <Bot className="w-3 h-3 text-indigo-400" />
+                  </div>
+                )}
+                {isOutbound && !msg.isAiGenerated && msg.source === "smoobu" && (
+                  <div className="flex items-center gap-1.5 mb-1 justify-end mr-1">
+                    <span className="text-xs text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-full">
+                      sent via Smoobu
+                    </span>
                   </div>
                 )}
                 <div
