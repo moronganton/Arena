@@ -62,9 +62,10 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     // Full raw payloads minus the bulky HTML variant of the body
+    // (kept as a boolean — it drives the direction heuristic)
     smoobuRaw: smoobuRaw.map((m) => {
-      const { messageHtml: _omit, ...rest } = m;
-      return rest;
+      const { messageHtml: _a, htmlMessage: _b, ...rest } = m;
+      return { ...rest, hasHtmlBody: !!String(m.htmlMessage ?? m.messageHtml ?? "").trim() };
     }),
     stayhq: rows.map((r) => ({ ...r, body: r.body.slice(0, 100) })),
   });

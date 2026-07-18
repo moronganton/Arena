@@ -156,9 +156,15 @@ export async function syncSmoobuMessagesForReservation(
       continue;
     }
 
-    // Smoobu direction: type 1 = incoming (guest), type 2 = outgoing (host).
+    // Direction: Smoobu's type field alone is unreliable — some genuine guest
+    // messages (e.g. relayed by email instead of the channel thread) arrive as
+    // type 2 just like host messages. Genuinely host-sent messages always carry
+    // a non-empty htmlMessage (rendered email HTML or Smoobu-composed text);
+    // guest-authored messages never do. So: type 2 + htmlMessage → host,
+    // everything else → guest.
     const type = Number(m.type ?? 0);
-    const direction = type === 2 ? "OUTBOUND" : "INBOUND";
+    const htmlBody = String(m.htmlMessage ?? m.messageHtml ?? "").trim();
+    const direction = type === 2 && htmlBody ? "OUTBOUND" : "INBOUND";
 
     const exists = await prisma.message.findFirst({ where: { externalId: msgId } });
     if (!exists) {
@@ -187,12 +193,27 @@ export async function syncSmoobuMessagesForReservation(
           continue;
         }
       }
-      // Direction is decided once, at import. Smoobu has been seen re-reporting
-      // guest messages with type=2 after they were read/handled, so re-syncs
-      // must never flip a stored direction — log the mismatch for diagnosis only.
+      // Repair guest messages imported as host-sent under the old type-only
+      // mapping: flip them back to INBOUND and let the AI process them.
+      // (Only this direction — host rows are never flipped to guest.)
+      if (
+        exists.source === "smoobu" &&
+        exists.direction === "OUTBOUND" &&
+        direction === "INBOUND" &&
+        !exists.senderId &&
+        !exists.isAiGenerated
+      ) {
+        await prisma.message.update({
+          where: { id: exists.id },
+          data: { direction: "INBOUND" },
+        });
+        console.log(`[smoobu-messages] repaired ${msgId}: OUTBOUND -> INBOUND (guest message mislabeled type=2)`);
+        newInboundIds.push(exists.id);
+        continue;
+      }
       if (exists.source === "smoobu" && exists.direction !== direction) {
         console.log(
-          `[smoobu-messages] note ${msgId}: stored=${exists.direction} but Smoobu now reports type=${type}; ` +
+          `[smoobu-messages] note ${msgId}: stored=${exists.direction} but heuristic says ${direction}; ` +
           `keeping stored direction; raw: ${JSON.stringify(m).slice(0, 300)}`
         );
       }
