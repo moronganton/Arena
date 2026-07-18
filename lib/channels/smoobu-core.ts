@@ -126,40 +126,65 @@ export async function syncSmoobuMessagesForReservation(
     const msgId = m.id != null ? `smoobu-msg-${m.id}` : null;
     if (!msgId) continue;
 
-    const exists = await prisma.message.findFirst({ where: { externalId: msgId } });
-    if (exists) continue;
-
     // Strip HTML tags Smoobu may include
     const rawBody = String(m.message ?? m.messageBody ?? m.body ?? "");
     const body = rawBody.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim();
     if (!body) continue;
 
-    // Smoobu message "type": observed 1 = sent by host, 2 = received from guest.
-    // Log the raw type so mis-mapping is easy to spot in the logs.
-    const type = Number(m.type ?? 0);
-    const direction = type === 1 ? "OUTBOUND" : "INBOUND";
-    console.log(`[smoobu-messages] importing msg ${msgId} type=${type} as ${direction}`);
+    const exists = await prisma.message.findFirst({ where: { externalId: msgId } });
+    if (exists) {
+      // Repair pass: earlier syncs misclassified guest replies as OUTBOUND
+      // (Smoobu's "type" field doesn't encode direction the way assumed).
+      if (exists.direction === "OUTBOUND" && exists.source === "smoobu") {
+        const hostCopy = await prisma.message.findFirst({
+          where: {
+            reservationId: reservation.id,
+            direction: "OUTBOUND",
+            body: exists.body,
+            externalId: null,
+          },
+        });
+        if (!hostCopy) {
+          await prisma.message.update({
+            where: { id: exists.id },
+            data: { direction: "INBOUND" },
+          });
+          console.log(`[smoobu-messages] repaired ${msgId}: OUTBOUND -> INBOUND`);
+        }
+      }
+      continue;
+    }
 
-    // Avoid duplicating messages StayHQ itself sent (they have no externalId)
-    if (direction === "OUTBOUND") {
-      const dupe = await prisma.message.findFirst({
-        where: { reservationId: reservation.id, direction: "OUTBOUND", body },
-      });
-      if (dupe) continue;
+    // Log raw payload to learn Smoobu's actual direction field over time
+    console.log(`[smoobu-messages] raw msg: ${JSON.stringify(m).slice(0, 300)}`);
+
+    // Direction heuristic that doesn't rely on Smoobu's undocumented fields:
+    // if the text matches a message the host already sent (from StayHQ, which
+    // relays through Smoobu), it's the host's own copy — skip it. Everything
+    // else in the thread is treated as written by the guest.
+    const hostCopy = await prisma.message.findFirst({
+      where: { reservationId: reservation.id, direction: "OUTBOUND", body },
+    });
+    if (hostCopy) {
+      // Tag the host copy so future syncs recognize it without re-checking
+      if (!hostCopy.externalId) {
+        await prisma.message.update({ where: { id: hostCopy.id }, data: { externalId: msgId } });
+      }
+      continue;
     }
 
     await prisma.message.create({
       data: {
         reservationId: reservation.id,
         body,
-        direction,
+        direction: "INBOUND",
         channel: "PLATFORM",
         source: "smoobu",
         externalId: msgId,
-        isRead: direction === "OUTBOUND",
+        isRead: false,
       },
     });
-    if (direction === "INBOUND") imported++;
+    imported++;
   }
 
   return imported;
