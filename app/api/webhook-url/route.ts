@@ -7,7 +7,15 @@ export async function GET(req: NextRequest) {
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const secret = process.env.WEBHOOK_SECRET;
-  const origin = new URL(req.url).origin;
+
+  // Behind Railway's proxy the request URL is the internal address —
+  // derive the public origin from forwarded headers or the configured URL.
+  const forwardedHost = req.headers.get("x-forwarded-host") || req.headers.get("host");
+  const forwardedProto = req.headers.get("x-forwarded-proto") || "https";
+  const origin =
+    forwardedHost && !forwardedHost.includes("localhost")
+      ? `${forwardedProto}://${forwardedHost}`
+      : process.env.NEXTAUTH_URL?.replace(/\/$/, "") || new URL(req.url).origin;
 
   if (!secret) {
     return NextResponse.json({
