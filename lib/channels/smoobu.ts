@@ -5,8 +5,6 @@ import {
   updateAccessCodePeriodsForReservation,
 } from "@/lib/ttlock";
 
-const BASE_URL = "https://login.smoobu.com/api";
-
 interface SmoobuBooking {
   id: number;
   type?: string; // "cancellation" when cancelled
@@ -26,80 +24,13 @@ interface SmoobuBooking {
   notice?: string;
 }
 
-import crypto from "crypto";
-
-// The stored credential is JSON. Smoobu supports a legacy plain Api-Key and
-// (since 2026) HMAC-SHA256 signed requests using a key id (usr_live_...) + secret.
-interface SmoobuCredential {
-  scheme: "apikey" | "bearer" | "basic" | "hmac";
-  value: string; // api key / secret depending on scheme
-  keyId?: string; // usr_live_... (hmac only)
-  variant?: number; // hmac canonicalization variant that worked
-}
-
-// HMAC canonicalization variants (Smoobu's docs don't publish the low-level
-// encoding openly, so connect() discovers the right one and we remember it).
-const HMAC_VARIANTS = [
-  { apiPrefix: true, hashEncoding: "hex" as const },
-  { apiPrefix: true, hashEncoding: "base64" as const },
-  { apiPrefix: false, hashEncoding: "hex" as const },
-  { apiPrefix: false, hashEncoding: "base64" as const },
-];
-
-function hmacHeaders(
-  keyId: string,
-  secret: string,
-  variantIdx: number,
-  method: string,
-  fullPath: string // e.g. "/reservations?from=2026-01-01&page=1"
-): Record<string, string> {
-  const variant = HMAC_VARIANTS[variantIdx] || HMAC_VARIANTS[0];
-  const [rawPath, rawQuery] = fullPath.split("?");
-  const path = variant.apiPrefix ? `/api${rawPath}` : rawPath;
-  const query = rawQuery ? rawQuery.split("&").sort().join("&") : "";
-  const timestamp = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
-  const nonce = crypto.randomUUID();
-  const bodyHash = crypto.createHash("sha256").update("").digest(variant.hashEncoding);
-
-  const canonical = [method.toUpperCase(), path, query, timestamp, nonce, bodyHash, keyId].join("\n");
-  const signature = crypto.createHmac("sha256", secret).update(canonical).digest("base64");
-
-  return {
-    "X-API-Key": keyId,
-    "X-Timestamp": timestamp,
-    "X-Nonce": nonce,
-    "X-Signature": signature,
-  };
-}
-
-function buildHeaders(cred: SmoobuCredential, method: string, fullPath: string): Record<string, string> {
-  if (cred.scheme === "hmac") {
-    return hmacHeaders(cred.keyId || "", cred.value, cred.variant ?? 0, method, fullPath);
-  }
-  if (cred.scheme === "bearer") return { Authorization: `Bearer ${cred.value}` };
-  if (cred.scheme === "basic") return { Authorization: `Basic ${cred.value}` };
-  return { "Api-Key": cred.value };
-}
-
-function parseCredential(stored: string): SmoobuCredential {
-  try {
-    const parsed = JSON.parse(stored);
-    if (parsed.scheme && parsed.value) return parsed;
-  } catch {
-    // legacy plain API key
-  }
-  return { scheme: "apikey", value: stored };
-}
-
-async function smoobuFetch(storedCred: string, path: string) {
-  const cred = parseCredential(storedCred);
-  const res = await fetch(`${BASE_URL}${path}`, {
-    headers: { ...buildHeaders(cred, "GET", path), "Cache-Control": "no-cache" },
-  });
-  if (res.status === 401 || res.status === 403) throw new Error("Invalid Smoobu API credentials");
-  if (!res.ok) throw new Error(`Smoobu API error ${res.status}`);
-  return res.json();
-}
+import {
+  SMOOBU_BASE_URL,
+  SmoobuCredential,
+  HMAC_VARIANTS,
+  buildHeaders,
+  smoobuFetch,
+} from "@/lib/channels/smoobu-core";
 
 // Verify credentials and store them. Tries the legacy schemes and all HMAC
 // canonicalization variants; keeps whichever Smoobu accepts.
@@ -125,7 +56,7 @@ export async function connectSmoobu(userId: string, apiKey: string, label?: stri
   const attempts: string[] = [];
   for (const cred of candidates) {
     try {
-      const res = await fetch(`${BASE_URL}/me`, {
+      const res = await fetch(`${SMOOBU_BASE_URL}/me`, {
         headers: { ...buildHeaders(cred, "GET", "/me"), "Cache-Control": "no-cache" },
       });
       if (res.ok) {
