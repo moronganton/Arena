@@ -30,6 +30,7 @@ import {
   HMAC_VARIANTS,
   buildHeaders,
   smoobuFetch,
+  syncSmoobuMessagesForReservation,
 } from "@/lib/channels/smoobu-core";
 
 // Verify credentials and store them. Tries the legacy schemes and all HMAC
@@ -271,6 +272,28 @@ export async function syncSmoobuBookings(userId: string): Promise<{
 
     if (bookings.length === 0) break;
     page++;
+  }
+
+  // Sync guest messages for current and upcoming stays (guest replies from
+  // Booking.com/Airbnb land in Smoobu; pull them into the unified inbox)
+  try {
+    const recentReservations = await prisma.reservation.findMany({
+      where: {
+        property: { ownerId: userId },
+        externalId: { startsWith: "smoobu-" },
+        status: { not: "CANCELLED" },
+        checkOut: { gte: new Date(Date.now() - 7 * 86400000) },
+      },
+      select: { id: true, externalId: true },
+      orderBy: { checkIn: "asc" },
+      take: 20,
+    });
+    for (const r of recentReservations) {
+      const n = await syncSmoobuMessagesForReservation(userId, r);
+      if (n > 0) console.log(`[smoobu-sync] imported ${n} new guest message(s) for ${r.externalId}`);
+    }
+  } catch (err) {
+    console.error("[smoobu-sync] message sync failed:", err);
   }
 
   await prisma.channelConfig.updateMany({

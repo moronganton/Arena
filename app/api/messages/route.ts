@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { processIncomingMessage } from "@/lib/ai";
 import { sendMessageToGuest } from "@/lib/notifications";
-import { sendSmoobuGuestMessage } from "@/lib/channels/smoobu-core";
+import { sendSmoobuGuestMessage, syncSmoobuMessagesForReservation } from "@/lib/channels/smoobu-core";
 
 export async function GET(req: NextRequest) {
   const session = await auth();
@@ -12,6 +12,22 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const reservationId = searchParams.get("reservationId");
   const unreadOnly = searchParams.get("unread") === "true";
+
+  // When viewing a specific thread, pull the latest messages from Smoobu first
+  // so guest replies from Booking.com/Airbnb appear without waiting for a sync
+  if (reservationId) {
+    const reservation = await prisma.reservation.findFirst({
+      where: { id: reservationId, property: { ownerId: session!.user!.id } },
+      select: { id: true, externalId: true },
+    });
+    if (reservation?.externalId?.startsWith("smoobu-")) {
+      try {
+        await syncSmoobuMessagesForReservation(session!.user!.id!, reservation);
+      } catch (err) {
+        console.error("On-demand Smoobu message sync failed:", err);
+      }
+    }
+  }
 
   const messages = await prisma.message.findMany({
     where: {

@@ -100,6 +100,71 @@ export async function smoobuPost(storedCred: string, path: string, bodyObj: unkn
   return res.json().catch(() => ({}));
 }
 
+// Pull the message thread for a Smoobu reservation and import any messages
+// StayHQ doesn't have yet. Returns the number of new inbound messages.
+export async function syncSmoobuMessagesForReservation(
+  userId: string,
+  reservation: { id: string; externalId: string | null }
+): Promise<number> {
+  if (!reservation.externalId?.startsWith("smoobu-")) return 0;
+  const account = await prisma.smoobuAccount.findUnique({ where: { userId } });
+  if (!account) return 0;
+
+  const smoobuId = reservation.externalId.replace("smoobu-", "");
+  let data: { messages?: Array<Record<string, unknown>> };
+  try {
+    data = await smoobuFetch(account.apiKey, `/reservations/${smoobuId}/messages`);
+  } catch (err) {
+    console.error(`[smoobu-messages] fetch failed for ${reservation.externalId}:`, err);
+    return 0;
+  }
+
+  const messages = Array.isArray(data) ? data : data.messages || [];
+  let imported = 0;
+
+  for (const m of messages) {
+    const msgId = m.id != null ? `smoobu-msg-${m.id}` : null;
+    if (!msgId) continue;
+
+    const exists = await prisma.message.findFirst({ where: { externalId: msgId } });
+    if (exists) continue;
+
+    // Strip HTML tags Smoobu may include
+    const rawBody = String(m.message ?? m.messageBody ?? m.body ?? "");
+    const body = rawBody.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim();
+    if (!body) continue;
+
+    // Smoobu message "type": observed 1 = sent by host, 2 = received from guest.
+    // Log the raw type so mis-mapping is easy to spot in the logs.
+    const type = Number(m.type ?? 0);
+    const direction = type === 1 ? "OUTBOUND" : "INBOUND";
+    console.log(`[smoobu-messages] importing msg ${msgId} type=${type} as ${direction}`);
+
+    // Avoid duplicating messages StayHQ itself sent (they have no externalId)
+    if (direction === "OUTBOUND") {
+      const dupe = await prisma.message.findFirst({
+        where: { reservationId: reservation.id, direction: "OUTBOUND", body },
+      });
+      if (dupe) continue;
+    }
+
+    await prisma.message.create({
+      data: {
+        reservationId: reservation.id,
+        body,
+        direction,
+        channel: "PLATFORM",
+        source: "smoobu",
+        externalId: msgId,
+        isRead: direction === "OUTBOUND",
+      },
+    });
+    if (direction === "INBOUND") imported++;
+  }
+
+  return imported;
+}
+
 // Send a message to the guest via Smoobu, which relays it through the booking
 // channel (Booking.com / Airbnb) when possible. reservationExternalId is the
 // StayHQ externalId, e.g. "smoobu-12345".

@@ -297,6 +297,7 @@ model Message {
   direction String   @default("INBOUND")  // INBOUND, OUTBOUND
   channel   String   @default("PLATFORM") // PLATFORM, EMAIL, SMS, INTERNAL
   source    String?  // booking, airbnb, vrbo, expedia, direct
+  externalId String? // e.g. smoobu-msg-123 (dedupe for channel-synced messages)
   isAiGenerated Boolean @default(false)
   isRead    Boolean  @default(false)
   createdAt DateTime @default(now())
