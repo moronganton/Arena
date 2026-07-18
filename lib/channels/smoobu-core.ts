@@ -113,20 +113,36 @@ export async function syncSmoobuMessagesForReservation(
   if (!account) return newInboundIds;
 
   const smoobuId = reservation.externalId.replace("smoobu-", "");
-  let data: { messages?: Array<Record<string, unknown>> };
+  // onlyRelatedToGuest=false → include host-sent messages (type 2 = outbox),
+  // so messages typed directly in Smoobu/Airbnb also appear in StayHQ.
+  // The endpoint is paginated like the bookings list — long threads overflow
+  // page 1, so walk every page or new messages are silently missed.
+  const messages: Array<Record<string, unknown>> = [];
   try {
-    // onlyRelatedToGuest=false → include host-sent messages (type 2 = outbox),
-    // so messages typed directly in Smoobu/Airbnb also appear in StayHQ
-    data = await smoobuFetch(
-      account.apiKey,
-      `/reservations/${smoobuId}/messages?onlyRelatedToGuest=false`
+    let page = 1;
+    let pageCount = 1;
+    while (page <= Math.min(pageCount, 20)) {
+      const data = await smoobuFetch(
+        account.apiKey,
+        `/reservations/${smoobuId}/messages?onlyRelatedToGuest=false&pageSize=100&page=${page}`
+      );
+      if (Array.isArray(data)) {
+        messages.push(...data);
+        break;
+      }
+      pageCount = Number(data.page_count) || 1;
+      const batch: Array<Record<string, unknown>> = data.messages || [];
+      messages.push(...batch);
+      if (batch.length === 0) break;
+      page++;
+    }
+    console.log(
+      `[smoobu-messages] ${reservation.externalId}: fetched ${messages.length} message(s) across ${page > pageCount ? pageCount : page} page(s)`
     );
   } catch (err) {
     console.error(`[smoobu-messages] fetch failed for ${reservation.externalId}:`, err);
     return newInboundIds;
   }
-
-  const messages = Array.isArray(data) ? data : data.messages || [];
 
   for (const m of messages) {
     const msgId = m.id != null ? `smoobu-msg-${m.id}` : null;
@@ -135,14 +151,19 @@ export async function syncSmoobuMessagesForReservation(
     // Strip HTML tags Smoobu may include
     const rawBody = String(m.message ?? m.messageBody ?? m.body ?? "");
     const body = rawBody.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim();
-    if (!body) continue;
+    if (!body) {
+      console.log(`[smoobu-messages] skipped ${msgId}: empty body; raw: ${JSON.stringify(m).slice(0, 300)}`);
+      continue;
+    }
 
     // Smoobu direction: type 1 = incoming (guest), type 2 = outgoing (host).
     const type = Number(m.type ?? 0);
     const direction = type === 2 ? "OUTBOUND" : "INBOUND";
-    console.log(`[smoobu-messages] msg ${msgId} type=${type} -> ${direction}; raw: ${JSON.stringify(m).slice(0, 200)}`);
 
     const exists = await prisma.message.findFirst({ where: { externalId: msgId } });
+    if (!exists) {
+      console.log(`[smoobu-messages] new msg ${msgId} type=${type} -> ${direction}; raw: ${JSON.stringify(m).slice(0, 300)}`);
+    }
     if (exists) {
       // Self-repair: fix rows imported under earlier, incorrect mappings
       if (exists.source === "smoobu" && exists.direction !== direction) {
