@@ -35,6 +35,8 @@ export default function SmoobuPage() {
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<string>("");
   const [copied, setCopied] = useState(false);
+  const [webhookUrl, setWebhookUrl] = useState<string>("");
+  const [webhookMessage, setWebhookMessage] = useState<string>("");
 
   const loadProperties = useCallback(async () => {
     setLoadingProps(true);
@@ -61,6 +63,12 @@ export default function SmoobuPage() {
         setConnected(!!d.connected);
         setAutomation(!!d.automationEnabled);
         if (d.connected) loadProperties();
+      });
+    fetch("/api/webhook-url")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.configured) setWebhookUrl(d.smoobu);
+        else setWebhookMessage(d.message || "");
       });
   }, [loadProperties]);
 
@@ -135,7 +143,7 @@ export default function SmoobuPage() {
   }
 
   function copyWebhookUrl() {
-    const url = `${window.location.origin}/api/smoobu/webhook?secret=YOUR_WEBHOOK_SECRET`;
+    const url = webhookUrl || `${window.location.origin}/api/smoobu/webhook?secret=YOUR_WEBHOOK_SECRET`;
     navigator.clipboard.writeText(url);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -302,15 +310,17 @@ export default function SmoobuPage() {
           <div className="bg-white rounded-2xl border border-slate-100 p-5">
             <h3 className="font-semibold text-slate-900 mb-1">Real-Time Sync (Webhook)</h3>
             <p className="text-sm text-slate-500 mb-3">
-              For instant updates, in Smoobu go to <strong>Settings → For Developers → Webhook</strong>{" "}
-              and set the URL below. Replace{" "}
-              <code className="bg-slate-100 px-1 rounded">YOUR_WEBHOOK_SECRET</code> with the value of
-              the <code className="bg-slate-100 px-1 rounded">WEBHOOK_SECRET</code> variable in Railway
-              (same one used for Beds24).
+              Copy the URL below and paste it in Smoobu under{" "}
+              <strong>Settings → For Developers → Webhook</strong>. This field is only displayed here —
+              the configuration itself happens inside Smoobu.
             </p>
+            {webhookMessage && (
+              <p className="text-xs bg-amber-50 text-amber-700 rounded-lg px-3 py-2 mb-3">{webhookMessage}</p>
+            )}
             <div className="flex items-center gap-2">
               <code className="flex-1 bg-slate-100 text-slate-700 text-xs px-3 py-2 rounded-lg overflow-x-auto whitespace-nowrap">
-                {typeof window !== "undefined" ? window.location.origin : ""}/api/smoobu/webhook?secret=YOUR_WEBHOOK_SECRET
+                {webhookUrl ||
+                  `${typeof window !== "undefined" ? window.location.origin : ""}/api/smoobu/webhook?secret=YOUR_WEBHOOK_SECRET`}
               </code>
               <button
                 onClick={copyWebhookUrl}
