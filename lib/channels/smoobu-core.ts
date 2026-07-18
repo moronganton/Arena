@@ -131,60 +131,47 @@ export async function syncSmoobuMessagesForReservation(
     const body = rawBody.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim();
     if (!body) continue;
 
+    // Smoobu direction: type 1 = incoming (guest), type 2 = outgoing (host).
+    const type = Number(m.type ?? 0);
+    const direction = type === 2 ? "OUTBOUND" : "INBOUND";
+    console.log(`[smoobu-messages] msg ${msgId} type=${type} -> ${direction}; raw: ${JSON.stringify(m).slice(0, 200)}`);
+
     const exists = await prisma.message.findFirst({ where: { externalId: msgId } });
     if (exists) {
-      // Repair pass: earlier syncs misclassified guest replies as OUTBOUND
-      // (Smoobu's "type" field doesn't encode direction the way assumed).
-      if (exists.direction === "OUTBOUND" && exists.source === "smoobu") {
-        const hostCopy = await prisma.message.findFirst({
-          where: {
-            reservationId: reservation.id,
-            direction: "OUTBOUND",
-            body: exists.body,
-            externalId: null,
-          },
+      // Self-repair: fix rows imported under earlier, incorrect mappings
+      if (exists.source === "smoobu" && exists.direction !== direction) {
+        await prisma.message.update({
+          where: { id: exists.id },
+          data: { direction, isRead: direction === "OUTBOUND" ? true : exists.isRead },
         });
-        if (!hostCopy) {
-          await prisma.message.update({
-            where: { id: exists.id },
-            data: { direction: "INBOUND" },
-          });
-          console.log(`[smoobu-messages] repaired ${msgId}: OUTBOUND -> INBOUND`);
-        }
+        console.log(`[smoobu-messages] repaired ${msgId}: ${exists.direction} -> ${direction}`);
       }
       continue;
     }
 
-    // Log raw payload to learn Smoobu's actual direction field over time
-    console.log(`[smoobu-messages] raw msg: ${JSON.stringify(m).slice(0, 300)}`);
-
-    // Direction heuristic that doesn't rely on Smoobu's undocumented fields:
-    // if the text matches a message the host already sent (from StayHQ, which
-    // relays through Smoobu), it's the host's own copy — skip it. Everything
-    // else in the thread is treated as written by the guest.
-    const hostCopy = await prisma.message.findFirst({
-      where: { reservationId: reservation.id, direction: "OUTBOUND", body },
-    });
-    if (hostCopy) {
-      // Tag the host copy so future syncs recognize it without re-checking
-      if (!hostCopy.externalId) {
+    if (direction === "OUTBOUND") {
+      // Skip StayHQ's own relayed copy; tag it for future syncs
+      const hostCopy = await prisma.message.findFirst({
+        where: { reservationId: reservation.id, direction: "OUTBOUND", body, externalId: null },
+      });
+      if (hostCopy) {
         await prisma.message.update({ where: { id: hostCopy.id }, data: { externalId: msgId } });
+        continue;
       }
-      continue;
     }
 
     await prisma.message.create({
       data: {
         reservationId: reservation.id,
         body,
-        direction: "INBOUND",
+        direction,
         channel: "PLATFORM",
         source: "smoobu",
         externalId: msgId,
-        isRead: false,
+        isRead: direction === "OUTBOUND",
       },
     });
-    imported++;
+    if (direction === "INBOUND") imported++;
   }
 
   return imported;
