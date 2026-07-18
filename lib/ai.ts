@@ -161,7 +161,11 @@ export async function processIncomingMessage(messageId: string): Promise<void> {
     },
   });
 
-  if (!message || message.direction !== "INBOUND") return;
+  if (!message || message.direction !== "INBOUND") {
+    console.log(`[ai] skipped messageId ${messageId}: not inbound or not found`);
+    return;
+  }
+  console.log(`[ai] processing inbound message ${messageId}`);
 
   const { reservation } = message;
 
@@ -173,14 +177,8 @@ export async function processIncomingMessage(messageId: string): Promise<void> {
     return;
   }
 
-  // Don't answer if an AI draft is already pending on this thread
-  const pendingDraft = await prisma.message.findFirst({
-    where: { reservationId: reservation.id, isDraft: true },
-  });
-  if (pendingDraft) {
-    console.log(`[ai] skipped message ${messageId}: draft already pending`);
-    return;
-  }
+  // Allow multiple AI drafts per reservation; they can be approved/discarded independently
+  // No need to check for pending drafts — just generate a response to this message
 
   const knowledgeEntries = await prisma.propertyKnowledge.findMany({
     where: { propertyId: reservation.propertyId, active: true },
@@ -214,7 +212,13 @@ export async function processIncomingMessage(messageId: string): Promise<void> {
     (result.reasoning ? ` — ${result.reasoning}` : "")
   );
 
-  if (!result.shouldReply || result.confidence < aiSettings.confidenceThreshold) return;
+  if (!result.shouldReply || result.confidence < aiSettings.confidenceThreshold) {
+    console.log(
+      `[ai] message ${messageId}: not replying (shouldReply=${result.shouldReply}, ` +
+      `confidence=${result.confidence} vs threshold=${aiSettings.confidenceThreshold})`
+    );
+    return;
+  }
 
   const isDraft = !aiSettings.autoReplyEnabled;
   const reply = await prisma.message.create({
@@ -228,6 +232,7 @@ export async function processIncomingMessage(messageId: string): Promise<void> {
       reservationId: message.reservationId,
     },
   });
+  console.log(`[ai] message ${messageId}: ${isDraft ? "draft" : "auto-reply"} ${reply.id} created`);
 
   if (!isDraft) {
     await deliverAiMessage(reply.id);
