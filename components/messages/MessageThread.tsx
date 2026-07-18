@@ -10,6 +10,7 @@ interface Message {
   channel: string;
   source?: string | null;
   isAiGenerated: boolean;
+  isDraft?: boolean;
   createdAt: Date | string;
   senderId: string | null;
 }
@@ -72,6 +73,21 @@ export function MessageThread({
     }
   }
 
+  async function handleDraft(id: string, action: "approve" | "discard") {
+    const res = await fetch("/api/messages/draft", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, action }),
+    });
+    if (res.ok) {
+      if (action === "discard") {
+        setMessages((prev) => prev.filter((m) => m.id !== id));
+      } else {
+        setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, isDraft: false } : m)));
+      }
+    }
+  }
+
   return (
     <div className="bg-white rounded-2xl border border-slate-100 flex flex-col h-[680px]">
       <div className="flex items-center justify-between p-5 border-b border-slate-100">
@@ -120,15 +136,40 @@ export function MessageThread({
                     </span>
                   </div>
                 )}
+                {msg.isDraft && (
+                  <div className="flex items-center gap-1.5 mb-1 justify-end mr-1">
+                    <span className="text-xs text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full font-medium">
+                      AI draft — not sent yet
+                    </span>
+                  </div>
+                )}
                 <div
                   className={`rounded-2xl px-4 py-3 text-sm ${
-                    isOutbound
+                    msg.isDraft
+                      ? "bg-amber-50 text-slate-800 border-2 border-dashed border-amber-300 rounded-tr-sm"
+                      : isOutbound
                       ? "bg-indigo-600 text-white rounded-tr-sm"
                       : "bg-slate-100 text-slate-800 rounded-tl-sm"
                   }`}
                 >
                   <p className="whitespace-pre-wrap">{msg.body}</p>
                 </div>
+                {msg.isDraft && (
+                  <div className="flex gap-2 mt-2 justify-end">
+                    <button
+                      onClick={() => handleDraft(msg.id, "approve")}
+                      className="text-xs bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded-lg font-medium transition"
+                    >
+                      Approve & Send
+                    </button>
+                    <button
+                      onClick={() => handleDraft(msg.id, "discard")}
+                      className="text-xs border border-slate-200 text-slate-600 hover:bg-slate-50 px-3 py-1.5 rounded-lg font-medium transition"
+                    >
+                      Discard
+                    </button>
+                  </div>
+                )}
                 <p className={`text-xs text-slate-400 mt-1 ${isOutbound ? "text-right mr-1" : "ml-1"}`}>
                   {new Date(msg.createdAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}
                   {" · "}

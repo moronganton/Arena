@@ -22,7 +22,10 @@ export async function GET(req: NextRequest) {
     });
     if (reservation?.externalId?.startsWith("smoobu-")) {
       try {
-        await syncSmoobuMessagesForReservation(session!.user!.id!, reservation);
+        const newIds = await syncSmoobuMessagesForReservation(session!.user!.id!, reservation);
+        for (const id of newIds) {
+          await processIncomingMessage(id);
+        }
       } catch (err) {
         console.error("On-demand Smoobu message sync failed:", err);
       }

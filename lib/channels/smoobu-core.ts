@@ -101,14 +101,16 @@ export async function smoobuPost(storedCred: string, path: string, bodyObj: unkn
 }
 
 // Pull the message thread for a Smoobu reservation and import any messages
-// StayHQ doesn't have yet. Returns the number of new inbound messages.
+// StayHQ doesn't have yet. Returns the ids of newly imported inbound messages
+// so callers can hand them to the AI assistant.
 export async function syncSmoobuMessagesForReservation(
   userId: string,
   reservation: { id: string; externalId: string | null }
-): Promise<number> {
-  if (!reservation.externalId?.startsWith("smoobu-")) return 0;
+): Promise<string[]> {
+  const newInboundIds: string[] = [];
+  if (!reservation.externalId?.startsWith("smoobu-")) return newInboundIds;
   const account = await prisma.smoobuAccount.findUnique({ where: { userId } });
-  if (!account) return 0;
+  if (!account) return newInboundIds;
 
   const smoobuId = reservation.externalId.replace("smoobu-", "");
   let data: { messages?: Array<Record<string, unknown>> };
@@ -121,11 +123,10 @@ export async function syncSmoobuMessagesForReservation(
     );
   } catch (err) {
     console.error(`[smoobu-messages] fetch failed for ${reservation.externalId}:`, err);
-    return 0;
+    return newInboundIds;
   }
 
   const messages = Array.isArray(data) ? data : data.messages || [];
-  let imported = 0;
 
   for (const m of messages) {
     const msgId = m.id != null ? `smoobu-msg-${m.id}` : null;
@@ -165,7 +166,7 @@ export async function syncSmoobuMessagesForReservation(
       }
     }
 
-    await prisma.message.create({
+    const created = await prisma.message.create({
       data: {
         reservationId: reservation.id,
         body,
@@ -176,10 +177,10 @@ export async function syncSmoobuMessagesForReservation(
         isRead: direction === "OUTBOUND",
       },
     });
-    if (direction === "INBOUND") imported++;
+    if (direction === "INBOUND") newInboundIds.push(created.id);
   }
 
-  return imported;
+  return newInboundIds;
 }
 
 // Send a message to the guest via Smoobu, which relays it through the booking

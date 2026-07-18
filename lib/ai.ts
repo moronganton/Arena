@@ -1,5 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { prisma } from "@/lib/prisma";
+import { sendSmoobuGuestMessage } from "@/lib/channels/smoobu-core";
+import { sendMessageToGuest } from "@/lib/notifications";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -12,6 +14,7 @@ interface ReservationContext {
   confirmationCode?: string | null;
   accessCode?: string;
   specialRequests?: string | null;
+  knowledge?: string;
 }
 
 interface AutoReplyResult {
@@ -37,6 +40,8 @@ ${context.confirmationCode ? `Confirmation: ${context.confirmationCode}` : ""}
 ${context.accessCode ? `Access Code: ${context.accessCode}` : ""}
 ${context.specialRequests ? `Guest requests: ${context.specialRequests}` : ""}
 
+${context.knowledge ? `PROPERTY KNOWLEDGE BASE (your primary source of truth — answer ONLY from these facts):\n${context.knowledge}` : "No knowledge base entries exist for this property."}
+
 ${customInstructions ? `Host instructions: ${customInstructions}` : ""}
 
 You must respond in JSON with this exact structure:
@@ -48,10 +53,11 @@ You must respond in JSON with this exact structure:
 }
 
 Guidelines:
-- Only reply if you can answer with HIGH confidence (>0.8) from the context provided
-- For complex issues (maintenance, refunds, disputes), set shouldReply=false so the host reviews manually
+- Only reply if the answer is clearly present in the knowledge base or reservation details above — never invent facts (no made-up codes, prices, times or addresses)
+- If the knowledge base does not contain the answer, set shouldReply=false so the host replies manually
+- For complex issues (maintenance, damages, refunds, disputes, date changes), set shouldReply=false
 - Keep replies friendly, professional, and concise
-- If the guest asks about WiFi password, parking, check-in time, check-out time, access codes — answer directly if you have the info
+- If the guest asks about WiFi, parking, check-in/check-out, access codes, house rules, appliances or local tips — answer directly when the info is above
 - Always greet the guest by name
 - Sign off as "Your Host Team"
 - Match the guest's language if possible`;
@@ -96,6 +102,42 @@ CHECK_IN_INFO, CHECK_OUT_INFO, ACCESS_CODE, WIFI, PARKING, AMENITIES, COMPLAINT,
   return res.content[0].type === "text" ? res.content[0].text.trim() : "GENERAL_INQUIRY";
 }
 
+// Deliver an AI (or approved draft) message to the guest: relay via the
+// booking channel when possible, and email if the guest has an address.
+export async function deliverAiMessage(messageId: string): Promise<void> {
+  const message = await prisma.message.findUnique({
+    where: { id: messageId },
+    include: { reservation: { include: { guest: true, property: true } } },
+  });
+  if (!message) return;
+  const { reservation } = message;
+
+  if (reservation.externalId?.startsWith("smoobu-")) {
+    try {
+      await sendSmoobuGuestMessage(reservation.property.ownerId, reservation.externalId, message.body);
+    } catch (err) {
+      console.error("[ai] channel relay failed:", err);
+    }
+  }
+  if (reservation.guest.email) {
+    try {
+      await sendMessageToGuest({
+        guestName: reservation.guest.name,
+        guestEmail: reservation.guest.email,
+        propertyName: reservation.property.name,
+        messageBody: message.body,
+        reservationId: reservation.id,
+      });
+    } catch (err) {
+      console.error("[ai] email delivery failed:", err);
+    }
+  }
+}
+
+// Process an inbound guest message:
+// - AI disabled → do nothing
+// - AI enabled, auto-reply OFF (testing) → create a DRAFT for host approval
+// - AI enabled, auto-reply ON → send the reply automatically
 export async function processIncomingMessage(messageId: string): Promise<void> {
   const message = await prisma.message.findUnique({
     where: { id: messageId },
@@ -112,15 +154,34 @@ export async function processIncomingMessage(messageId: string): Promise<void> {
 
   if (!message || message.direction !== "INBOUND") return;
 
-  const aiSettings = await prisma.aiSettings.findFirst({
-    where: { enabled: true, autoReplyEnabled: true },
-  });
-
-  if (!aiSettings) return;
-
   const { reservation } = message;
-  const latestCode = reservation.accessCodes[0];
 
+  const aiSettings = await prisma.aiSettings.findFirst({
+    where: { userId: reservation.property.ownerId, enabled: true },
+  });
+  if (!aiSettings) {
+    console.log(`[ai] skipped message ${messageId}: AI assistant disabled`);
+    return;
+  }
+
+  // Don't answer if an AI draft is already pending on this thread
+  const pendingDraft = await prisma.message.findFirst({
+    where: { reservationId: reservation.id, isDraft: true },
+  });
+  if (pendingDraft) {
+    console.log(`[ai] skipped message ${messageId}: draft already pending`);
+    return;
+  }
+
+  const knowledgeEntries = await prisma.propertyKnowledge.findMany({
+    where: { propertyId: reservation.propertyId, active: true },
+    orderBy: [{ category: "asc" }, { sortOrder: "asc" }],
+  });
+  const knowledge = knowledgeEntries
+    .map((k) => `[${k.category}] ${k.title}: ${k.content}`)
+    .join("\n");
+
+  const latestCode = reservation.accessCodes[0];
   const context: ReservationContext = {
     guestName: reservation.guest.name,
     propertyName: reservation.property.name,
@@ -130,6 +191,7 @@ export async function processIncomingMessage(messageId: string): Promise<void> {
     confirmationCode: reservation.confirmationCode,
     accessCode: latestCode?.code,
     specialRequests: reservation.specialRequests,
+    knowledge: knowledge || undefined,
   };
 
   const result = await generateAutoReply(
@@ -138,16 +200,27 @@ export async function processIncomingMessage(messageId: string): Promise<void> {
     aiSettings.customInstructions || undefined
   );
 
-  if (result.shouldReply && result.confidence >= aiSettings.confidenceThreshold) {
-    await prisma.message.create({
-      data: {
-        body: result.message,
-        direction: "OUTBOUND",
-        channel: message.channel,
-        source: message.source,
-        isAiGenerated: true,
-        reservationId: message.reservationId,
-      },
-    });
+  console.log(
+    `[ai] message ${messageId}: shouldReply=${result.shouldReply} confidence=${result.confidence}` +
+    (result.reasoning ? ` — ${result.reasoning}` : "")
+  );
+
+  if (!result.shouldReply || result.confidence < aiSettings.confidenceThreshold) return;
+
+  const isDraft = !aiSettings.autoReplyEnabled;
+  const reply = await prisma.message.create({
+    data: {
+      body: result.message,
+      direction: "OUTBOUND",
+      channel: "PLATFORM",
+      isAiGenerated: true,
+      isDraft,
+      isRead: true,
+      reservationId: message.reservationId,
+    },
+  });
+
+  if (!isDraft) {
+    await deliverAiMessage(reply.id);
   }
 }

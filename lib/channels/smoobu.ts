@@ -4,6 +4,7 @@ import {
   revokeAccessCodesForReservation,
   updateAccessCodePeriodsForReservation,
 } from "@/lib/ttlock";
+import { processIncomingMessage } from "@/lib/ai";
 
 interface SmoobuBooking {
   id: number;
@@ -289,8 +290,17 @@ export async function syncSmoobuBookings(userId: string): Promise<{
       take: 20,
     });
     for (const r of recentReservations) {
-      const n = await syncSmoobuMessagesForReservation(userId, r);
-      if (n > 0) console.log(`[smoobu-sync] imported ${n} new guest message(s) for ${r.externalId}`);
+      const newIds = await syncSmoobuMessagesForReservation(userId, r);
+      if (newIds.length > 0) {
+        console.log(`[smoobu-sync] imported ${newIds.length} new guest message(s) for ${r.externalId}`);
+        for (const id of newIds) {
+          try {
+            await processIncomingMessage(id);
+          } catch (err) {
+            console.error(`[smoobu-sync] AI processing failed for message ${id}:`, err);
+          }
+        }
+      }
     }
   } catch (err) {
     console.error("[smoobu-sync] message sync failed:", err);

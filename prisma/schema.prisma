@@ -318,6 +318,7 @@ model Message {
   source    String?  // booking, airbnb, vrbo, expedia, direct
   externalId String? // e.g. smoobu-msg-123 (dedupe for channel-synced messages)
   isAiGenerated Boolean @default(false)
+  isDraft   Boolean  @default(false) // AI draft awaiting host approval — not sent
   isRead    Boolean  @default(false)
   createdAt DateTime @default(now())
 
