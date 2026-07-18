@@ -20,6 +20,7 @@ interface Mapping {
 export default function SmoobuPage() {
   const [connected, setConnected] = useState<boolean | null>(null);
   const [apiKey, setApiKey] = useState("");
+  const [tokenLabel, setTokenLabel] = useState("");
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState("");
 
@@ -78,7 +79,7 @@ export default function SmoobuPage() {
     const res = await fetch("/api/smoobu/account", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ apiKey }),
+      body: JSON.stringify({ apiKey, label: tokenLabel }),
     });
     const data = await res.json();
     if (res.ok) {
@@ -175,19 +176,27 @@ export default function SmoobuPage() {
         ) : (
           <div className="mt-3">
             <p className="text-sm text-slate-500 mb-4">
-              In Smoobu go to <strong>Settings → For Developers</strong> and copy your{" "}
-              <strong>API Key</strong>, then paste it here. That&apos;s the whole setup.
+              In Smoobu go to <strong>Settings → For Developers</strong> and create/copy your API
+              credentials. Paste the <strong>Secret</strong> below; if Smoobu also gave you a{" "}
+              <strong>Label</strong> (e.g. usr_live_...), paste that too — StayHQ will figure out
+              the right combination automatically.
             </p>
             {error && (
               <div className="mb-3 px-3 py-2 rounded-lg text-xs font-medium bg-red-50 text-red-700">{error}</div>
             )}
-            <div className="flex gap-3 flex-wrap">
+            <div className="space-y-3">
               <input
                 type="password"
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
-                placeholder="Paste your Smoobu API key"
-                className="flex-1 min-w-64 border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder="Secret / API key (required)"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+              <input
+                value={tokenLabel}
+                onChange={(e) => setTokenLabel(e.target.value)}
+                placeholder="Label (optional — e.g. usr_live_...)"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
               <button
                 onClick={connect}
@@ -195,7 +204,7 @@ export default function SmoobuPage() {
                 className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2 rounded-xl text-sm font-medium transition"
               >
                 {connecting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Link2 className="w-4 h-4" />}
-                {connecting ? "Connecting..." : "Connect"}
+                {connecting ? "Trying all auth methods..." : "Connect"}
               </button>
             </div>
           </div>

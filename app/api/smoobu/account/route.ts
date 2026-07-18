@@ -23,11 +23,11 @@ export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { apiKey } = await req.json();
+  const { apiKey, label } = await req.json();
   if (!apiKey) return NextResponse.json({ error: "API key is required" }, { status: 400 });
 
   try {
-    await connectSmoobu(session.user.id, apiKey);
+    await connectSmoobu(session.user.id, apiKey, label);
     return NextResponse.json({ connected: true });
   } catch (err) {
     return NextResponse.json(

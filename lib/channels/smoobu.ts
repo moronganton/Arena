@@ -26,23 +26,82 @@ interface SmoobuBooking {
   notice?: string;
 }
 
-async function smoobuFetch(apiKey: string, path: string) {
+// The stored credential is JSON: { scheme, value } — supporting both Smoobu's
+// classic Api-Key header and their newer token formats.
+interface SmoobuCredential {
+  scheme: "apikey" | "bearer" | "basic";
+  value: string;
+}
+
+function authHeaders(cred: SmoobuCredential): Record<string, string> {
+  if (cred.scheme === "bearer") return { Authorization: `Bearer ${cred.value}` };
+  if (cred.scheme === "basic") return { Authorization: `Basic ${cred.value}` };
+  return { "Api-Key": cred.value };
+}
+
+function parseCredential(stored: string): SmoobuCredential {
+  try {
+    const parsed = JSON.parse(stored);
+    if (parsed.scheme && parsed.value) return parsed;
+  } catch {
+    // legacy plain API key
+  }
+  return { scheme: "apikey", value: stored };
+}
+
+async function smoobuFetch(storedCred: string, path: string) {
+  const cred = parseCredential(storedCred);
   const res = await fetch(`${BASE_URL}${path}`, {
-    headers: { "Api-Key": apiKey, "Cache-Control": "no-cache" },
+    headers: { ...authHeaders(cred), "Cache-Control": "no-cache" },
   });
-  if (res.status === 401) throw new Error("Invalid Smoobu API key");
+  if (res.status === 401 || res.status === 403) throw new Error("Invalid Smoobu API credentials");
   if (!res.ok) throw new Error(`Smoobu API error ${res.status}`);
   return res.json();
 }
 
-// Verify an API key and store it
-export async function connectSmoobu(userId: string, apiKey: string) {
-  await smoobuFetch(apiKey.trim(), "/me"); // throws on invalid key
-  return prisma.smoobuAccount.upsert({
-    where: { userId },
-    create: { userId, apiKey: apiKey.trim() },
-    update: { apiKey: apiKey.trim() },
-  });
+// Verify credentials and store them. Tries every known Smoobu auth scheme with
+// the provided secret (and optional label) and keeps whichever works.
+export async function connectSmoobu(userId: string, apiKey: string, label?: string) {
+  const secret = apiKey.trim();
+  const lbl = (label || "").trim();
+
+  const candidates: SmoobuCredential[] = [
+    { scheme: "apikey", value: secret },              // classic Api-Key
+    { scheme: "bearer", value: secret },              // newer token as Bearer
+  ];
+  if (lbl) {
+    candidates.push(
+      { scheme: "apikey", value: lbl },
+      { scheme: "bearer", value: lbl },
+      // label:secret as HTTP Basic
+      { scheme: "basic", value: Buffer.from(`${lbl}:${secret}`).toString("base64") },
+    );
+  }
+
+  const attempts: string[] = [];
+  for (const cred of candidates) {
+    try {
+      const res = await fetch(`${BASE_URL}/me`, {
+        headers: { ...authHeaders(cred), "Cache-Control": "no-cache" },
+      });
+      if (res.ok) {
+        const stored = JSON.stringify(cred);
+        return prisma.smoobuAccount.upsert({
+          where: { userId },
+          create: { userId, apiKey: stored },
+          update: { apiKey: stored },
+        });
+      }
+      attempts.push(`${cred.scheme}: HTTP ${res.status}`);
+    } catch (err) {
+      attempts.push(`${cred.scheme}: ${err instanceof Error ? err.message : "failed"}`);
+    }
+  }
+
+  throw new Error(
+    `Smoobu rejected the credentials (tried ${candidates.length} auth methods: ${attempts.join("; ")}). ` +
+    `Double-check you created the token in Smoobu under Settings → For Developers.`
+  );
 }
 
 // List apartments for the mapping screen
