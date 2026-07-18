@@ -26,6 +26,7 @@ model User {
   aiSettings AiSettings?
   ttlockAccount TTLockAccount?
   beds24Account Beds24Account?
+  smoobuAccount SmoobuAccount?
 }
 
 // Linked Beds24 account (channel manager bridge to Booking.com / Airbnb)
@@ -139,6 +140,19 @@ model RecurringExpense {
   property   Property? @relation(fields: [propertyId], references: [id])
 
   @@index([ownerId])
+}
+
+// Linked Smoobu account (channel manager bridge to Booking.com / Airbnb)
+model SmoobuAccount {
+  id     String @id @default(cuid())
+  apiKey String
+  // When true, imported bookings trigger PIN generation + guest emails
+  automationEnabled Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 // Commission percentage per booking channel (used to auto-compute platform fees)
