@@ -187,13 +187,14 @@ export async function syncSmoobuMessagesForReservation(
           continue;
         }
       }
-      // Self-repair: fix rows imported under earlier, incorrect mappings
+      // Direction is decided once, at import. Smoobu has been seen re-reporting
+      // guest messages with type=2 after they were read/handled, so re-syncs
+      // must never flip a stored direction — log the mismatch for diagnosis only.
       if (exists.source === "smoobu" && exists.direction !== direction) {
-        await prisma.message.update({
-          where: { id: exists.id },
-          data: { direction, isRead: direction === "OUTBOUND" ? true : exists.isRead },
-        });
-        console.log(`[smoobu-messages] repaired ${msgId}: ${exists.direction} -> ${direction}`);
+        console.log(
+          `[smoobu-messages] note ${msgId}: stored=${exists.direction} but Smoobu now reports type=${type}; ` +
+          `keeping stored direction; raw: ${JSON.stringify(m).slice(0, 300)}`
+        );
       }
       continue;
     }
