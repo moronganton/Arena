@@ -1,6 +1,13 @@
 import Anthropic from "@anthropic-ai/sdk";
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+let _client: Anthropic | null = null;
+function getClient(): Anthropic {
+  if (!process.env.ANTHROPIC_API_KEY) {
+    throw new Error("ANTHROPIC_API_KEY is not configured");
+  }
+  if (!_client) _client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  return _client;
+}
 
 export const EXPENSE_CATEGORIES = [
   "CLEANING",
@@ -35,7 +42,7 @@ export async function extractInvoiceData(
   const mediaType = match[1] as "image/jpeg" | "image/png" | "image/gif" | "image/webp";
   const base64 = match[2];
 
-  const response = await client.messages.create({
+  const response = await getClient().messages.create({
     model: "claude-haiku-4-5-20251001",
     max_tokens: 500,
     messages: [

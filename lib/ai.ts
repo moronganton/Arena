@@ -3,7 +3,16 @@ import { prisma } from "@/lib/prisma";
 import { sendSmoobuGuestMessage } from "@/lib/channels/smoobu-core";
 import { sendMessageToGuest } from "@/lib/notifications";
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+// Lazy init: a missing ANTHROPIC_API_KEY must never crash module import
+// (which would take down message sync and webhooks with it).
+let _client: Anthropic | null = null;
+function getClient(): Anthropic {
+  if (!process.env.ANTHROPIC_API_KEY) {
+    throw new Error("ANTHROPIC_API_KEY is not configured");
+  }
+  if (!_client) _client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  return _client;
+}
 
 interface ReservationContext {
   guestName: string;
@@ -62,7 +71,7 @@ Guidelines:
 - Sign off as "Your Host Team"
 - Match the guest's language if possible`;
 
-  const res = await client.messages.create({
+  const res = await getClient().messages.create({
     model: "claude-haiku-4-5-20251001",
     max_tokens: 1024,
     messages: [
@@ -91,7 +100,7 @@ Guidelines:
 }
 
 export async function classifyMessageIntent(message: string): Promise<string> {
-  const res = await client.messages.create({
+  const res = await getClient().messages.create({
     model: "claude-haiku-4-5-20251001",
     max_tokens: 64,
     messages: [{ role: "user", content: message }],
