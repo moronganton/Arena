@@ -324,19 +324,28 @@ export async function generateAccessCode(params: {
 
   // Send code to guest via email
   if (reservation.guest.email) {
-    await sendAccessCodeEmail({
-      guestName: reservation.guest.name,
-      guestEmail: reservation.guest.email,
-      propertyName: reservation.property.name,
-      code,
-      validFrom: params.validFrom,
-      validTo: params.validTo,
-    });
+    try {
+      await sendAccessCodeEmail({
+        guestName: reservation.guest.name,
+        guestEmail: reservation.guest.email,
+        propertyName: reservation.property.name,
+        code,
+        validFrom: params.validFrom,
+        validTo: params.validTo,
+      });
+      console.log(`[codes] PIN email sent to ${reservation.guest.email}`);
 
-    await prisma.accessCode.update({
-      where: { id: accessCode.id },
-      data: { sentToGuest: true, sentAt: new Date() },
-    });
+      await prisma.accessCode.update({
+        where: { id: accessCode.id },
+        data: { sentToGuest: true, sentAt: new Date() },
+      });
+    } catch (err) {
+      console.error(`[codes] PIN email to ${reservation.guest.email} FAILED:`, err);
+    }
+  } else {
+    console.log(
+      `[codes] reservation ${params.reservationId}: guest "${reservation.guest.name}" has NO email — PIN email skipped`
+    );
   }
 
   // Also post the code into the reservation's message thread

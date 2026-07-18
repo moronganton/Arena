@@ -160,8 +160,20 @@ export async function syncSmoobuBookings(userId: string): Promise<{
           b["guest-name"] ||
           `${b.firstname || ""} ${b.lastname || ""}`.trim() ||
           "Guest";
-        const guestEmail = b.email || undefined;
-        const guestPhone = b.phone || undefined;
+        let guestEmail = b.email || undefined;
+        let guestPhone = b.phone || undefined;
+
+        // Channel bookings sometimes omit contact data in the list response —
+        // the reservation detail usually has it (incl. Booking.com relay email)
+        if (!guestEmail && !isCancelled) {
+          try {
+            const detail = await smoobuFetch(account.apiKey, `/reservations/${b.id}`);
+            guestEmail = detail?.email || guestEmail;
+            guestPhone = detail?.phone || guestPhone;
+          } catch (err) {
+            console.error(`[smoobu-sync] could not fetch detail for booking ${b.id}:`, err);
+          }
+        }
         const bookingCurrency =
           b.currency?.toUpperCase() ||
           currencyByApartment[mapping.listingId!] ||
@@ -227,6 +239,20 @@ export async function syncSmoobuBookings(userId: string): Promise<{
               currency: bookingCurrency,
             },
           });
+
+          // Backfill guest contact data if we have it now but didn't before
+          if (guestEmail || guestPhone) {
+            const guest = await prisma.guest.findUnique({ where: { id: existing.guestId } });
+            if (guest && (!guest.email || !guest.phone)) {
+              await prisma.guest.update({
+                where: { id: guest.id },
+                data: {
+                  email: guest.email || guestEmail,
+                  phone: guest.phone || guestPhone,
+                },
+              });
+            }
+          }
 
           if (becameCancelled) {
             await revokeAccessCodesForReservation(existing.id, userId);
