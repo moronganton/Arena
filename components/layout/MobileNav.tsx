@@ -23,7 +23,6 @@ const navItems = [
 const settingsItems = [
   { href: "/settings/channels", label: "Channels", icon: Wifi },
   { href: "/settings/smoobu", label: "Smoobu", icon: RefreshCw },
-  { href: "/settings/beds24", label: "Beds24", icon: RefreshCw },
   { href: "/settings/locks", label: "Smart Locks", icon: Key },
   { href: "/settings/ai", label: "AI Assistant", icon: Bot },
 ];

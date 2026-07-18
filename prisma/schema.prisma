@@ -29,7 +29,8 @@ model User {
   smoobuAccount SmoobuAccount?
 }
 
-// Linked Beds24 account (channel manager bridge to Booking.com / Airbnb)
+// LEGACY — Beds24 integration was removed in favor of Smoobu. The model is
+// kept so the automatic schema sync never drops a table with data.
 model Beds24Account {
   id           String   @id @default(cuid())
   refreshToken String

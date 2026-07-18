@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { processIncomingMessage } from "@/lib/ai";
 import { sendMessageToGuest } from "@/lib/notifications";
+import { sendSmoobuGuestMessage } from "@/lib/channels/smoobu-core";
 
 export async function GET(req: NextRequest) {
   const session = await auth();
@@ -67,7 +68,24 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  return NextResponse.json(message, { status: 201 });
+  // If the booking came through Smoobu, also relay the message through the
+  // booking channel (Booking.com / Airbnb inbox) so the guest sees it there.
+  let channelRelay: string | null = null;
+  if (reservation.externalId?.startsWith("smoobu-")) {
+    try {
+      const sent = await sendSmoobuGuestMessage(
+        session!.user!.id!,
+        reservation.externalId,
+        messageBody
+      );
+      channelRelay = sent ? "sent" : "skipped";
+    } catch (err) {
+      console.error("Failed to relay message via Smoobu:", err);
+      channelRelay = "failed";
+    }
+  }
+
+  return NextResponse.json({ ...message, channelRelay }, { status: 201 });
 }
 
 // Mark messages as read

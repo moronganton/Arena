@@ -3,18 +3,18 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getValidAccessToken } from "@/lib/ttlock";
 
-// Diagnostic: checks every link of the Beds24 → reservation → PIN → email chain
+// Diagnostic: checks every link of the Smoobu → reservation → PIN → email chain
 export async function GET() {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized — log in first" }, { status: 401 });
 
   const userId = session.user.id;
 
-  const beds24 = await prisma.beds24Account.findUnique({ where: { userId } });
+  const smoobu = await prisma.smoobuAccount.findUnique({ where: { userId } });
   const ttlockAccount = await prisma.tTLockAccount.findUnique({ where: { userId } });
 
   const mappings = await prisma.channelConfig.findMany({
-    where: { channel: "BEDS24", property: { ownerId: userId } },
+    where: { channel: "SMOOBU", property: { ownerId: userId } },
     include: {
       property: {
         select: {
@@ -36,7 +36,7 @@ export async function GET() {
   }
 
   const lastReservations = await prisma.reservation.findMany({
-    where: { property: { ownerId: userId }, externalId: { startsWith: "beds24-" } },
+    where: { property: { ownerId: userId }, externalId: { startsWith: "smoobu-" } },
     orderBy: { createdAt: "desc" },
     take: 3,
     select: {
@@ -51,12 +51,12 @@ export async function GET() {
   });
 
   const checks = {
-    "1_beds24_connected": !!beds24,
-    "2_automation_enabled": beds24?.automationEnabled ?? false,
+    "1_smoobu_connected": !!smoobu,
+    "2_automation_enabled": smoobu?.automationEnabled ?? false,
     "3_properties_mapped": mappings.length,
     "4_mapped_properties": mappings.map((m) => ({
       stayhqProperty: m.property.name,
-      beds24PropertyId: m.listingId,
+      smoobuApartmentId: m.listingId,
       locks: m.property.locks.map((l) => ({
         name: l.name,
         active: l.isActive,
@@ -67,7 +67,7 @@ export async function GET() {
     "5_ttlock_account_connected": !!ttlockAccount,
     "6_ttlock_token_valid": ttlockTokenOk,
     "7_resend_email_configured": !!process.env.RESEND_API_KEY,
-    "8_last_beds24_reservations": lastReservations.map((r) => ({
+    "8_last_channel_reservations": lastReservations.map((r) => ({
       externalId: r.externalId,
       property: r.property.name,
       guest: r.guest.name,
@@ -79,9 +79,9 @@ export async function GET() {
   };
 
   const problems: string[] = [];
-  if (!beds24) problems.push("Beds24 not connected");
-  if (beds24 && !beds24.automationEnabled) problems.push("Automation toggle is OFF — turn it on in Settings → Beds24");
-  if (mappings.length === 0) problems.push("No properties mapped to Beds24");
+  if (!smoobu) problems.push("Smoobu not connected");
+  if (smoobu && !smoobu.automationEnabled) problems.push("Automation toggle is OFF — turn it on in Settings → Smoobu");
+  if (mappings.length === 0) problems.push("No properties mapped to Smoobu");
   for (const m of mappings) {
     if (m.property.locks.filter((l) => l.isActive).length === 0) {
       problems.push(`Property "${m.property.name}" has no ACTIVE lock — codes cannot be generated for it`);

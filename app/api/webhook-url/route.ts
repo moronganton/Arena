@@ -31,6 +31,5 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     configured: true,
     smoobu: `${origin}/api/smoobu/webhook?secret=${secret}`,
-    beds24: `${origin}/api/beds24/webhook?secret=${secret}`,
   });
 }
