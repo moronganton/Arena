@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
   let raw: unknown;
   let fetchError: string | null = null;
   try {
-    raw = await smoobuFetch(account.apiKey, `/reservations/${smoobuId}/messages`);
+    raw = await smoobuFetch(account.apiKey, `/reservations/${smoobuId}/messages?onlyRelatedToGuest=false`);
   } catch (err) {
     fetchError = err instanceof Error ? err.message : String(err);
   }

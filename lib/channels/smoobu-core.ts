@@ -113,7 +113,12 @@ export async function syncSmoobuMessagesForReservation(
   const smoobuId = reservation.externalId.replace("smoobu-", "");
   let data: { messages?: Array<Record<string, unknown>> };
   try {
-    data = await smoobuFetch(account.apiKey, `/reservations/${smoobuId}/messages`);
+    // onlyRelatedToGuest=false → include host-sent messages (type 2 = outbox),
+    // so messages typed directly in Smoobu/Airbnb also appear in StayHQ
+    data = await smoobuFetch(
+      account.apiKey,
+      `/reservations/${smoobuId}/messages?onlyRelatedToGuest=false`
+    );
   } catch (err) {
     console.error(`[smoobu-messages] fetch failed for ${reservation.externalId}:`, err);
     return 0;
