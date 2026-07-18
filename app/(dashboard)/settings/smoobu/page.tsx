@@ -64,11 +64,18 @@ export default function SmoobuPage() {
         setAutomation(!!d.automationEnabled);
         if (d.connected) loadProperties();
       });
-    fetch("/api/webhook-url")
+    fetch("/api/webhook-url", { cache: "no-store" })
       .then((r) => r.json())
       .then((d) => {
-        if (d.configured) setWebhookUrl(d.smoobu);
-        else setWebhookMessage(d.message || "");
+        if (d.configured) {
+          // Guard against the server reporting an internal origin
+          const url: string = d.smoobu.includes("localhost")
+            ? d.smoobu.replace(/https?:\/\/[^/]+/, window.location.origin)
+            : d.smoobu;
+          setWebhookUrl(url);
+        } else {
+          setWebhookMessage(d.message || "");
+        }
       });
   }, [loadProperties]);
 
@@ -318,10 +325,12 @@ export default function SmoobuPage() {
               <p className="text-xs bg-amber-50 text-amber-700 rounded-lg px-3 py-2 mb-3">{webhookMessage}</p>
             )}
             <div className="flex items-center gap-2">
-              <code className="flex-1 bg-slate-100 text-slate-700 text-xs px-3 py-2 rounded-lg overflow-x-auto whitespace-nowrap">
-                {webhookUrl ||
-                  `${typeof window !== "undefined" ? window.location.origin : ""}/api/smoobu/webhook?secret=YOUR_WEBHOOK_SECRET`}
-              </code>
+              <input
+                value={webhookUrl}
+                onChange={(e) => setWebhookUrl(e.target.value)}
+                placeholder={`${typeof window !== "undefined" ? window.location.origin : ""}/api/smoobu/webhook?secret=YOUR_WEBHOOK_SECRET`}
+                className="flex-1 bg-slate-100 text-slate-700 text-xs font-mono px-3 py-2 rounded-lg border border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white"
+              />
               <button
                 onClick={copyWebhookUrl}
                 className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition"

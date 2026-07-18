@@ -8,14 +8,18 @@ export async function GET(req: NextRequest) {
 
   const secret = process.env.WEBHOOK_SECRET;
 
-  // Behind Railway's proxy the request URL is the internal address —
-  // derive the public origin from forwarded headers or the configured URL.
+  // Behind Railway's proxy the request URL is the internal address.
+  // NEXTAUTH_URL is configured with the public domain — prefer it, then
+  // fall back to forwarded headers.
+  const configured = process.env.NEXTAUTH_URL?.replace(/\/$/, "");
   const forwardedHost = req.headers.get("x-forwarded-host") || req.headers.get("host");
   const forwardedProto = req.headers.get("x-forwarded-proto") || "https";
   const origin =
-    forwardedHost && !forwardedHost.includes("localhost")
+    configured && !configured.includes("localhost")
+      ? configured
+      : forwardedHost && !forwardedHost.includes("localhost")
       ? `${forwardedProto}://${forwardedHost}`
-      : process.env.NEXTAUTH_URL?.replace(/\/$/, "") || new URL(req.url).origin;
+      : new URL(req.url).origin;
 
   if (!secret) {
     return NextResponse.json({
