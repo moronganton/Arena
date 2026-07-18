@@ -165,6 +165,28 @@ export async function syncSmoobuMessagesForReservation(
       console.log(`[smoobu-messages] new msg ${msgId} type=${type} -> ${direction}; raw: ${JSON.stringify(m).slice(0, 300)}`);
     }
     if (exists) {
+      // Clean up host-side echoes of guest messages imported before the echo
+      // check below existed: an outgoing row that duplicates an inbound one.
+      if (
+        exists.direction === "OUTBOUND" &&
+        exists.source === "smoobu" &&
+        !exists.senderId &&
+        !exists.isAiGenerated
+      ) {
+        const guestTwin = await prisma.message.findFirst({
+          where: {
+            reservationId: reservation.id,
+            direction: "INBOUND",
+            body,
+            id: { not: exists.id },
+          },
+        });
+        if (guestTwin) {
+          await prisma.message.delete({ where: { id: exists.id } });
+          console.log(`[smoobu-messages] removed ${msgId}: host-side echo of inbound message`);
+          continue;
+        }
+      }
       // Self-repair: fix rows imported under earlier, incorrect mappings
       if (exists.source === "smoobu" && exists.direction !== direction) {
         await prisma.message.update({
@@ -183,6 +205,16 @@ export async function syncSmoobuMessagesForReservation(
       });
       if (hostCopy) {
         await prisma.message.update({ where: { id: hostCopy.id }, data: { externalId: msgId } });
+        continue;
+      }
+      // Some channels echo the guest's own message back as an outgoing entry.
+      // If this exact text already exists as an inbound guest message, it's an
+      // echo — importing it would show the guest's question on the host side.
+      const guestEcho = await prisma.message.findFirst({
+        where: { reservationId: reservation.id, direction: "INBOUND", body },
+      });
+      if (guestEcho) {
+        console.log(`[smoobu-messages] skipped ${msgId}: host-side echo of inbound message`);
         continue;
       }
     }
