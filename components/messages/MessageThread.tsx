@@ -53,6 +53,12 @@ export function MessageThread({
       const msg = await res.json();
       setMessages((prev) => [...prev, msg]);
       setNewMessage("");
+      if (msg.channelRelay === "failed") {
+        alert(
+          "Message saved, but relaying it to the booking channel (Booking.com/Airbnb) failed. " +
+          "Check Railway logs for the Smoobu error, or send it from Smoobu directly."
+        );
+      }
     }
     setSending(false);
   }
