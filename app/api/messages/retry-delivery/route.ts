@@ -22,13 +22,12 @@ export async function POST(req: NextRequest) {
 
   try {
     await sendSmoobuGuestMessage(session.user.id, message.reservation.externalId, message.body);
-    await prisma.message.update({ where: { id }, data: { channelFailed: false } });
+    await prisma.message.update({ where: { id }, data: { channelFailed: false, channelError: null } });
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error("[retry-delivery] failed:", err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Delivery failed again" },
-      { status: 502 }
-    );
+    const msg = err instanceof Error ? err.message : String(err);
+    await prisma.message.update({ where: { id }, data: { channelFailed: true, channelError: msg.slice(0, 300) } });
+    return NextResponse.json({ error: msg }, { status: 502 });
   }
 }

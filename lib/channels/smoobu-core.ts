@@ -267,6 +267,23 @@ export async function syncSmoobuMessagesForReservation(
 // Send a message to the guest via Smoobu, which relays it through the booking
 // channel (Booking.com / Airbnb) when possible. reservationExternalId is the
 // StayHQ externalId, e.g. "smoobu-12345".
+// Booking.com/Airbnb drop rapid bursts of guest messages, so we serialize all
+// guest-message sends process-wide and keep a minimum gap between them. When the
+// AI answers several questions at once, the replies go out one-by-one, spaced,
+// instead of all in the same instant.
+const MIN_SEND_GAP_MS = 2500;
+let lastGuestSendAt = 0;
+let sendGate: Promise<void> = Promise.resolve();
+function reserveSendSlot(): Promise<void> {
+  const slot = sendGate.then(async () => {
+    const wait = lastGuestSendAt + MIN_SEND_GAP_MS - Date.now();
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    lastGuestSendAt = Date.now();
+  });
+  sendGate = slot.catch(() => {});
+  return slot;
+}
+
 export async function sendSmoobuGuestMessage(
   userId: string,
   reservationExternalId: string,
@@ -278,6 +295,9 @@ export async function sendSmoobuGuestMessage(
 
   const smoobuId = reservationExternalId.replace("smoobu-", "");
   const path = `/reservations/${smoobuId}/messages/send-message-to-guest`;
+
+  // Wait for our turn in the global send queue (spaces out bursts)
+  await reserveSendSlot();
 
   // Booking.com/Airbnb (via Smoobu) rate-limit bursts — when the AI answers a
   // handful of questions at once, some sends come back 429/5xx. Retry those

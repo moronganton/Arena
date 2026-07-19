@@ -136,7 +136,10 @@ export async function POST(req: NextRequest) {
       channelRelay = "failed";
       channelFailed = true;
       // Persist so the thread shows a "not delivered — retry" affordance
-      await prisma.message.update({ where: { id: message.id }, data: { channelFailed: true } });
+      await prisma.message.update({
+        where: { id: message.id },
+        data: { channelFailed: true, channelError: (err instanceof Error ? err.message : String(err)).slice(0, 300) },
+      });
     }
   }
 

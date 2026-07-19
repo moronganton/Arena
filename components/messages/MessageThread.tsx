@@ -13,6 +13,7 @@ interface Message {
   isDraft?: boolean;
   needsHostReply?: boolean;
   channelFailed?: boolean;
+  channelError?: string | null;
   createdAt: Date | string;
   senderId: string | null;
 }
@@ -242,19 +243,24 @@ export function MessageThread({
                   </div>
                 )}
                 {isOutbound && msg.channelFailed && !msg.isDraft && (
-                  <div className="mt-1.5 flex items-center gap-2 justify-end">
-                    <span className="flex items-center gap-1 text-xs text-rose-700 bg-rose-100 px-2 py-0.5 rounded-full font-medium">
-                      <AlertTriangle className="w-3 h-3" />
-                      Not delivered to guest
-                    </span>
-                    <button
-                      onClick={() => retryDelivery(msg.id)}
-                      disabled={retrying === msg.id}
-                      className="flex items-center gap-1 text-xs bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white px-2.5 py-1 rounded-lg font-medium transition"
-                    >
-                      {retrying === msg.id ? <RefreshCw className="w-3 h-3 animate-spin" /> : <SendHorizonal className="w-3 h-3" />}
-                      Retry
-                    </button>
+                  <div className="mt-1.5 flex flex-col items-end gap-1">
+                    <div className="flex items-center gap-2">
+                      <span className="flex items-center gap-1 text-xs text-rose-700 bg-rose-100 px-2 py-0.5 rounded-full font-medium">
+                        <AlertTriangle className="w-3 h-3" />
+                        Not delivered to guest
+                      </span>
+                      <button
+                        onClick={() => retryDelivery(msg.id)}
+                        disabled={retrying === msg.id}
+                        className="flex items-center gap-1 text-xs bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white px-2.5 py-1 rounded-lg font-medium transition"
+                      >
+                        {retrying === msg.id ? <RefreshCw className="w-3 h-3 animate-spin" /> : <SendHorizonal className="w-3 h-3" />}
+                        Retry
+                      </button>
+                    </div>
+                    {msg.channelError && (
+                      <span className="text-[10px] text-rose-400 max-w-[75%] text-right">{msg.channelError}</span>
+                    )}
                   </div>
                 )}
                 <p className={`text-xs text-slate-400 mt-1 ${isOutbound ? "text-right mr-1" : "ml-1"}`}>

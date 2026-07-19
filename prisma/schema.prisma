@@ -325,6 +325,7 @@ model Message {
   // Outbound message whose relay to the booking channel (Booking.com/Airbnb via
   // Smoobu) failed — shown in the UI with a Retry action so it's never silent
   channelFailed Boolean @default(false)
+  channelError  String? // the last relay error, surfaced in the UI for diagnosis
   createdAt DateTime @default(now())
 
   reservationId String
