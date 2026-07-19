@@ -24,6 +24,7 @@ interface ReservationContext {
   accessCode?: string;
   specialRequests?: string | null;
   knowledge?: string;
+  recentConversation?: string;
 }
 
 interface AutoReplyResult {
@@ -51,6 +52,8 @@ ${context.specialRequests ? `Guest requests: ${context.specialRequests}` : ""}
 
 ${context.knowledge ? `PROPERTY KNOWLEDGE BASE (your primary source of truth — answer ONLY from these facts):\n${context.knowledge}` : "No knowledge base entries exist for this property."}
 
+${context.recentConversation ? `RECENT CONVERSATION (for tone and context — don't repeat what was already said):\n${context.recentConversation}` : ""}
+
 ${customInstructions ? `Host instructions: ${customInstructions}` : ""}
 
 You must respond in JSON with this exact structure:
@@ -65,11 +68,15 @@ Guidelines:
 - Only reply if the answer is clearly present in the knowledge base or reservation details above — never invent facts (no made-up codes, prices, times or addresses)
 - If the knowledge base does not contain the answer, set shouldReply=false so the host replies manually
 - For complex issues (maintenance, damages, refunds, disputes, date changes), set shouldReply=false
-- Keep replies friendly, professional, and concise
 - If the guest asks about WiFi, parking, check-in/check-out, access codes, house rules, appliances or local tips — answer directly when the info is above
-- Always greet the guest by name
-- Sign off as "Your Host Team"
-- Match the guest's language if possible`;
+
+Writing style — you are the host personally texting in a messaging app, NOT a support bot:
+- Just answer the question directly, the way a person replies in a chat. Do NOT open with "Hi <name>", "Hello", "Dear guest" etc. — in an ongoing conversation nobody greets on every message. A greeting is only natural in the very first message of the whole conversation.
+- NO sign-offs: never end with "Your Host Team", "Best regards", your name, or any signature. Chat messages don't have signatures.
+- Skip corporate filler: no "Thank you for your inquiry", "Great question!", "Please don't hesitate to reach out", "We're happy to assist".
+- Keep it short and natural — 1-4 sentences is usually enough. A casual "Sure!" or "Of course" is fine.
+- Vary your phrasing; don't follow a template.
+- Match the guest's language and mirror their tone (casual if they're casual).`;
 
   const res = await getClient().messages.create({
     model: "claude-haiku-4-5-20251001",
@@ -188,6 +195,18 @@ export async function processIncomingMessage(messageId: string): Promise<void> {
     .map((k) => `[${k.category}] ${k.title}: ${k.content}`)
     .join("\n");
 
+  // Last few exchanged messages, so the reply fits the flow of the
+  // conversation (no greeting mid-thread, no repeating earlier answers)
+  const recentMessages = await prisma.message.findMany({
+    where: { reservationId: reservation.id, isDraft: false, id: { not: message.id } },
+    orderBy: { createdAt: "desc" },
+    take: 8,
+  });
+  const recentConversation = recentMessages
+    .reverse()
+    .map((m) => `${m.direction === "INBOUND" ? "Guest" : "Host"}: ${m.body.slice(0, 300)}`)
+    .join("\n");
+
   const latestCode = reservation.accessCodes[0];
   const context: ReservationContext = {
     guestName: reservation.guest.name,
@@ -199,6 +218,7 @@ export async function processIncomingMessage(messageId: string): Promise<void> {
     accessCode: latestCode?.code,
     specialRequests: reservation.specialRequests,
     knowledge: knowledge || undefined,
+    recentConversation: recentConversation || undefined,
   };
 
   let result: AutoReplyResult;
