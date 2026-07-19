@@ -37,3 +37,19 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json(item, { status: 201 });
 }
+
+// DELETE ?id
+export async function DELETE(req: NextRequest) {
+  const session = await auth();
+  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { searchParams } = new URL(req.url);
+  const id = searchParams.get("id");
+  if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
+
+  const item = await prisma.feedback.findFirst({ where: { id, ownerId: session.user.id } });
+  if (!item) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  await prisma.feedback.delete({ where: { id } });
+  return NextResponse.json({ success: true });
+}

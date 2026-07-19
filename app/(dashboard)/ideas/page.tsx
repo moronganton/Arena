@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
-import { Lightbulb, Camera, X, Send, RefreshCw, Check } from "lucide-react";
+import { Lightbulb, Camera, X, Send, RefreshCw, Check, Trash2 } from "lucide-react";
 
 interface FeedbackItem {
   id: string;
@@ -64,6 +64,12 @@ export default function IdeasPage() {
     } finally {
       setAdding(false);
     }
+  }
+
+  async function deleteItem(id: string) {
+    if (!confirm("Delete this idea?")) return;
+    await fetch(`/api/feedback?id=${id}`, { method: "DELETE" });
+    setItems((prev) => prev.filter((i) => i.id !== id));
   }
 
   async function submit() {
@@ -174,9 +180,18 @@ export default function IdeasPage() {
                 <div key={item.id} className="px-5 py-4">
                   <div className="flex items-start justify-between gap-3 mb-1">
                     <p className="text-sm text-slate-800 whitespace-pre-wrap">{item.message}</p>
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${STATUS_STYLE[item.status] || "bg-slate-100 text-slate-600"}`}>
-                      {item.status}
-                    </span>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_STYLE[item.status] || "bg-slate-100 text-slate-600"}`}>
+                        {item.status}
+                      </span>
+                      <button
+                        onClick={() => deleteItem(item.id)}
+                        className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
+                        title="Delete"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
                   {shots.length > 0 && (
                     <div className="flex gap-2 mt-2">
