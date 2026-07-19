@@ -19,7 +19,9 @@ export async function GET() {
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const channels = await prisma.channelConfig.findMany({
-    where: { property: { ownerId: session!.user!.id } },
+    // Smoobu mappings live in the same table but are managed on their own
+    // settings page — never show them here (was rendering with a broken badge)
+    where: { property: { ownerId: session!.user!.id }, channel: { not: "SMOOBU" } },
     include: { property: { select: { id: true, name: true } } },
     orderBy: { createdAt: "asc" },
   });
