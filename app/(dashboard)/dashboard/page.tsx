@@ -16,6 +16,9 @@ async function getDashboardData(userId: string) {
   const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
   const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
   const next30 = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
+  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const todayEnd = new Date(todayStart.getTime() + 86400000);
+  const dayAgo = new Date(Date.now() - 86400000);
 
   const [properties, totalReservations, monthRevenue, upcomingCheckIns, activeGuests, unreadMessages, recentReservations] =
     await Promise.all([
@@ -62,6 +65,37 @@ async function getDashboardData(userId: string) {
       }),
     ]);
 
+  // "What's new" strip — live shortcuts to where something needs the host
+  const [needsReply, newBookings, checkInsToday, checkOutsToday, cleaningDue] = await Promise.all([
+    prisma.message.count({
+      where: { needsHostReply: true, direction: "INBOUND", reservation: { property: { ownerId: userId } } },
+    }),
+    prisma.reservation.count({
+      where: { createdAt: { gte: dayAgo }, status: { not: "CANCELLED" }, property: { ownerId: userId } },
+    }),
+    prisma.reservation.count({
+      where: {
+        checkIn: { gte: todayStart, lt: todayEnd },
+        status: { notIn: ["CANCELLED", "NO_SHOW"] },
+        property: { ownerId: userId },
+      },
+    }),
+    prisma.reservation.count({
+      where: {
+        checkOut: { gte: todayStart, lt: todayEnd },
+        status: { notIn: ["CANCELLED", "NO_SHOW"] },
+        property: { ownerId: userId },
+      },
+    }),
+    prisma.cleaningTask.count({
+      where: {
+        scheduledDate: { gte: todayStart, lt: todayEnd },
+        status: { not: "COMPLETED" },
+        property: { ownerId: userId },
+      },
+    }),
+  ]);
+
   return {
     properties,
     totalReservations,
@@ -70,12 +104,38 @@ async function getDashboardData(userId: string) {
     activeGuests,
     unreadMessages,
     recentReservations,
+    needsReply,
+    newBookings,
+    checkInsToday,
+    checkOutsToday,
+    cleaningDue,
   };
 }
 
 export default async function DashboardPage() {
   const session = await auth();
   const data = await getDashboardData(session!.user.id);
+
+  // "What's new" chips — only rendered when there's actually news
+  const TONES = {
+    rose: { chip: "bg-rose-50 text-rose-700 border-rose-200", dot: "bg-rose-500" },
+    indigo: { chip: "bg-indigo-50 text-indigo-700 border-indigo-200", dot: "bg-indigo-500" },
+    green: { chip: "bg-green-50 text-green-700 border-green-200", dot: "bg-green-500" },
+    amber: { chip: "bg-amber-50 text-amber-700 border-amber-200", dot: "bg-amber-500" },
+  } as const;
+  const chips: Array<{ href: string; label: string; tone: keyof typeof TONES }> = [];
+  if (data.needsReply > 0)
+    chips.push({ href: "/messages", label: `${data.needsReply} need${data.needsReply === 1 ? "s" : ""} your reply`, tone: "rose" });
+  if (data.unreadMessages > 0)
+    chips.push({ href: "/messages", label: `${data.unreadMessages} unread message${data.unreadMessages === 1 ? "" : "s"}`, tone: "indigo" });
+  if (data.newBookings > 0)
+    chips.push({ href: "/reservations?sort=newest", label: `${data.newBookings} new booking${data.newBookings === 1 ? "" : "s"}`, tone: "indigo" });
+  if (data.checkInsToday > 0)
+    chips.push({ href: "/calendar", label: `${data.checkInsToday} check-in${data.checkInsToday === 1 ? "" : "s"} today`, tone: "green" });
+  if (data.checkOutsToday > 0)
+    chips.push({ href: "/cleaning", label: `${data.checkOutsToday} check-out${data.checkOutsToday === 1 ? "" : "s"} today`, tone: "green" });
+  if (data.cleaningDue > 0)
+    chips.push({ href: "/cleaning", label: `${data.cleaningDue} cleaning${data.cleaningDue === 1 ? "" : "s"} due today`, tone: "amber" });
 
   const stats = [
     {
@@ -110,12 +170,28 @@ export default async function DashboardPage() {
 
   return (
     <div className="p-4 md:p-8 max-w-7xl mx-auto">
-      <div className="mb-8">
+      <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
         <p className="text-slate-500 mt-1">
           {new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
         </p>
       </div>
+
+      {/* What's new — tap a chip to jump straight there */}
+      {chips.length > 0 && (
+        <div className="flex gap-2 overflow-x-auto pb-2 mb-6 -mx-1 px-1">
+          {chips.map((chip) => (
+            <Link
+              key={chip.label}
+              href={chip.href}
+              className={`flex-none inline-flex items-center gap-2 text-sm font-medium px-3.5 py-2 rounded-full border transition hover:shadow-sm ${TONES[chip.tone].chip}`}
+            >
+              <span className={`w-2 h-2 rounded-full ${TONES[chip.tone].dot}`} />
+              {chip.label}
+            </Link>
+          ))}
+        </div>
+      )}
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
