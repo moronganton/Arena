@@ -122,6 +122,7 @@ export async function POST(req: NextRequest) {
   // If the booking came through Smoobu, also relay the message through the
   // booking channel (Booking.com / Airbnb inbox) so the guest sees it there.
   let channelRelay: string | null = null;
+  let channelFailed = false;
   if (reservation.externalId?.startsWith("smoobu-")) {
     try {
       const sent = await sendSmoobuGuestMessage(
@@ -133,10 +134,13 @@ export async function POST(req: NextRequest) {
     } catch (err) {
       console.error("Failed to relay message via Smoobu:", err);
       channelRelay = "failed";
+      channelFailed = true;
+      // Persist so the thread shows a "not delivered — retry" affordance
+      await prisma.message.update({ where: { id: message.id }, data: { channelFailed: true } });
     }
   }
 
-  return NextResponse.json({ ...message, channelRelay, knowledgeSaved }, { status: 201 });
+  return NextResponse.json({ ...message, channelRelay, channelFailed, knowledgeSaved }, { status: 201 });
 }
 
 // Mark messages as read

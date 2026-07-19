@@ -1,6 +1,6 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
-import { Send, Bot, User, RefreshCw, AlertTriangle, Reply, X, BookOpen, Check, StickyNote } from "lucide-react";
+import { Send, Bot, User, RefreshCw, AlertTriangle, Reply, X, BookOpen, Check, StickyNote, SendHorizonal } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 
 interface Message {
@@ -12,6 +12,7 @@ interface Message {
   isAiGenerated: boolean;
   isDraft?: boolean;
   needsHostReply?: boolean;
+  channelFailed?: boolean;
   createdAt: Date | string;
   senderId: string | null;
 }
@@ -30,6 +31,7 @@ export function MessageThread({
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [saveToKb, setSaveToKb] = useState(false);
   const [kbSaved, setKbSaved] = useState(false);
+  const [retrying, setRetrying] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   function startReply(msg: Message) {
@@ -84,8 +86,8 @@ export function MessageThread({
       }
       if (msg.channelRelay === "failed") {
         alert(
-          "Message saved, but relaying it to the booking channel (Booking.com/Airbnb) failed. " +
-          "Check Railway logs for the Smoobu error, or send it from Smoobu directly."
+          "Message saved, but it didn't reach the guest on Booking.com/Airbnb. " +
+          "Use the Retry button on the message to try again."
         );
       }
     }
@@ -97,6 +99,21 @@ export function MessageThread({
     if (res.ok) {
       const data = await res.json();
       setMessages(data);
+    }
+  }
+
+  async function retryDelivery(id: string) {
+    setRetrying(id);
+    const res = await fetch("/api/messages/retry-delivery", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    setRetrying(null);
+    if (res.ok) {
+      setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, channelFailed: false } : m)));
+    } else {
+      alert("Still couldn't deliver to the booking channel. Try again shortly, or send it from Smoobu directly.");
     }
   }
 
@@ -221,6 +238,22 @@ export function MessageThread({
                       className="text-xs border border-slate-200 text-slate-600 hover:bg-slate-50 px-3 py-1.5 rounded-lg font-medium transition"
                     >
                       Discard
+                    </button>
+                  </div>
+                )}
+                {isOutbound && msg.channelFailed && !msg.isDraft && (
+                  <div className="mt-1.5 flex items-center gap-2 justify-end">
+                    <span className="flex items-center gap-1 text-xs text-rose-700 bg-rose-100 px-2 py-0.5 rounded-full font-medium">
+                      <AlertTriangle className="w-3 h-3" />
+                      Not delivered to guest
+                    </span>
+                    <button
+                      onClick={() => retryDelivery(msg.id)}
+                      disabled={retrying === msg.id}
+                      className="flex items-center gap-1 text-xs bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white px-2.5 py-1 rounded-lg font-medium transition"
+                    >
+                      {retrying === msg.id ? <RefreshCw className="w-3 h-3 animate-spin" /> : <SendHorizonal className="w-3 h-3" />}
+                      Retry
                     </button>
                   </div>
                 )}

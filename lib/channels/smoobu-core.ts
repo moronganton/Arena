@@ -92,10 +92,16 @@ export async function smoobuPost(storedCred: string, path: string, bodyObj: unkn
     },
     body,
   });
-  if (res.status === 401 || res.status === 403) throw new Error("Invalid Smoobu API credentials");
+  if (res.status === 401 || res.status === 403) {
+    const err = new Error("Invalid Smoobu API credentials") as Error & { status?: number };
+    err.status = res.status;
+    throw err;
+  }
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Smoobu API error ${res.status}: ${text.slice(0, 150)}`);
+    const err = new Error(`Smoobu API error ${res.status}: ${text.slice(0, 150)}`) as Error & { status?: number };
+    err.status = res.status;
+    throw err;
   }
   return res.json().catch(() => ({}));
 }
@@ -271,8 +277,31 @@ export async function sendSmoobuGuestMessage(
   if (!account) return false;
 
   const smoobuId = reservationExternalId.replace("smoobu-", "");
-  await smoobuPost(account.apiKey, `/reservations/${smoobuId}/messages/send-message-to-guest`, {
-    messageBody: message,
-  });
-  return true;
+  const path = `/reservations/${smoobuId}/messages/send-message-to-guest`;
+
+  // Booking.com/Airbnb (via Smoobu) rate-limit bursts — when the AI answers a
+  // handful of questions at once, some sends come back 429/5xx. Retry those
+  // with exponential backoff so replies aren't silently dropped. Only retry
+  // errors that mean the message did NOT go through (rate limit / server /
+  // network); a duplicate would otherwise reach the guest.
+  const maxAttempts = 4;
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await smoobuPost(account.apiKey, path, { messageBody: message });
+      if (attempt > 1) console.log(`[smoobu-send] delivered on attempt ${attempt} for ${reservationExternalId}`);
+      return true;
+    } catch (err) {
+      lastErr = err;
+      const status = (err as { status?: number })?.status;
+      const retryable = status === 429 || status === undefined || (typeof status === "number" && status >= 500);
+      if (!retryable || attempt === maxAttempts) break;
+      const delayMs = 1000 * 2 ** (attempt - 1); // 1s, 2s, 4s
+      console.warn(
+        `[smoobu-send] attempt ${attempt} failed (status ${status ?? "network"}) for ${reservationExternalId}; retrying in ${delayMs}ms`
+      );
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }

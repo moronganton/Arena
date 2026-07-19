@@ -131,8 +131,14 @@ export async function deliverAiMessage(messageId: string): Promise<void> {
   if (reservation.externalId?.startsWith("smoobu-")) {
     try {
       await sendSmoobuGuestMessage(reservation.property.ownerId, reservation.externalId, message.body);
+      // Clear a prior failure flag if this (re)send finally got through
+      if (message.channelFailed) {
+        await prisma.message.update({ where: { id: message.id }, data: { channelFailed: false } });
+      }
     } catch (err) {
       console.error("[ai] channel relay failed:", err);
+      // Surface it: the message looks sent in StayHQ but never reached the guest
+      await prisma.message.update({ where: { id: message.id }, data: { channelFailed: true } });
     }
   }
   if (reservation.guest.email) {
