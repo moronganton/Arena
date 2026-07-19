@@ -1,6 +1,6 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
-import { Send, Bot, User, RefreshCw, AlertTriangle } from "lucide-react";
+import { Send, Bot, User, RefreshCw, AlertTriangle, Reply, X, BookOpen, Check } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 
 interface Message {
@@ -27,7 +27,16 @@ export function MessageThread({
   const [newMessage, setNewMessage] = useState("");
   const [sending, setSending] = useState(false);
   const [channel, setChannel] = useState("EMAIL");
+  const [replyTo, setReplyTo] = useState<Message | null>(null);
+  const [saveToKb, setSaveToKb] = useState(false);
+  const [kbSaved, setKbSaved] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  function startReply(msg: Message) {
+    setReplyTo(msg);
+    // Flagged questions are exactly what the knowledge base is missing
+    setSaveToKb(!!msg.needsHostReply);
+  }
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -49,13 +58,29 @@ export function MessageThread({
     const res = await fetch("/api/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reservationId, messageBody: newMessage, channel }),
+      body: JSON.stringify({
+        reservationId,
+        messageBody: newMessage,
+        channel,
+        replyToId: replyTo?.id,
+        saveToKnowledge: saveToKb,
+      }),
     });
 
     if (res.ok) {
       const msg = await res.json();
-      setMessages((prev) => [...prev, msg]);
+      // The reply clears all "needs your reply" highlights server-side
+      setMessages((prev) => [
+        ...prev.map((m) => (m.needsHostReply ? { ...m, needsHostReply: false } : m)),
+        msg,
+      ]);
       setNewMessage("");
+      setReplyTo(null);
+      setSaveToKb(false);
+      if (msg.knowledgeSaved) {
+        setKbSaved(true);
+        setTimeout(() => setKbSaved(false), 4000);
+      }
       if (msg.channelRelay === "failed") {
         alert(
           "Message saved, but relaying it to the booking channel (Booking.com/Airbnb) failed. " +
@@ -128,6 +153,14 @@ export function MessageThread({
                         Needs your reply
                       </span>
                     )}
+                    <button
+                      onClick={() => startReply(msg)}
+                      className="flex items-center gap-0.5 text-xs text-slate-400 hover:text-indigo-600 transition"
+                      title="Reply to this message"
+                    >
+                      <Reply className="w-3 h-3" />
+                      Reply
+                    </button>
                   </div>
                 )}
                 {isOutbound && msg.isAiGenerated && (
@@ -193,6 +226,42 @@ export function MessageThread({
 
       {/* Compose */}
       <div className="p-4 border-t border-slate-100">
+        {/* Quoted message being replied to (WhatsApp-style) */}
+        {replyTo && (
+          <div className="mb-3 flex items-start gap-2 bg-slate-50 border-l-4 border-indigo-400 rounded-lg px-3 py-2">
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium text-indigo-600 mb-0.5 flex items-center gap-1">
+                <Reply className="w-3 h-3" />
+                Replying to guest
+              </p>
+              <p className="text-xs text-slate-600 truncate">{replyTo.body}</p>
+            </div>
+            <button
+              onClick={() => { setReplyTo(null); setSaveToKb(false); }}
+              className="p-1 text-slate-400 hover:text-slate-600 flex-shrink-0"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+        {replyTo && (
+          <label className="flex items-center gap-2 mb-3 text-xs text-slate-600 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={saveToKb}
+              onChange={(e) => setSaveToKb(e.target.checked)}
+              className="accent-indigo-600 w-3.5 h-3.5"
+            />
+            <BookOpen className="w-3.5 h-3.5 text-indigo-500" />
+            Save question &amp; answer to the knowledge base — the AI will answer it by itself next time
+          </label>
+        )}
+        {kbSaved && (
+          <p className="mb-3 text-xs text-green-700 bg-green-50 rounded-lg px-3 py-2 flex items-center gap-1.5">
+            <Check className="w-3.5 h-3.5" />
+            Saved to the knowledge base — similar questions will now be answered automatically.
+          </p>
+        )}
         <div className="flex items-center gap-2 mb-3">
           <select
             value={channel}

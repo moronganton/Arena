@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json();
-  const { reservationId, messageBody, channel = "PLATFORM" } = body;
+  const { reservationId, messageBody, channel = "PLATFORM", replyToId, saveToKnowledge } = body;
 
   const reservation = await prisma.reservation.findFirst({
     where: { id: reservationId, property: { ownerId: session!.user!.id } },
@@ -81,6 +81,26 @@ export async function POST(req: NextRequest) {
     where: { reservationId, direction: "INBOUND", needsHostReply: true },
     data: { needsHostReply: false },
   });
+
+  // Store the question + this answer in the property knowledge base so the
+  // AI can answer similar questions on its own next time
+  let knowledgeSaved = false;
+  if (saveToKnowledge && replyToId) {
+    const question = await prisma.message.findFirst({
+      where: { id: replyToId, reservationId, direction: "INBOUND" },
+    });
+    if (question) {
+      await prisma.propertyKnowledge.create({
+        data: {
+          propertyId: reservation.propertyId,
+          category: "FAQ",
+          title: question.body.replace(/\s+/g, " ").trim().slice(0, 100),
+          content: messageBody,
+        },
+      });
+      knowledgeSaved = true;
+    }
+  }
 
   // Send via email if guest has email address
   if (reservation.guest.email && channel === "EMAIL") {
@@ -110,7 +130,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ ...message, channelRelay }, { status: 201 });
+  return NextResponse.json({ ...message, channelRelay, knowledgeSaved }, { status: 201 });
 }
 
 // Mark messages as read
