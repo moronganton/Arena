@@ -468,17 +468,17 @@ export default function LocksPage() {
           <div className="divide-y divide-slate-50">
             {locks.map((lock) => (
               <div key={lock.id} className="p-5 hover:bg-slate-50 transition-colors">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className="w-11 h-11 bg-slate-100 rounded-xl flex items-center justify-center">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-4 min-w-0">
+                    <div className="w-11 h-11 bg-slate-100 rounded-xl flex items-center justify-center flex-shrink-0">
                       <Key className="w-5 h-5 text-slate-500" />
                     </div>
-                    <div>
-                      <p className="font-semibold text-slate-900">{lock.name}</p>
-                      <p className="text-xs text-slate-500">{lock.property.name} · {lock.lockType} · ID: {lock.ttlockId}</p>
+                    <div className="min-w-0">
+                      <p className="font-semibold text-slate-900 truncate">{lock.name}</p>
+                      <p className="text-xs text-slate-500 truncate">{lock.property.name} · {lock.lockType} · ID: {lock.ttlockId}</p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-4">
+                  <div className="flex items-center flex-wrap gap-3 sm:gap-4 sm:flex-nowrap">
                     {lock.batteryLevel !== null && lock.batteryLevel !== undefined && (
                       <div className="flex items-center gap-1.5 text-sm">
                         <Battery className={`w-4 h-4 ${lock.batteryLevel < 20 ? "text-red-500" : "text-green-500"}`} />
@@ -489,19 +489,21 @@ export default function LocksPage() {
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${lock.isActive ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"}`}>
                       {lock.isActive ? "Active" : "Inactive"}
                     </span>
-                    <button
-                      onClick={() => (editingLock === lock.id ? setEditingLock(null) : startEdit(lock))}
-                      className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition"
-                      title="Edit lock"
-                    >
-                      <Pencil className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => deleteLock(lock.id)}
-                      className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <span className="flex items-center gap-1 ml-auto sm:ml-0">
+                      <button
+                        onClick={() => (editingLock === lock.id ? setEditingLock(null) : startEdit(lock))}
+                        className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition"
+                        title="Edit lock"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => deleteLock(lock.id)}
+                        className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </span>
                   </div>
                 </div>
 

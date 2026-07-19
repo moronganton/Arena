@@ -14,6 +14,10 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: "#4f46e5",
+  // Lets content extend under the notch/Dynamic Island and home indicator so
+  // env(safe-area-inset-*) resolves to real values instead of 0 — required
+  // for the fixed top bar and bottom tab bar to clear them correctly.
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

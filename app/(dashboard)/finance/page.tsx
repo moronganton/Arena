@@ -333,43 +333,75 @@ export default function FinancePage() {
           </div>
 
           {/* Per property */}
-          <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden mb-6">
-            <div className="px-5 py-4 border-b border-slate-100">
-              <h3 className="font-semibold text-slate-900 text-sm">Per Property</h3>
+          <div className="mb-6">
+            <h3 className="font-semibold text-slate-900 text-sm mb-3 md:hidden">Per Property</h3>
+
+            {/* Mobile cards — every figure gets its own line, nothing cropped */}
+            <div className="md:hidden space-y-3">
+              {report.properties.length === 0 && (
+                <div className="bg-white rounded-2xl border border-slate-100 text-center text-slate-400 py-8 text-sm">
+                  No activity this month
+                </div>
+              )}
+              {report.properties.map((p) => (
+                <div key={p.id} className="bg-white rounded-2xl border border-slate-100 p-4">
+                  <p className="font-medium text-slate-900 text-sm">{p.name}</p>
+                  <p className="text-xs text-slate-400 mb-2">{p.city} · {p.reservationCount} stays</p>
+                  <dl className="grid grid-cols-2 gap-y-1.5 text-sm">
+                    <dt className="text-slate-500">Revenue</dt>
+                    <dd className="text-right text-slate-700">{fmt(p.revenue)} {p.currency}</dd>
+                    <dt className="text-slate-500">Costs</dt>
+                    <dd className="text-right text-slate-700">{fmt(p.costs)} {p.currency}</dd>
+                    <dt className="text-slate-500">Net</dt>
+                    <dd className={`text-right font-semibold ${p.net >= 0 ? "text-green-700" : "text-red-600"}`}>
+                      {fmt(p.net)} {p.currency}
+                    </dd>
+                    <dt className="text-slate-500">Margin</dt>
+                    <dd className="text-right text-slate-500">{p.margin !== null ? `${p.margin}%` : "—"}</dd>
+                  </dl>
+                </div>
+              ))}
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-slate-100 text-xs text-slate-500 uppercase">
-                    <th className="text-left px-5 py-3">Property</th>
-                    <th className="text-right px-5 py-3">Revenue</th>
-                    <th className="text-right px-5 py-3">Costs</th>
-                    <th className="text-right px-5 py-3">Net</th>
-                    <th className="text-right px-5 py-3">Margin</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {report.properties.length === 0 && (
-                    <tr><td colSpan={5} className="text-center text-slate-400 py-8">No activity this month</td></tr>
-                  )}
-                  {report.properties.map((p) => (
-                    <tr key={p.id} className="border-b border-slate-50 last:border-0">
-                      <td className="px-5 py-3">
-                        <p className="font-medium text-slate-900">{p.name}</p>
-                        <p className="text-xs text-slate-400">{p.city} · {p.reservationCount} stays</p>
-                      </td>
-                      <td className="px-5 py-3 text-right text-slate-700">{fmt(p.revenue)} {p.currency}</td>
-                      <td className="px-5 py-3 text-right text-slate-700">{fmt(p.costs)} {p.currency}</td>
-                      <td className={`px-5 py-3 text-right font-semibold ${p.net >= 0 ? "text-green-700" : "text-red-600"}`}>
-                        {fmt(p.net)} {p.currency}
-                      </td>
-                      <td className="px-5 py-3 text-right text-slate-500">
-                        {p.margin !== null ? `${p.margin}%` : "—"}
-                      </td>
+
+            {/* Desktop table */}
+            <div className="hidden md:block bg-white rounded-2xl border border-slate-100 overflow-hidden">
+              <div className="px-5 py-4 border-b border-slate-100">
+                <h3 className="font-semibold text-slate-900 text-sm">Per Property</h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-100 text-xs text-slate-500 uppercase">
+                      <th className="text-left px-5 py-3">Property</th>
+                      <th className="text-right px-5 py-3">Revenue</th>
+                      <th className="text-right px-5 py-3">Costs</th>
+                      <th className="text-right px-5 py-3">Net</th>
+                      <th className="text-right px-5 py-3">Margin</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {report.properties.length === 0 && (
+                      <tr><td colSpan={5} className="text-center text-slate-400 py-8">No activity this month</td></tr>
+                    )}
+                    {report.properties.map((p) => (
+                      <tr key={p.id} className="border-b border-slate-50 last:border-0">
+                        <td className="px-5 py-3">
+                          <p className="font-medium text-slate-900">{p.name}</p>
+                          <p className="text-xs text-slate-400">{p.city} · {p.reservationCount} stays</p>
+                        </td>
+                        <td className="px-5 py-3 text-right text-slate-700">{fmt(p.revenue)} {p.currency}</td>
+                        <td className="px-5 py-3 text-right text-slate-700">{fmt(p.costs)} {p.currency}</td>
+                        <td className={`px-5 py-3 text-right font-semibold ${p.net >= 0 ? "text-green-700" : "text-red-600"}`}>
+                          {fmt(p.net)} {p.currency}
+                        </td>
+                        <td className="px-5 py-3 text-right text-slate-500">
+                          {p.margin !== null ? `${p.margin}%` : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </>

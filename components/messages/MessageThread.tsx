@@ -116,7 +116,7 @@ export function MessageThread({
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-100 flex flex-col h-[680px]">
+    <div className="bg-white rounded-2xl border border-slate-100 flex flex-col h-[520px] sm:h-[680px]">
       <div className="flex items-center justify-between p-5 border-b border-slate-100">
         <div className="flex items-center gap-2">
           <h3 className="font-semibold text-slate-900">Messages</h3>

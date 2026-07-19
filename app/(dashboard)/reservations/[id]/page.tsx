@@ -39,10 +39,10 @@ export default async function ReservationDetailPage({
           <ArrowLeft className="w-4 h-4" />
           Back to Reservations
         </Link>
-        <div className="flex items-start justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="text-2xl font-bold text-slate-900">{reservation.guest.name}</h1>
-            <div className="flex items-center gap-3 mt-1">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3 mt-1">
               <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${SOURCE_COLORS[reservation.source]}`}>
                 {SOURCE_LABELS[reservation.source]}
               </span>

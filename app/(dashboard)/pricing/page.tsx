@@ -250,13 +250,65 @@ export default function PricingPage() {
       )}
 
       {/* Rules List */}
-      <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
-        {rules.length === 0 ? (
-          <div className="text-center py-16">
-            <DollarSign className="w-10 h-10 text-slate-300 mx-auto mb-3" />
-            <p className="text-slate-400">No pricing rules yet</p>
+      {rules.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-slate-100 text-center py-16">
+          <DollarSign className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+          <p className="text-slate-400">No pricing rules yet</p>
+        </div>
+      ) : (
+        <>
+          {/* Mobile cards — every field on its own line, nothing to scroll or crop */}
+          <div className="md:hidden space-y-3">
+            {rules.map((rule) => (
+              <div key={rule.id} className="bg-white rounded-2xl border border-slate-100 p-4">
+                <div className="flex items-start justify-between gap-3 mb-2">
+                  <div className="min-w-0">
+                    <p className="font-medium text-slate-900 text-sm truncate">{rule.name}</p>
+                    <span className="inline-block mt-1 text-xs bg-slate-100 text-slate-700 px-2.5 py-1 rounded-full">
+                      {RULE_TYPE_LABELS[rule.ruleType] || rule.ruleType}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => deleteRule(rule.id)}
+                    className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition flex-shrink-0"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+                <dl className="grid grid-cols-2 gap-y-1.5 text-sm">
+                  <dt className="text-slate-500">Rate</dt>
+                  <dd className="text-right">
+                    {rule.price && <span className="font-medium text-slate-900">{rule.property.currency} {rule.price}/night</span>}
+                    {rule.adjustment && (
+                      <span className={`font-medium ${rule.adjustment > 0 ? "text-green-600" : "text-red-600"}`}>
+                        {rule.adjustment > 0 ? "+" : ""}{rule.adjustment}{rule.adjType === "PERCENT" ? "%" : ` ${rule.property.currency}`}
+                      </span>
+                    )}
+                    {!rule.price && !rule.adjustment && <span className="text-slate-400">—</span>}
+                  </dd>
+                  <dt className="text-slate-500">Period</dt>
+                  <dd className="text-right text-slate-700">
+                    {rule.startDate && rule.endDate
+                      ? `${new Date(rule.startDate).toLocaleDateString()} — ${new Date(rule.endDate).toLocaleDateString()}`
+                      : "Always"}
+                  </dd>
+                  <dt className="text-slate-500">Min. nights</dt>
+                  <dd className="text-right text-slate-700">{rule.minNights || 1} nights</dd>
+                </dl>
+                <button
+                  onClick={() => toggleRule(rule)}
+                  className={`mt-3 w-full text-center text-xs px-2.5 py-1.5 rounded-full font-medium ${
+                    rule.active ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"
+                  }`}
+                >
+                  {rule.active ? "Active" : "Inactive"}
+                </button>
+              </div>
+            ))}
           </div>
-        ) : (
+
+          {/* Desktop table */}
+          <div className="hidden md:block bg-white rounded-2xl border border-slate-100 overflow-hidden">
           <table className="w-full">
             <thead>
               <tr className="border-b border-slate-100">
@@ -317,8 +369,9 @@ export default function PricingPage() {
               ))}
             </tbody>
           </table>
-        )}
-      </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

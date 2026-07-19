@@ -42,5 +42,23 @@
   }
   body {
     @apply bg-background text-foreground;
+    /* iOS Safari elastic bounce reveals the page background past the edges */
+    overscroll-behavior-y: none;
+  }
+  /* Form controls default to shrinking their intrinsic content width like any
+     other flex child — without this, an <input>/<select> next to a button
+     pushes the button off-screen on narrow phones instead of shrinking. */
+  input, select, textarea {
+    min-width: 0;
+  }
+}
+
+/* iOS Safari auto-zooms the whole page when a focused input's font-size is
+   under 16px. Every form control on the site used 14px (text-sm), so tapping
+   almost any field on an iPhone zoomed the page in and made it look broken.
+   Force 16px on phones only — text-sm still applies on larger screens. */
+@media (max-width: 640px) {
+  input, select, textarea {
+    font-size: 16px !important;
   }
 }
