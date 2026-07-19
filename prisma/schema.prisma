@@ -426,6 +426,18 @@ model AccessCode {
   @@index([reservationId])
 }
 
+// User-submitted improvement ideas (UX, navigation, features...)
+model Feedback {
+  id          String   @id @default(cuid())
+  ownerId     String
+  message     String
+  screenshots String?  // JSON array of data URLs
+  status      String   @default("NEW") // NEW, REVIEWED, DONE
+  createdAt   DateTime @default(now())
+
+  @@index([ownerId])
+}
+
 // AI configuration
 model AiSettings {
   id                  String  @id @default(cuid())
