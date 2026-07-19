@@ -320,6 +320,8 @@ model Message {
   isAiGenerated Boolean @default(false)
   isDraft   Boolean  @default(false) // AI draft awaiting host approval — not sent
   isRead    Boolean  @default(false)
+  // Inbound message the AI looked at but couldn't answer — host must reply
+  needsHostReply Boolean @default(false)
   createdAt DateTime @default(now())
 
   reservationId String

@@ -76,6 +76,12 @@ export async function POST(req: NextRequest) {
     include: { reservation: { include: { guest: true, property: true } } },
   });
 
+  // The host replied — clear any "AI couldn't answer" highlights in this thread
+  await prisma.message.updateMany({
+    where: { reservationId, direction: "INBOUND", needsHostReply: true },
+    data: { needsHostReply: false },
+  });
+
   // Send via email if guest has email address
   if (reservation.guest.email && channel === "EMAIL") {
     await sendMessageToGuest({

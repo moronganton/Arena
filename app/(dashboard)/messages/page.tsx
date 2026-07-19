@@ -1,7 +1,7 @@
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
-import { MessageSquare, Bot } from "lucide-react";
+import { MessageSquare, Bot, AlertTriangle } from "lucide-react";
 import { SOURCE_COLORS, SOURCE_LABELS } from "@/lib/utils";
 
 export default async function MessagesPage() {
@@ -30,6 +30,17 @@ export default async function MessagesPage() {
     },
     orderBy: { updatedAt: "desc" },
   });
+
+  // Conversations where the AI couldn't answer a guest question
+  const flagged = await prisma.message.findMany({
+    where: {
+      needsHostReply: true,
+      direction: "INBOUND",
+      reservation: { property: { ownerId: session!.user.id } },
+    },
+    select: { reservationId: true },
+  });
+  const needsReplySet = new Set(flagged.map((f) => f.reservationId));
 
   return (
     <div className="p-4 md:p-8 max-w-4xl mx-auto">
@@ -72,6 +83,12 @@ export default async function MessagesPage() {
                     {lastMsg?.isAiGenerated && (
                       <span className="text-xs text-indigo-500 flex items-center gap-0.5">
                         <Bot className="w-3 h-3" />AI
+                      </span>
+                    )}
+                    {needsReplySet.has(conv.id) && (
+                      <span className="text-xs text-rose-700 bg-rose-100 px-2 py-0.5 rounded-full font-medium flex items-center gap-1">
+                        <AlertTriangle className="w-3 h-3" />
+                        Needs your reply
                       </span>
                     )}
                   </div>

@@ -1,6 +1,6 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
-import { Send, Bot, User, RefreshCw } from "lucide-react";
+import { Send, Bot, User, RefreshCw, AlertTriangle } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 
 interface Message {
@@ -11,6 +11,7 @@ interface Message {
   source?: string | null;
   isAiGenerated: boolean;
   isDraft?: boolean;
+  needsHostReply?: boolean;
   createdAt: Date | string;
   senderId: string | null;
 }
@@ -121,6 +122,12 @@ export function MessageThread({
                   <div className="flex items-center gap-1.5 mb-1 ml-1">
                     <User className="w-3 h-3 text-slate-400" />
                     <span className="text-xs text-slate-500">Guest</span>
+                    {msg.needsHostReply && (
+                      <span className="flex items-center gap-1 text-xs text-rose-700 bg-rose-100 px-1.5 py-0.5 rounded-full font-medium">
+                        <AlertTriangle className="w-3 h-3" />
+                        Needs your reply
+                      </span>
+                    )}
                   </div>
                 )}
                 {isOutbound && msg.isAiGenerated && (
@@ -149,6 +156,8 @@ export function MessageThread({
                       ? "bg-amber-50 text-slate-800 border-2 border-dashed border-amber-300 rounded-tr-sm"
                       : isOutbound
                       ? "bg-indigo-600 text-white rounded-tr-sm"
+                      : msg.needsHostReply
+                      ? "bg-rose-50 text-slate-800 border-2 border-rose-200 rounded-tl-sm"
                       : "bg-slate-100 text-slate-800 rounded-tl-sm"
                   }`}
                 >

@@ -201,11 +201,19 @@ export async function processIncomingMessage(messageId: string): Promise<void> {
     knowledge: knowledge || undefined,
   };
 
-  const result = await generateAutoReply(
-    message.body,
-    context,
-    aiSettings.customInstructions || undefined
-  );
+  let result: AutoReplyResult;
+  try {
+    result = await generateAutoReply(
+      message.body,
+      context,
+      aiSettings.customInstructions || undefined
+    );
+  } catch (err) {
+    // AI unavailable (API error, missing key...) — flag for the host
+    console.error(`[ai] message ${messageId}: generation failed:`, err);
+    await prisma.message.update({ where: { id: messageId }, data: { needsHostReply: true } });
+    return;
+  }
 
   console.log(
     `[ai] message ${messageId}: shouldReply=${result.shouldReply} confidence=${result.confidence}` +
@@ -217,6 +225,8 @@ export async function processIncomingMessage(messageId: string): Promise<void> {
       `[ai] message ${messageId}: not replying (shouldReply=${result.shouldReply}, ` +
       `confidence=${result.confidence} vs threshold=${aiSettings.confidenceThreshold})`
     );
+    // The AI is standing down — highlight the message so the host replies
+    await prisma.message.update({ where: { id: messageId }, data: { needsHostReply: true } });
     return;
   }
 
@@ -233,6 +243,10 @@ export async function processIncomingMessage(messageId: string): Promise<void> {
     },
   });
   console.log(`[ai] message ${messageId}: ${isDraft ? "draft" : "auto-reply"} ${reply.id} created`);
+  if (message.needsHostReply) {
+    // Answered after all (e.g. reprocessed after a repair) — clear the flag
+    await prisma.message.update({ where: { id: messageId }, data: { needsHostReply: false } });
+  }
 
   if (!isDraft) {
     await deliverAiMessage(reply.id);
