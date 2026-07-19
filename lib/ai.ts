@@ -198,7 +198,12 @@ export async function processIncomingMessage(messageId: string): Promise<void> {
   // Last few exchanged messages, so the reply fits the flow of the
   // conversation (no greeting mid-thread, no repeating earlier answers)
   const recentMessages = await prisma.message.findMany({
-    where: { reservationId: reservation.id, isDraft: false, id: { not: message.id } },
+    where: {
+      reservationId: reservation.id,
+      isDraft: false,
+      channel: { not: "INTERNAL" }, // private host notes must never reach the AI/guest
+      id: { not: message.id },
+    },
     orderBy: { createdAt: "desc" },
     take: 8,
   });

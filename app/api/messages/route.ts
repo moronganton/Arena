@@ -57,7 +57,9 @@ export async function POST(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json();
-  const { reservationId, messageBody, channel = "PLATFORM", replyToId, saveToKnowledge } = body;
+  const { reservationId, messageBody, internal, channel, replyToId, saveToKnowledge } = body;
+  // Internal notes are private: saved to the thread, never emailed or relayed
+  const isInternal = internal === true || channel === "INTERNAL";
 
   const reservation = await prisma.reservation.findFirst({
     where: { id: reservationId, property: { ownerId: session!.user!.id } },
@@ -69,12 +71,16 @@ export async function POST(req: NextRequest) {
     data: {
       body: messageBody,
       direction: "OUTBOUND",
-      channel,
+      channel: isInternal ? "INTERNAL" : "PLATFORM",
       reservationId,
       senderId: session!.user!.id,
     },
     include: { reservation: { include: { guest: true, property: true } } },
   });
+
+  if (isInternal) {
+    return NextResponse.json({ ...message, channelRelay: null, knowledgeSaved: false }, { status: 201 });
+  }
 
   // The host replied — clear any "AI couldn't answer" highlights in this thread
   await prisma.message.updateMany({
@@ -103,7 +109,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Send via email if guest has email address
-  if (reservation.guest.email && channel === "EMAIL") {
+  if (reservation.guest.email) {
     await sendMessageToGuest({
       guestName: reservation.guest.name,
       guestEmail: reservation.guest.email,

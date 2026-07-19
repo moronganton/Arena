@@ -1,6 +1,6 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
-import { Send, Bot, User, RefreshCw, AlertTriangle, Reply, X, BookOpen, Check } from "lucide-react";
+import { Send, Bot, User, RefreshCw, AlertTriangle, Reply, X, BookOpen, Check, StickyNote } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 
 interface Message {
@@ -26,7 +26,7 @@ export function MessageThread({
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [newMessage, setNewMessage] = useState("");
   const [sending, setSending] = useState(false);
-  const [channel, setChannel] = useState("EMAIL");
+  const [internalNote, setInternalNote] = useState(false);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [saveToKb, setSaveToKb] = useState(false);
   const [kbSaved, setKbSaved] = useState(false);
@@ -61,9 +61,9 @@ export function MessageThread({
       body: JSON.stringify({
         reservationId,
         messageBody: newMessage,
-        channel,
-        replyToId: replyTo?.id,
-        saveToKnowledge: saveToKb,
+        internal: internalNote,
+        replyToId: internalNote ? undefined : replyTo?.id,
+        saveToKnowledge: internalNote ? false : saveToKb,
       }),
     });
 
@@ -77,6 +77,7 @@ export function MessageThread({
       setNewMessage("");
       setReplyTo(null);
       setSaveToKb(false);
+      setInternalNote(false);
       if (msg.knowledgeSaved) {
         setKbSaved(true);
         setTimeout(() => setKbSaved(false), 4000);
@@ -140,6 +141,7 @@ export function MessageThread({
         )}
         {messages.map((msg) => {
           const isOutbound = msg.direction === "OUTBOUND";
+          const isInternal = msg.channel === "INTERNAL";
           return (
             <div key={msg.id} className={`flex ${isOutbound ? "justify-end" : "justify-start"}`}>
               <div className={`max-w-[75%] ${isOutbound ? "order-2" : "order-1"}`}>
@@ -161,6 +163,14 @@ export function MessageThread({
                       <Reply className="w-3 h-3" />
                       Reply
                     </button>
+                  </div>
+                )}
+                {isOutbound && isInternal && (
+                  <div className="flex items-center gap-1.5 mb-1 justify-end mr-1">
+                    <span className="flex items-center gap-1 text-xs text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full font-medium">
+                      <StickyNote className="w-3 h-3" />
+                      Internal note — guest can&apos;t see this
+                    </span>
                   </div>
                 )}
                 {isOutbound && msg.isAiGenerated && (
@@ -187,6 +197,8 @@ export function MessageThread({
                   className={`rounded-2xl px-4 py-3 text-sm ${
                     msg.isDraft
                       ? "bg-amber-50 text-slate-800 border-2 border-dashed border-amber-300 rounded-tr-sm"
+                      : isInternal
+                      ? "bg-amber-100 text-amber-900 border border-amber-200 rounded-tr-sm"
                       : isOutbound
                       ? "bg-indigo-600 text-white rounded-tr-sm"
                       : msg.needsHostReply
@@ -263,16 +275,16 @@ export function MessageThread({
           </p>
         )}
         <div className="flex items-center gap-2 mb-3">
-          <select
-            value={channel}
-            onChange={(e) => setChannel(e.target.value)}
-            className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-          >
-            <option value="EMAIL">Email</option>
-            <option value="PLATFORM">Platform</option>
-            <option value="SMS">SMS</option>
-            <option value="INTERNAL">Internal Note</option>
-          </select>
+          <label className="flex items-center gap-2 text-xs text-slate-600 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={internalNote}
+              onChange={(e) => setInternalNote(e.target.checked)}
+              className="accent-amber-500 w-3.5 h-3.5"
+            />
+            <StickyNote className="w-3.5 h-3.5 text-amber-500" />
+            Internal note (not visible to the guest)
+          </label>
         </div>
         <div className="flex gap-2">
           <textarea
@@ -284,14 +296,20 @@ export function MessageThread({
                 sendMessage();
               }
             }}
-            placeholder="Type a message... (Enter to send)"
-            className="flex-1 resize-none border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 max-h-32"
+            placeholder={internalNote ? "Type a private note — the guest won't see it..." : "Type a message... (Enter to send)"}
+            className={`flex-1 resize-none border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 max-h-32 ${
+              internalNote
+                ? "border-amber-300 bg-amber-50 focus:ring-amber-400"
+                : "border-slate-200 focus:ring-indigo-500"
+            }`}
             rows={2}
           />
           <button
             onClick={sendMessage}
             disabled={sending || !newMessage.trim()}
-            className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl px-4 py-3 transition flex items-center gap-2"
+            className={`disabled:opacity-50 text-white rounded-xl px-4 py-3 transition flex items-center gap-2 ${
+              internalNote ? "bg-amber-500 hover:bg-amber-600" : "bg-indigo-600 hover:bg-indigo-700"
+            }`}
           >
             <Send className="w-4 h-4" />
           </button>
