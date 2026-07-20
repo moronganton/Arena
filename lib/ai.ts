@@ -5,12 +5,17 @@ import { sendMessageToGuest } from "@/lib/notifications";
 
 // Lazy init: a missing ANTHROPIC_API_KEY must never crash module import
 // (which would take down message sync and webhooks with it).
+//
+// Note: this is the Anthropic *API* (billed per-token via the console API key),
+// which is entirely separate from any Claude Pro / claude.ai subscription —
+// Pro usage limits have no effect here. maxRetries makes transient API rate
+// limits (429) self-heal with exponential backoff, honoring Retry-After.
 let _client: Anthropic | null = null;
 function getClient(): Anthropic {
   if (!process.env.ANTHROPIC_API_KEY) {
     throw new Error("ANTHROPIC_API_KEY is not configured");
   }
-  if (!_client) _client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  if (!_client) _client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 4 });
   return _client;
 }
 
@@ -243,8 +248,18 @@ export async function processIncomingMessage(messageId: string): Promise<void> {
       aiSettings.customInstructions || undefined
     );
   } catch (err) {
-    // AI unavailable (API error, missing key...) — flag for the host
-    console.error(`[ai] message ${messageId}: generation failed:`, err);
+    // AI unavailable — flag the message for the host so it isn't left unanswered.
+    // Log the precise cause: these are the Anthropic API's OWN limits (rate limit,
+    // exhausted credits, spend cap, or a bad key) — NOT the Claude Pro subscription.
+    const e = err as { status?: number; error?: { type?: string }; message?: string };
+    const type = e?.error?.type;
+    let hint = "";
+    if (e?.status === 429 || type === "rate_limit_error") hint = " — API RATE LIMIT (raise your usage tier or slow sends)";
+    else if (e?.status === 400 && /credit|billing|balance/i.test(e?.message || "")) hint = " — OUT OF API CREDITS / SPEND CAP (top up in the Anthropic console → Billing)";
+    else if (e?.status === 401 || type === "authentication_error") hint = " — BAD/EXPIRED API KEY (check ANTHROPIC_API_KEY in Railway)";
+    console.error(
+      `[ai] message ${messageId}: generation failed — status=${e?.status ?? "?"} type=${type ?? "?"}${hint}: ${e?.message ?? String(err)}`
+    );
     await prisma.message.update({ where: { id: messageId }, data: { needsHostReply: true } });
     return;
   }
