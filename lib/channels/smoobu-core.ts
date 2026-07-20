@@ -308,9 +308,6 @@ export async function sendSmoobuGuestMessage(
   let lastErr: unknown;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      // Payload is messageBody only — the exact shape that historically
-      // relayed to Booking.com/Airbnb. (Adding a `subject` field was tried and
-      // reverted: it did not help and may route the message differently.)
       await smoobuPost(account.apiKey, path, { messageBody: message });
       if (attempt > 1) console.log(`[smoobu-send] delivered on attempt ${attempt} for ${reservationExternalId}`);
       return true;

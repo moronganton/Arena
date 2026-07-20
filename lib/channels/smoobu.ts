@@ -4,7 +4,7 @@ import {
   revokeAccessCodesForReservation,
   updateAccessCodePeriodsForReservation,
 } from "@/lib/ttlock";
-import { processIncomingMessages } from "@/lib/ai";
+import { processIncomingMessage } from "@/lib/ai";
 
 interface SmoobuBooking {
   id: number;
@@ -293,14 +293,14 @@ export async function syncSmoobuBookings(userId: string): Promise<{
       const newIds = await syncSmoobuMessagesForReservation(userId, r);
       if (newIds.length > 0) {
         console.log(`[smoobu-sync] imported ${newIds.length} new guest message(s) for ${r.externalId}`);
-        // Batch as one AI turn (one combined reply, one relay send) instead of
-        // one per message — several separate replies back-to-back tend to
-        // never reach the guest on Airbnb/Booking.com even though each send
-        // succeeds against Smoobu's API.
-        try {
-          await processIncomingMessages(newIds);
-        } catch (err) {
-          console.error(`[smoobu-sync] AI processing failed for ${r.externalId}:`, err);
+        // One reply per message (yesterday's behavior). Notifications/health
+        // still fire per message inside processIncomingMessage.
+        for (const id of newIds) {
+          try {
+            await processIncomingMessage(id);
+          } catch (err) {
+            console.error(`[smoobu-sync] AI processing failed for message ${id}:`, err);
+          }
         }
       }
     }
