@@ -138,13 +138,16 @@ CHECK_IN_INFO, CHECK_OUT_INFO, ACCESS_CODE, WIFI, PARKING, AMENITIES, COMPLAINT,
 
 // Deliver an AI (or approved draft) message to the guest: relay via the
 // booking channel when possible, and email if the guest has an address.
-export async function deliverAiMessage(messageId: string): Promise<void> {
+// Returns false if the channel relay failed (so callers can skip a redundant
+// "replied" notification — deliverAiMessage already sent a delivery_failed one).
+export async function deliverAiMessage(messageId: string): Promise<boolean> {
   const message = await prisma.message.findUnique({
     where: { id: messageId },
     include: { reservation: { include: { guest: true, property: true } } },
   });
-  if (!message) return;
+  if (!message) return false;
   const { reservation } = message;
+  let channelOk = true;
 
   if (reservation.externalId?.startsWith("smoobu-")) {
     try {
@@ -154,6 +157,7 @@ export async function deliverAiMessage(messageId: string): Promise<void> {
         await prisma.message.update({ where: { id: message.id }, data: { channelFailed: false, channelError: null } });
       }
     } catch (err) {
+      channelOk = false;
       console.error("[ai] channel relay failed:", err);
       // Surface it: the message looks sent in StayHQ but never reached the guest
       await prisma.message.update({
@@ -181,6 +185,7 @@ export async function deliverAiMessage(messageId: string): Promise<void> {
       console.error("[ai] email delivery failed:", err);
     }
   }
+  return channelOk;
 }
 
 // Process an inbound guest message:
@@ -320,7 +325,26 @@ export async function processIncomingMessage(messageId: string): Promise<void> {
     await prisma.message.update({ where: { id: messageId }, data: { needsHostReply: false } });
   }
 
-  if (!isDraft) {
-    await deliverAiMessage(reply.id);
+  const guestPreview = message.body.replace(/\s+/g, " ").trim().slice(0, 140);
+  if (isDraft) {
+    // Auto-reply is off — the AI wrote a draft, but a human still has to send it
+    await notifyUser(reservation.property.ownerId, {
+      type: "guest_reply",
+      title: `${reservation.guest.name} messaged you — AI drafted a reply`,
+      body: guestPreview,
+      link: `/messages?reservationId=${reservation.id}`,
+    });
+  } else {
+    const delivered = await deliverAiMessage(reply.id);
+    // Only notify on success — a failed relay already sent its own
+    // delivery_failed alert inside deliverAiMessage, so this would double up.
+    if (delivered) {
+      await notifyUser(reservation.property.ownerId, {
+        type: "info",
+        title: `${reservation.guest.name} messaged you — AI replied automatically`,
+        body: guestPreview,
+        link: `/messages?reservationId=${reservation.id}`,
+      });
+    }
   }
 }
