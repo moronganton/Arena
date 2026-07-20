@@ -51,19 +51,26 @@ export async function notifyUser(userId: string, input: NotifyInput): Promise<vo
   if (!ensureVapid()) return; // push not configured — in-app only
 
   let subs;
+  let unreadCount = 0;
   try {
-    subs = await prisma.pushSubscription.findMany({ where: { userId } });
+    [subs, unreadCount] = await Promise.all([
+      prisma.pushSubscription.findMany({ where: { userId } }),
+      prisma.notification.count({ where: { userId, isRead: false } }),
+    ]);
   } catch (err) {
     console.error("[notify] failed to load push subscriptions:", err);
     return;
   }
 
+  // badge travels with the push so the service worker can set the app icon's
+  // unread count even while StayHQ isn't open — no separate fetch needed.
   const payload = JSON.stringify({
     id: saved.id,
     type: input.type,
     title: input.title,
     body: input.body,
     link: input.link || "/dashboard",
+    badge: unreadCount,
   });
 
   await Promise.all(

@@ -22,11 +22,23 @@ self.addEventListener("push", (event) => {
   const options = {
     body: data.body || "",
     icon: "/icon-192.png",
-    badge: "/icon-192.png",
+    badge: "/icon-192.png", // small monochrome icon Android shows in the status bar
     tag: data.id || data.type || "stayhq",
     data: { link: data.link || "/dashboard" },
   };
-  event.waitUntil(self.registration.showNotification(title, options));
+
+  // App icon badge count (Home Screen icon) — set here so it updates even
+  // while StayHQ isn't open. "navigator" is available in the service worker
+  // scope too; feature-detect since not every platform supports it.
+  const badgeCount = typeof data.badge === "number" ? data.badge : null;
+  const setBadge =
+    badgeCount != null && "setAppBadge" in self.navigator
+      ? badgeCount > 0
+        ? self.navigator.setAppBadge(badgeCount).catch(() => {})
+        : self.navigator.clearAppBadge().catch(() => {})
+      : Promise.resolve();
+
+  event.waitUntil(Promise.all([self.registration.showNotification(title, options), setBadge]));
 });
 
 self.addEventListener("notificationclick", (event) => {

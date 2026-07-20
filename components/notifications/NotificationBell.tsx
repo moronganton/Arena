@@ -60,6 +60,15 @@ export function NotificationBell() {
     }
   }, []);
 
+  // Keep the Home Screen icon's badge count in sync with the bell whenever it
+  // changes in-app (opening the app, marking read) — the service worker
+  // handles the case where a push arrives while StayHQ isn't open at all.
+  useEffect(() => {
+    if (!("setAppBadge" in navigator)) return;
+    const nav = navigator as Navigator & { setAppBadge: (n: number) => Promise<void>; clearAppBadge: () => Promise<void> };
+    (unread > 0 ? nav.setAppBadge(unread) : nav.clearAppBadge()).catch(() => {});
+  }, [unread]);
+
   // Push a subscription (existing or newly created) to the server. Shared by
   // the silent self-heal on load and the manual "Enable push" tap.
   async function subscribeAndSave(reg: ServiceWorkerRegistration): Promise<void> {
