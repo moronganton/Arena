@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
 
   const smoobuId = reservation.externalId.replace("smoobu-", "");
   const path = `/reservations/${smoobuId}/messages/send-message-to-guest`;
-  const body = JSON.stringify({ messageBody: text });
+  const body = JSON.stringify({ subject: "Message from your host", messageBody: text });
   const cred = parseCredential(account.apiKey);
 
   const started = Date.now();

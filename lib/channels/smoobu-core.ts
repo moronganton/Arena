@@ -287,7 +287,8 @@ function reserveSendSlot(): Promise<void> {
 export async function sendSmoobuGuestMessage(
   userId: string,
   reservationExternalId: string,
-  message: string
+  message: string,
+  subject = "Message from your host"
 ): Promise<boolean> {
   if (!reservationExternalId.startsWith("smoobu-")) return false;
   const account = await prisma.smoobuAccount.findUnique({ where: { userId } });
@@ -308,7 +309,12 @@ export async function sendSmoobuGuestMessage(
   let lastErr: unknown;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      await smoobuPost(account.apiKey, path, { messageBody: message });
+      // Smoobu's documented example for this endpoint always pairs messageBody
+      // with subject. Omitting it still returned "201 Resource created" but the
+      // message never showed up in Smoobu's own thread or reached the guest —
+      // it appears to accept the call but not create a real relayed message
+      // without it.
+      await smoobuPost(account.apiKey, path, { subject, messageBody: message });
       if (attempt > 1) console.log(`[smoobu-send] delivered on attempt ${attempt} for ${reservationExternalId}`);
       return true;
     } catch (err) {
