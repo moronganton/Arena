@@ -52,7 +52,7 @@ export async function GET(req: NextRequest) {
     const marker = `var${v}-${Date.now().toString().slice(-5)}`;
     const cred = { ...stored, variant: v };
     const text = `StayHQ variant probe — please ignore [${marker}]`;
-    const body = JSON.stringify({ subject: "Message from your host", messageBody: text });
+    const body = JSON.stringify({ messageBody: text });
     try {
       const res = await fetch(`${SMOOBU_BASE_URL}${sendPath}`, {
         method: "POST",

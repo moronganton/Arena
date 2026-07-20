@@ -47,7 +47,8 @@ export async function GET(req: NextRequest) {
   };
 
   const sendPath = `/reservations/${smoobuId}/messages/send-message-to-guest`;
-  const body = JSON.stringify({ subject: "Message from your host", messageBody: text });
+  // messageBody only — the exact payload that historically relayed to the OTA
+  const body = JSON.stringify({ messageBody: text });
 
   const started = Date.now();
   let sendResult: Record<string, unknown>;
