@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { prisma } from "@/lib/prisma";
 import { sendSmoobuGuestMessage } from "@/lib/channels/smoobu-core";
 import { sendMessageToGuest } from "@/lib/notifications";
+import { recordAiSuccess, recordAiFailure, readRateLimitHeaders } from "@/lib/ai-health";
 
 // Lazy init: a missing ANTHROPIC_API_KEY must never crash module import
 // (which would take down message sync and webhooks with it).
@@ -42,7 +43,10 @@ interface AutoReplyResult {
 export async function generateAutoReply(
   incomingMessage: string,
   context: ReservationContext,
-  customInstructions?: string
+  customInstructions?: string,
+  // When set, the call's rate-limit headroom is recorded against this owner so
+  // the AI Status panel can show how much room is left before the next limit.
+  ownerId?: string
 ): Promise<AutoReplyResult> {
   const systemPrompt = `You are a helpful property management assistant responding on behalf of a short-term rental host.
 
@@ -83,17 +87,25 @@ Writing style — you are the host personally texting in a messaging app, NOT a 
 - Vary your phrasing; don't follow a template.
 - Match the guest's language and mirror their tone (casual if they're casual).`;
 
-  const res = await getClient().messages.create({
-    model: "claude-haiku-4-5-20251001",
-    max_tokens: 1024,
-    messages: [
-      {
-        role: "user",
-        content: `Guest message: "${incomingMessage}"\n\nGenerate an appropriate reply.`,
-      },
-    ],
-    system: systemPrompt,
-  });
+  // .withResponse() also hands back the raw HTTP response, so we can read the
+  // rate-limit headroom headers Anthropic returns on every call.
+  const { data: res, response } = await getClient()
+    .messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 1024,
+      messages: [
+        {
+          role: "user",
+          content: `Guest message: "${incomingMessage}"\n\nGenerate an appropriate reply.`,
+        },
+      ],
+      system: systemPrompt,
+    })
+    .withResponse();
+
+  if (ownerId) {
+    await recordAiSuccess(ownerId, readRateLimitHeaders(response.headers));
+  }
 
   const text = res.content[0].type === "text" ? res.content[0].text : "";
 
@@ -245,20 +257,18 @@ export async function processIncomingMessage(messageId: string): Promise<void> {
     result = await generateAutoReply(
       message.body,
       context,
-      aiSettings.customInstructions || undefined
+      aiSettings.customInstructions || undefined,
+      reservation.property.ownerId
     );
   } catch (err) {
     // AI unavailable — flag the message for the host so it isn't left unanswered.
-    // Log the precise cause: these are the Anthropic API's OWN limits (rate limit,
-    // exhausted credits, spend cap, or a bad key) — NOT the Claude Pro subscription.
-    const e = err as { status?: number; error?: { type?: string }; message?: string };
-    const type = e?.error?.type;
-    let hint = "";
-    if (e?.status === 429 || type === "rate_limit_error") hint = " — API RATE LIMIT (raise your usage tier or slow sends)";
-    else if (e?.status === 400 && /credit|billing|balance/i.test(e?.message || "")) hint = " — OUT OF API CREDITS / SPEND CAP (top up in the Anthropic console → Billing)";
-    else if (e?.status === 401 || type === "authentication_error") hint = " — BAD/EXPIRED API KEY (check ANTHROPIC_API_KEY in Railway)";
+    // recordAiFailure classifies the cause (these are the Anthropic API's OWN
+    // limits — rate limit, exhausted credits, spend cap, or a bad key — NOT the
+    // Claude Pro subscription), stores it for the AI Status panel, and emails the
+    // owner if it's an actionable outage (debounced to once per 30 min).
+    const info = await recordAiFailure(reservation.property.ownerId, err);
     console.error(
-      `[ai] message ${messageId}: generation failed — status=${e?.status ?? "?"} type=${type ?? "?"}${hint}: ${e?.message ?? String(err)}`
+      `[ai] message ${messageId}: generation failed — type=${info.type} status=${info.status ?? "?"} — ${info.title}: ${info.hint}`
     );
     await prisma.message.update({ where: { id: messageId }, data: { needsHostReply: true } });
     return;

@@ -24,6 +24,7 @@ model User {
   properties Property[]
   messages   Message[]  @relation("SentMessages")
   aiSettings AiSettings?
+  aiHealth   AiHealth?
   ttlockAccount TTLockAccount?
   beds24Account Beds24Account?
   smoobuAccount SmoobuAccount?
@@ -457,6 +458,34 @@ model AiSettings {
   user   User   @relation(fields: [userId], references: [id])
 
   templates AiTemplate[]
+}
+
+// Live health of the Anthropic API used by the AI assistant. One row per user,
+// updated after every AI call. Lets the app show whether the assistant is
+// working, when it last succeeded, and how much rate-limit headroom is left —
+// and lets us email the owner the moment the API blocks a reply (rate limit
+// hit, credits/spend cap exhausted, or a bad key). Note: Anthropic exposes
+// rate-limit headroom on each response, but NOT a "remaining prepaid credit $"
+// endpoint — so credit exhaustion is detected when it first bites, not before.
+model AiHealth {
+  id               String    @id @default(cuid())
+  status           String    @default("unknown") // ok | error | unknown
+  lastSuccessAt    DateTime?
+  lastErrorAt      DateTime?
+  lastErrorType    String? // rate_limit | billing | auth | overloaded | other
+  lastErrorMessage String?
+  // Rate-limit headroom from the most recent response headers
+  reqRemaining     Int?
+  tokensRemaining  Int?
+  tokensLimit      Int?
+  resetAt          DateTime?
+  // Debounces alert emails so one outage doesn't flood the inbox
+  lastAlertAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model AiTemplate {

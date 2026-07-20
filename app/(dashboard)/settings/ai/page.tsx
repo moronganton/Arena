@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
-import { Bot, Save, TestTube, RefreshCw } from "lucide-react";
+import { Save, TestTube, RefreshCw, CheckCircle2, AlertTriangle, HelpCircle, Gauge } from "lucide-react";
 
 interface AiSettings {
   id?: string;
@@ -10,6 +10,37 @@ interface AiSettings {
   language: string;
   customInstructions?: string;
 }
+
+interface AiHealth {
+  status: "ok" | "error" | "unknown";
+  lastSuccessAt: string | null;
+  lastErrorAt: string | null;
+  lastErrorType: string | null;
+  lastErrorMessage: string | null;
+  reqRemaining: number | null;
+  tokensRemaining: number | null;
+  tokensLimit: number | null;
+  resetAt: string | null;
+}
+
+function timeAgo(iso: string | null): string {
+  if (!iso) return "never";
+  const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+  return `${Math.floor(s / 86400)} d ago`;
+}
+
+const ERROR_HELP: Record<string, string> = {
+  rate_limit:
+    "Too many requests/tokens per minute for your usage tier. It usually clears within a minute — to raise the ceiling, increase your tier in the Anthropic console → Limits.",
+  billing:
+    "Your prepaid balance is exhausted or the spend cap was reached. Top up in the Anthropic console → Billing, and turn on auto-reload so it never runs out mid-conversation.",
+  auth: "The ANTHROPIC_API_KEY is missing, wrong, or revoked. Set a valid key in Railway → Variables.",
+  overloaded: "Anthropic's API was briefly overloaded. This clears on its own and the assistant retries automatically.",
+  other: "The AI request failed unexpectedly. Check the server logs for details.",
+};
 
 const SAMPLE_QUESTIONS = [
   "What is the WiFi password?",
@@ -32,6 +63,18 @@ export default function AiSettingsPage() {
   const [testMessage, setTestMessage] = useState("");
   const [testResult, setTestResult] = useState<{ message: string; confidence: number; shouldReply: boolean } | null>(null);
   const [testing, setTesting] = useState(false);
+  const [health, setHealth] = useState<AiHealth | null>(null);
+  const [refreshingHealth, setRefreshingHealth] = useState(false);
+
+  async function loadHealth() {
+    setRefreshingHealth(true);
+    try {
+      const r = await fetch("/api/ai/health");
+      if (r.ok) setHealth(await r.json());
+    } finally {
+      setRefreshingHealth(false);
+    }
+  }
 
   useEffect(() => {
     fetch("/api/ai")
@@ -39,6 +82,7 @@ export default function AiSettingsPage() {
       .then((data) => {
         if (data) setSettings(data);
       });
+    loadHealth();
   }, []);
 
   async function saveSettings() {
@@ -89,6 +133,9 @@ export default function AiSettingsPage() {
           <span className="text-sm text-indigo-600 font-medium">Claude AI</span>
         </div>
       </div>
+
+      {/* AI Status — live health of the Anthropic API behind the assistant */}
+      <AiStatusCard health={health} onRefresh={loadHealth} refreshing={refreshingHealth} />
 
       {/* Settings */}
       <div className="bg-white rounded-2xl border border-slate-100 p-6 mb-6">
@@ -240,6 +287,117 @@ export default function AiSettingsPage() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function AiStatusCard({
+  health,
+  onRefresh,
+  refreshing,
+}: {
+  health: AiHealth | null;
+  onRefresh: () => void;
+  refreshing: boolean;
+}) {
+  const status = health?.status ?? "unknown";
+  const isError = status === "error";
+  const isOk = status === "ok";
+
+  const tone = isError
+    ? { bg: "bg-rose-50", border: "border-rose-200", dot: "bg-rose-500", text: "text-rose-700", label: "Paused" }
+    : isOk
+    ? { bg: "bg-emerald-50", border: "border-emerald-200", dot: "bg-emerald-500", text: "text-emerald-700", label: "Working" }
+    : { bg: "bg-slate-50", border: "border-slate-200", dot: "bg-slate-400", text: "text-slate-600", label: "No activity yet" };
+
+  const Icon = isError ? AlertTriangle : isOk ? CheckCircle2 : HelpCircle;
+
+  // Rate-limit headroom as a percentage of this minute's token budget
+  const pct =
+    health?.tokensRemaining != null && health?.tokensLimit
+      ? Math.max(0, Math.min(100, Math.round((health.tokensRemaining / health.tokensLimit) * 100)))
+      : null;
+  const barColor = pct == null ? "bg-slate-300" : pct < 15 ? "bg-rose-500" : pct < 40 ? "bg-amber-500" : "bg-emerald-500";
+
+  return (
+    <div className={`rounded-2xl border ${tone.border} ${tone.bg} p-6 mb-6`}>
+      <div className="flex items-start justify-between mb-4">
+        <div className="flex items-center gap-2.5">
+          <Icon className={`w-5 h-5 ${tone.text}`} />
+          <div>
+            <div className="flex items-center gap-2">
+              <span className={`w-2 h-2 rounded-full ${tone.dot} ${isOk ? "animate-pulse" : ""}`} />
+              <h2 className={`font-semibold ${tone.text}`}>AI Status — {tone.label}</h2>
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">Live health of the Claude API that powers guest replies</p>
+          </div>
+        </div>
+        <button
+          onClick={onRefresh}
+          disabled={refreshing}
+          className="flex items-center gap-1.5 text-xs text-slate-600 border border-slate-200 bg-white px-2.5 py-1.5 rounded-lg hover:border-indigo-300 hover:text-indigo-600 transition disabled:opacity-50"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
+          Refresh
+        </button>
+      </div>
+
+      {/* When it's blocked, spell out exactly what's wrong and what to do */}
+      {isError && health?.lastErrorType && (
+        <div className="bg-white rounded-xl border border-rose-200 p-4 mb-4">
+          <p className="font-medium text-rose-700 text-sm">{health.lastErrorMessage || "AI reply failed"}</p>
+          <p className="text-sm text-slate-600 mt-1">{ERROR_HELP[health.lastErrorType] ?? ERROR_HELP.other}</p>
+          {(health.lastErrorType === "billing" || health.lastErrorType === "rate_limit") && (
+            <a
+              href={health.lastErrorType === "billing" ? "https://console.anthropic.com/settings/billing" : "https://console.anthropic.com/settings/limits"}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-block mt-2 text-xs font-medium bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700 transition"
+            >
+              Open Anthropic console →
+            </a>
+          )}
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-3 text-sm">
+        <div className="bg-white rounded-xl border border-slate-100 p-3">
+          <p className="text-xs text-slate-500">Last successful reply</p>
+          <p className="font-semibold text-slate-800 mt-0.5">{timeAgo(health?.lastSuccessAt ?? null)}</p>
+        </div>
+        <div className="bg-white rounded-xl border border-slate-100 p-3">
+          <p className="text-xs text-slate-500">Last problem</p>
+          <p className="font-semibold text-slate-800 mt-0.5">{health?.lastErrorAt ? timeAgo(health.lastErrorAt) : "none"}</p>
+        </div>
+      </div>
+
+      {/* Rate-limit headroom — how close we are to the per-minute API ceiling */}
+      <div className="bg-white rounded-xl border border-slate-100 p-3 mt-3">
+        <div className="flex items-center justify-between mb-1.5">
+          <span className="flex items-center gap-1.5 text-xs text-slate-500">
+            <Gauge className="w-3.5 h-3.5" /> Rate-limit headroom (this minute)
+          </span>
+          <span className="text-xs font-semibold text-slate-700">
+            {pct != null ? `${pct}%` : health?.tokensRemaining != null ? `${health.tokensRemaining.toLocaleString()} tokens` : "—"}
+          </span>
+        </div>
+        <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+          <div className={`h-full ${barColor} transition-all`} style={{ width: `${pct ?? 0}%` }} />
+        </div>
+        <p className="text-[11px] text-slate-400 mt-1.5">
+          Refills every minute. Low headroom just means high traffic right now — the assistant auto-retries when it clears.
+        </p>
+      </div>
+
+      <p className="text-xs text-slate-500 mt-4 leading-relaxed">
+        You&apos;ll get an <strong>email the moment the AI is blocked</strong> by a rate limit, empty credits, or a bad key —
+        so you can top up before guests notice. Anthropic doesn&apos;t expose a live &quot;remaining balance&quot; number, so the
+        surest prevention is turning on <strong>auto-reload</strong> in the{" "}
+        <a href="https://console.anthropic.com/settings/billing" target="_blank" rel="noreferrer" className="text-indigo-600 underline">
+          Anthropic console → Billing
+        </a>
+        . Note: this is your Anthropic <strong>API</strong> account (per-token), separate from any Claude Pro subscription.
+      </p>
     </div>
   );
 }

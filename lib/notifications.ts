@@ -199,3 +199,54 @@ export async function sendMessageToGuest(params: MessageNotificationParams): Pro
     html,
   });
 }
+
+interface AiHealthAlertParams {
+  ownerEmail: string;
+  ownerName?: string | null;
+  title: string;
+  hint: string;
+  errorType: string;
+}
+
+// Alert the host that the AI assistant just got blocked by the Anthropic API
+// (rate limit hit, out of credits, or bad key) so they can fix it fast. This is
+// the "tell me when the credit is close to exhausted" signal — it fires the
+// moment a reply is actually blocked, because Anthropic exposes no advance
+// "remaining balance" reading to warn on beforehand.
+export async function sendAiHealthAlert(params: AiHealthAlertParams): Promise<void> {
+  const { ownerEmail, ownerName, title, hint, errorType } = params;
+
+  const consoleLink =
+    errorType === "billing"
+      ? "https://console.anthropic.com/settings/billing"
+      : errorType === "rate_limit"
+      ? "https://console.anthropic.com/settings/limits"
+      : "https://console.anthropic.com/settings/keys";
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+      <h2 style="color: #b91c1c;">⚠️ Your AI assistant is paused — ${title}</h2>
+      <p>${ownerName ? `Hi ${ownerName},` : "Hi,"}</p>
+      <p>StayHQ just tried to answer a guest and the Anthropic API blocked it. Until this is resolved, guests may not get automatic replies.</p>
+      <div style="background: #fef2f2; border-left: 4px solid #b91c1c; padding: 16px; margin: 16px 0; border-radius: 4px;">
+        <p style="margin: 0 0 8px; font-weight: bold; color: #7f1d1d;">${title}</p>
+        <p style="margin: 0; color: #7f1d1d;">${hint}</p>
+      </div>
+      <p style="margin: 24px 0;">
+        <a href="${consoleLink}" style="background: #4f46e5; color: white; padding: 12px 20px; border-radius: 8px; text-decoration: none; font-weight: bold;">Open Anthropic Console</a>
+      </p>
+      <p style="color: #666; font-size: 13px;">Tip: enabling <strong>auto-reload</strong> in the Anthropic console (Billing → Auto-reload) tops your balance up automatically so credit never runs out mid-conversation.</p>
+      <p style="color: #999; font-size: 12px;">Note: this is your Anthropic <strong>API</strong> account (billed per token) — it's separate from any Claude Pro subscription. You'll get at most one of these emails every 30 minutes.</p>
+    </body>
+    </html>
+  `;
+
+  await getResend().emails.send({
+    from: FROM,
+    to: ownerEmail,
+    subject: `⚠️ StayHQ AI paused — ${title}`,
+    html,
+  });
+}
