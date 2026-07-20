@@ -192,7 +192,35 @@ export async function deliverAiMessage(messageId: string): Promise<boolean> {
 // - AI disabled → do nothing
 // - AI enabled, auto-reply OFF (testing) → create a DRAFT for host approval
 // - AI enabled, auto-reply ON → send the reply automatically
+//
+// Wrapped so any unexpected failure (not just the AI-call failure already
+// handled inside) can never silently drop a guest message: callers that loop
+// over several new messages (on-demand sync, webhook sync) must not have one
+// bad message abort the rest, and the host must always end up notified.
 export async function processIncomingMessage(messageId: string): Promise<void> {
+  try {
+    await processIncomingMessageImpl(messageId);
+  } catch (err) {
+    console.error(`[ai] message ${messageId}: unexpected failure in processIncomingMessage:`, err);
+    try {
+      const message = await prisma.message.update({
+        where: { id: messageId },
+        data: { needsHostReply: true },
+        include: { reservation: { include: { property: true, guest: true } } },
+      });
+      await notifyUser(message.reservation.property.ownerId, {
+        type: "guest_reply",
+        title: `${message.reservation.guest.name} needs a reply`,
+        body: message.body.replace(/\s+/g, " ").trim().slice(0, 140),
+        link: `/messages?reservationId=${message.reservation.id}`,
+      });
+    } catch (fallbackErr) {
+      console.error(`[ai] message ${messageId}: fallback notify also failed:`, fallbackErr);
+    }
+  }
+}
+
+async function processIncomingMessageImpl(messageId: string): Promise<void> {
   const message = await prisma.message.findUnique({
     where: { id: messageId },
     include: {
