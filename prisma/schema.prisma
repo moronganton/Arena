@@ -28,6 +28,44 @@ model User {
   ttlockAccount TTLockAccount?
   beds24Account Beds24Account?
   smoobuAccount SmoobuAccount?
+  notifications      Notification[]
+  pushSubscriptions  PushSubscription[]
+}
+
+// An in-app notification shown in the bell menu. Created for events the host
+// should notice — a guest needing a reply, the AI getting paused, a message
+// that failed to reach the guest. Optionally also delivered as a web push.
+model Notification {
+  id        String   @id @default(cuid())
+  type      String   // guest_reply | ai_paused | delivery_failed | checkout | info
+  title     String
+  body      String
+  link      String? // in-app path to open when tapped, e.g. /messages?reservationId=...
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@index([userId, createdAt])
+}
+
+// A browser/PWA push subscription (one per installed device that opted in).
+// Used to send Web Push notifications so alerts reach the phone even when the
+// app is closed. Dead subscriptions are pruned when a push returns 404/410.
+model PushSubscription {
+  id        String   @id @default(cuid())
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 // LEGACY — Beds24 integration was removed in favor of Smoobu. The model is

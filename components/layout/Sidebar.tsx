@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { cn } from "@/lib/utils";
+import { NotificationBell } from "@/components/notifications/NotificationBell";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -45,13 +46,14 @@ export function Sidebar() {
 
   return (
     <aside className="hidden lg:flex w-64 min-h-screen bg-sidebar flex-col">
-      <div className="p-6 border-b border-sidebar-border">
+      <div className="p-6 border-b border-sidebar-border flex items-center justify-between">
         <Link href="/dashboard" className="flex items-center gap-3">
           <div className="w-8 h-8 bg-sidebar-primary rounded-lg flex items-center justify-center">
             <Building2 className="w-5 h-5 text-white" />
           </div>
           <span className="text-sidebar-foreground font-bold text-lg">StayHQ</span>
         </Link>
+        <NotificationBell />
       </div>
 
       <nav className="flex-1 p-4 space-y-1">

@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { sendAiHealthAlert } from "@/lib/notifications";
+import { notifyUser } from "@/lib/notify";
 
 // How long to wait before sending another alert email for the same account,
 // so a burst of failures (or a long outage) doesn't flood the owner's inbox.
@@ -151,6 +152,13 @@ export async function recordAiFailure(userId: string, err: unknown): Promise<Cla
       !existing?.lastAlertAt || Date.now() - existing.lastAlertAt.getTime() > ALERT_DEBOUNCE_MS;
     if (info.alert && dueForAlert) {
       const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true, name: true } });
+      // In-app + push notification (fires regardless of whether email is set up)
+      await notifyUser(userId, {
+        type: "ai_paused",
+        title: `AI paused — ${info.title}`,
+        body: info.hint,
+        link: "/settings/ai",
+      });
       if (user?.email) {
         try {
           await sendAiHealthAlert({
@@ -160,11 +168,11 @@ export async function recordAiFailure(userId: string, err: unknown): Promise<Cla
             hint: info.hint,
             errorType: info.type,
           });
-          await prisma.aiHealth.update({ where: { userId }, data: { lastAlertAt: new Date() } });
         } catch (mailErr) {
           console.error("[ai-health] alert email failed:", mailErr);
         }
       }
+      await prisma.aiHealth.update({ where: { userId }, data: { lastAlertAt: new Date() } });
     }
   } catch (dbErr) {
     console.error("[ai-health] recordAiFailure failed:", dbErr);

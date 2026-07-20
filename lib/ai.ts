@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { sendSmoobuGuestMessage } from "@/lib/channels/smoobu-core";
 import { sendMessageToGuest } from "@/lib/notifications";
 import { recordAiSuccess, recordAiFailure, readRateLimitHeaders } from "@/lib/ai-health";
+import { notifyUser } from "@/lib/notify";
 
 // Lazy init: a missing ANTHROPIC_API_KEY must never crash module import
 // (which would take down message sync and webhooks with it).
@@ -159,6 +160,12 @@ export async function deliverAiMessage(messageId: string): Promise<void> {
         where: { id: message.id },
         data: { channelFailed: true, channelError: (err instanceof Error ? err.message : String(err)).slice(0, 300) },
       });
+      await notifyUser(reservation.property.ownerId, {
+        type: "delivery_failed",
+        title: "Reply didn't reach the guest",
+        body: `Your AI reply to ${reservation.guest.name} (${reservation.property.name}) failed to send. Open the thread to retry.`,
+        link: `/messages?reservationId=${reservation.id}`,
+      });
     }
   }
   if (reservation.guest.email) {
@@ -286,6 +293,12 @@ export async function processIncomingMessage(messageId: string): Promise<void> {
     );
     // The AI is standing down — highlight the message so the host replies
     await prisma.message.update({ where: { id: messageId }, data: { needsHostReply: true } });
+    await notifyUser(reservation.property.ownerId, {
+      type: "guest_reply",
+      title: `${reservation.guest.name} needs a reply`,
+      body: message.body.replace(/\s+/g, " ").trim().slice(0, 140),
+      link: `/messages?reservationId=${reservation.id}`,
+    });
     return;
   }
 
