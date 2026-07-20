@@ -23,6 +23,8 @@ export default function SmoobuPage() {
   const [tokenLabel, setTokenLabel] = useState("");
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState("");
+  const [showKeyForm, setShowKeyForm] = useState(false); // reveal the form to swap keys while connected
+  const [keyUpdated, setKeyUpdated] = useState(false);
 
   const [smoobuApartments, setSmoobuApartments] = useState<SmoobuApartment[]>([]);
   const [stayhqProperties, setStayhqProperties] = useState<StayhqProperty[]>([]);
@@ -91,6 +93,7 @@ export default function SmoobuPage() {
   async function connect() {
     setConnecting(true);
     setError("");
+    const wasConnected = connected;
     const res = await fetch("/api/smoobu/account", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -100,6 +103,13 @@ export default function SmoobuPage() {
     if (res.ok) {
       setConnected(true);
       setApiKey("");
+      setTokenLabel("");
+      setShowKeyForm(false);
+      if (wasConnected) {
+        // Swapped the key on an already-connected account — mappings are kept
+        setKeyUpdated(true);
+        setTimeout(() => setKeyUpdated(false), 4000);
+      }
       await loadProperties();
     } else {
       setError(data.error || "Connection failed");
@@ -175,18 +185,71 @@ export default function SmoobuPage() {
         {connected === null ? (
           <p className="text-sm text-slate-400 mt-3">Loading...</p>
         ) : connected ? (
-          <div className="flex items-center justify-between mt-3">
-            <div className="flex items-center gap-2 text-sm">
-              <span className="w-2 h-2 rounded-full bg-green-500"></span>
-              <span className="text-slate-700">Connected to Smoobu</span>
+          <div className="mt-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-sm">
+                <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                <span className="text-slate-700">Connected to Smoobu</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => { setShowKeyForm((v) => !v); setError(""); }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-lg text-xs font-medium transition"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  {showKeyForm ? "Cancel" : "Update API key"}
+                </button>
+                <button
+                  onClick={disconnect}
+                  className="flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-lg text-xs font-medium transition"
+                >
+                  <Unlink className="w-3.5 h-3.5" />
+                  Disconnect
+                </button>
+              </div>
             </div>
-            <button
-              onClick={disconnect}
-              className="flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-lg text-xs font-medium transition"
-            >
-              <Unlink className="w-3.5 h-3.5" />
-              Disconnect
-            </button>
+
+            {keyUpdated && (
+              <div className="mt-3 px-3 py-2 rounded-lg text-xs font-medium bg-green-50 text-green-700">
+                API key updated. Your property mapping was kept — send a test message to check delivery.
+              </div>
+            )}
+
+            {showKeyForm && (
+              <div className="mt-4 border-t border-slate-100 pt-4">
+                <p className="text-sm text-slate-500 mb-3">
+                  Paste the new key&apos;s <strong>Secret</strong> (and its <strong>Label</strong>, e.g.
+                  usr_live_…, if it has one). This replaces the stored credentials without touching your
+                  property mapping.
+                </p>
+                {error && (
+                  <div className="mb-3 px-3 py-2 rounded-lg text-xs font-medium bg-red-50 text-red-700">{error}</div>
+                )}
+                <div className="space-y-3">
+                  <input
+                    type="password"
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    placeholder="Secret / API key (required)"
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <input
+                    value={tokenLabel}
+                    onChange={(e) => setTokenLabel(e.target.value)}
+                    placeholder="Label (optional — e.g. usr_live_...)"
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <button
+                    onClick={connect}
+                    disabled={connecting || !apiKey.trim()}
+                    className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2 rounded-xl text-sm font-medium transition"
+                  >
+                    {connecting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Link2 className="w-4 h-4" />}
+                    {connecting ? "Trying all auth methods..." : "Save new key"}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <div className="mt-3">
