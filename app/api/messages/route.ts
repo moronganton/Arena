@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { processIncomingMessage } from "@/lib/ai";
+import { processIncomingMessages } from "@/lib/ai";
 import { sendMessageToGuest } from "@/lib/notifications";
 import { sendSmoobuGuestMessage, syncSmoobuMessagesForReservation } from "@/lib/channels/smoobu-core";
 
@@ -23,9 +23,10 @@ export async function GET(req: NextRequest) {
     if (reservation?.externalId?.startsWith("smoobu-")) {
       try {
         const newIds = await syncSmoobuMessagesForReservation(session!.user!.id!, reservation);
-        for (const id of newIds) {
-          await processIncomingMessage(id);
-        }
+        // Batch as one AI turn (one combined reply, one relay send) — several
+        // separate replies back-to-back tend to never reach the guest on
+        // Airbnb/Booking.com even though each send succeeds against Smoobu's API.
+        await processIncomingMessages(newIds);
       } catch (err) {
         console.error("On-demand Smoobu message sync failed:", err);
       }

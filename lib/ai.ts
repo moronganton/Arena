@@ -188,41 +188,63 @@ export async function deliverAiMessage(messageId: string): Promise<boolean> {
   return channelOk;
 }
 
-// Process an inbound guest message:
+// Process one inbound guest message.
+export async function processIncomingMessage(messageId: string): Promise<void> {
+  await processIncomingMessages([messageId]);
+}
+
+// Process a batch of inbound guest messages (same reservation) as ONE turn:
 // - AI disabled → do nothing
 // - AI enabled, auto-reply OFF (testing) → create a DRAFT for host approval
 // - AI enabled, auto-reply ON → send the reply automatically
 //
+// Batching matters beyond convenience: Airbnb/Booking.com (via Smoobu) accept
+// a single reply per burst fine, but appear to silently suppress the guest
+// ever seeing it when a host integration fires several separate replies back
+// to back — even when each individual send succeeds against Smoobu's API with
+// no error. A guest asking 6 questions in 6 separate messages must produce ONE
+// combined reply and ONE relay send, the same as if they'd asked all 6 in a
+// single message (which already worked) — not 6 sends we can't get delivered.
+//
 // Wrapped so any unexpected failure (not just the AI-call failure already
 // handled inside) can never silently drop a guest message: callers that loop
 // over several new messages (on-demand sync, webhook sync) must not have one
-// bad message abort the rest, and the host must always end up notified.
-export async function processIncomingMessage(messageId: string): Promise<void> {
+// bad batch abort the rest, and the host must always end up notified.
+export async function processIncomingMessages(messageIds: string[]): Promise<void> {
+  if (messageIds.length === 0) return;
   try {
-    await processIncomingMessageImpl(messageId);
+    await processIncomingMessagesImpl(messageIds);
   } catch (err) {
-    console.error(`[ai] message ${messageId}: unexpected failure in processIncomingMessage:`, err);
+    console.error(`[ai] messages ${messageIds.join(",")}: unexpected failure in processIncomingMessages:`, err);
     try {
-      const message = await prisma.message.update({
-        where: { id: messageId },
+      await prisma.message.updateMany({
+        where: { id: { in: messageIds } },
         data: { needsHostReply: true },
+      });
+      const sample = await prisma.message.findUnique({
+        where: { id: messageIds[0] },
         include: { reservation: { include: { property: true, guest: true } } },
       });
-      await notifyUser(message.reservation.property.ownerId, {
-        type: "guest_reply",
-        title: `${message.reservation.guest.name} needs a reply`,
-        body: message.body.replace(/\s+/g, " ").trim().slice(0, 140),
-        link: `/messages?reservationId=${message.reservation.id}`,
-      });
+      if (sample) {
+        await notifyUser(sample.reservation.property.ownerId, {
+          type: "guest_reply",
+          title:
+            messageIds.length > 1
+              ? `${sample.reservation.guest.name} sent ${messageIds.length} messages — needs a reply`
+              : `${sample.reservation.guest.name} needs a reply`,
+          body: sample.body.replace(/\s+/g, " ").trim().slice(0, 140),
+          link: `/messages?reservationId=${sample.reservation.id}`,
+        });
+      }
     } catch (fallbackErr) {
-      console.error(`[ai] message ${messageId}: fallback notify also failed:`, fallbackErr);
+      console.error(`[ai] messages ${messageIds.join(",")}: fallback notify also failed:`, fallbackErr);
     }
   }
 }
 
-async function processIncomingMessageImpl(messageId: string): Promise<void> {
-  const message = await prisma.message.findUnique({
-    where: { id: messageId },
+async function processIncomingMessagesImpl(messageIds: string[]): Promise<void> {
+  const messages = await prisma.message.findMany({
+    where: { id: { in: messageIds }, direction: "INBOUND" },
     include: {
       reservation: {
         include: {
@@ -232,26 +254,23 @@ async function processIncomingMessageImpl(messageId: string): Promise<void> {
         },
       },
     },
+    orderBy: { createdAt: "asc" },
   });
 
-  if (!message || message.direction !== "INBOUND") {
-    console.log(`[ai] skipped messageId ${messageId}: not inbound or not found`);
+  if (messages.length === 0) {
+    console.log(`[ai] skipped messageIds ${messageIds.join(",")}: none inbound or found`);
     return;
   }
-  console.log(`[ai] processing inbound message ${messageId}`);
-
-  const { reservation } = message;
+  const reservation = messages[0].reservation;
+  console.log(`[ai] processing ${messages.length} inbound message(s): ${messageIds.join(",")}`);
 
   const aiSettings = await prisma.aiSettings.findFirst({
     where: { userId: reservation.property.ownerId, enabled: true },
   });
   if (!aiSettings) {
-    console.log(`[ai] skipped message ${messageId}: AI assistant disabled`);
+    console.log(`[ai] skipped messages ${messageIds.join(",")}: AI assistant disabled`);
     return;
   }
-
-  // Allow multiple AI drafts per reservation; they can be approved/discarded independently
-  // No need to check for pending drafts — just generate a response to this message
 
   const knowledgeEntries = await prisma.propertyKnowledge.findMany({
     where: { propertyId: reservation.propertyId, active: true },
@@ -268,7 +287,7 @@ async function processIncomingMessageImpl(messageId: string): Promise<void> {
       reservationId: reservation.id,
       isDraft: false,
       channel: { not: "INTERNAL" }, // private host notes must never reach the AI/guest
-      id: { not: message.id },
+      id: { notIn: messageIds },
     },
     orderBy: { createdAt: "desc" },
     take: 8,
@@ -277,6 +296,13 @@ async function processIncomingMessageImpl(messageId: string): Promise<void> {
     .reverse()
     .map((m) => `${m.direction === "INBOUND" ? "Guest" : "Host"}: ${m.body.slice(0, 300)}`)
     .join("\n");
+
+  // Multiple new messages become ONE guest turn — same shape as a guest
+  // asking several questions in a single message, which already works.
+  const combinedGuestText =
+    messages.length === 1
+      ? messages[0].body
+      : messages.map((m, i) => `${i + 1}. ${m.body}`).join("\n");
 
   const latestCode = reservation.accessCodes[0];
   const context: ReservationContext = {
@@ -295,41 +321,46 @@ async function processIncomingMessageImpl(messageId: string): Promise<void> {
   let result: AutoReplyResult;
   try {
     result = await generateAutoReply(
-      message.body,
+      combinedGuestText,
       context,
       aiSettings.customInstructions || undefined,
       reservation.property.ownerId
     );
   } catch (err) {
-    // AI unavailable — flag the message for the host so it isn't left unanswered.
+    // AI unavailable — flag the messages for the host so they aren't left unanswered.
     // recordAiFailure classifies the cause (these are the Anthropic API's OWN
     // limits — rate limit, exhausted credits, spend cap, or a bad key — NOT the
     // Claude Pro subscription), stores it for the AI Status panel, and emails the
     // owner if it's an actionable outage (debounced to once per 30 min).
     const info = await recordAiFailure(reservation.property.ownerId, err);
     console.error(
-      `[ai] message ${messageId}: generation failed — type=${info.type} status=${info.status ?? "?"} — ${info.title}: ${info.hint}`
+      `[ai] messages ${messageIds.join(",")}: generation failed — type=${info.type} status=${info.status ?? "?"} — ${info.title}: ${info.hint}`
     );
-    await prisma.message.update({ where: { id: messageId }, data: { needsHostReply: true } });
+    await prisma.message.updateMany({ where: { id: { in: messageIds } }, data: { needsHostReply: true } });
     return;
   }
 
   console.log(
-    `[ai] message ${messageId}: shouldReply=${result.shouldReply} confidence=${result.confidence}` +
+    `[ai] messages ${messageIds.join(",")}: shouldReply=${result.shouldReply} confidence=${result.confidence}` +
     (result.reasoning ? ` — ${result.reasoning}` : "")
   );
 
+  const guestPreview = combinedGuestText.replace(/\s+/g, " ").trim().slice(0, 140);
+
   if (!result.shouldReply || result.confidence < aiSettings.confidenceThreshold) {
     console.log(
-      `[ai] message ${messageId}: not replying (shouldReply=${result.shouldReply}, ` +
+      `[ai] messages ${messageIds.join(",")}: not replying (shouldReply=${result.shouldReply}, ` +
       `confidence=${result.confidence} vs threshold=${aiSettings.confidenceThreshold})`
     );
-    // The AI is standing down — highlight the message so the host replies
-    await prisma.message.update({ where: { id: messageId }, data: { needsHostReply: true } });
+    // The AI is standing down — highlight the messages so the host replies
+    await prisma.message.updateMany({ where: { id: { in: messageIds } }, data: { needsHostReply: true } });
     await notifyUser(reservation.property.ownerId, {
       type: "guest_reply",
-      title: `${reservation.guest.name} needs a reply`,
-      body: message.body.replace(/\s+/g, " ").trim().slice(0, 140),
+      title:
+        messages.length > 1
+          ? `${reservation.guest.name} sent ${messages.length} messages — needs a reply`
+          : `${reservation.guest.name} needs a reply`,
+      body: guestPreview,
       link: `/messages?reservationId=${reservation.id}`,
     });
     return;
@@ -344,21 +375,24 @@ async function processIncomingMessageImpl(messageId: string): Promise<void> {
       isAiGenerated: true,
       isDraft,
       isRead: true,
-      reservationId: message.reservationId,
+      reservationId: reservation.id,
     },
   });
-  console.log(`[ai] message ${messageId}: ${isDraft ? "draft" : "auto-reply"} ${reply.id} created`);
-  if (message.needsHostReply) {
-    // Answered after all (e.g. reprocessed after a repair) — clear the flag
-    await prisma.message.update({ where: { id: messageId }, data: { needsHostReply: false } });
-  }
+  console.log(`[ai] messages ${messageIds.join(",")}: ${isDraft ? "draft" : "auto-reply"} ${reply.id} created`);
+  // Clear the flag on every batched message this reply answers (e.g. reprocessed after a repair)
+  await prisma.message.updateMany({
+    where: { id: { in: messageIds }, needsHostReply: true },
+    data: { needsHostReply: false },
+  });
 
-  const guestPreview = message.body.replace(/\s+/g, " ").trim().slice(0, 140);
   if (isDraft) {
     // Auto-reply is off — the AI wrote a draft, but a human still has to send it
     await notifyUser(reservation.property.ownerId, {
       type: "guest_reply",
-      title: `${reservation.guest.name} messaged you — AI drafted a reply`,
+      title:
+        messages.length > 1
+          ? `${reservation.guest.name} sent ${messages.length} messages — AI drafted a reply`
+          : `${reservation.guest.name} messaged you — AI drafted a reply`,
       body: guestPreview,
       link: `/messages?reservationId=${reservation.id}`,
     });
@@ -369,7 +403,10 @@ async function processIncomingMessageImpl(messageId: string): Promise<void> {
     if (delivered) {
       await notifyUser(reservation.property.ownerId, {
         type: "info",
-        title: `${reservation.guest.name} messaged you — AI replied automatically`,
+        title:
+          messages.length > 1
+            ? `${reservation.guest.name} sent ${messages.length} messages — AI replied automatically`
+            : `${reservation.guest.name} messaged you — AI replied automatically`,
         body: guestPreview,
         link: `/messages?reservationId=${reservation.id}`,
       });
