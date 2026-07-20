@@ -60,15 +60,35 @@ export function NotificationBell() {
     }
   }, []);
 
-  // Register the service worker + poll for new notifications
-  useEffect(() => {
-    if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/sw.js").catch((err) => {
-        console.error("[push] service worker registration failed:", err);
-        setPushError("Service worker failed to register: " + (err?.message || String(err)));
+  // Push a subscription (existing or newly created) to the server. Shared by
+  // the silent self-heal on load and the manual "Enable push" tap.
+  async function subscribeAndSave(reg: ServiceWorkerRegistration): Promise<void> {
+    const vapidRes = await fetch("/api/push/vapid");
+    if (!vapidRes.ok) throw new Error(`Couldn't reach the server (HTTP ${vapidRes.status})`);
+    const vapid = await vapidRes.json();
+    if (!vapid.key) throw new Error("The server doesn't have push keys configured yet (VAPID_PUBLIC_KEY missing).");
+
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(vapid.key),
       });
     }
 
+    const saveRes = await fetch("/api/push/subscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(sub),
+    });
+    if (!saveRes.ok) {
+      const errBody = await saveRes.json().catch(() => ({}));
+      throw new Error(errBody.error || `Server rejected the subscription (HTTP ${saveRes.status})`);
+    }
+  }
+
+  // Register the service worker + poll for new notifications
+  useEffect(() => {
     const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
     // iOS Safari only exposes Notification/PushManager to a PWA that's been
     // added to the Home Screen and opened from there — a regular tab has
@@ -77,11 +97,29 @@ export function NotificationBell() {
       window.matchMedia("(display-mode: standalone)").matches ||
       (navigator as unknown as { standalone?: boolean }).standalone === true;
 
-    if (!("Notification" in window) || !("PushManager" in window)) {
+    if (!("Notification" in window) || !("PushManager" in window) || !("serviceWorker" in navigator)) {
       setPushState(isIOS && !isStandalone ? "ios-not-installed" : "unsupported");
     } else {
-      setPushState(Notification.permission as "default" | "granted" | "denied");
+      const permission = Notification.permission as "default" | "granted" | "denied";
+      setPushState(permission);
+
+      (async () => {
+        try {
+          const reg = await navigator.serviceWorker.register("/sw.js");
+          await navigator.serviceWorker.ready;
+          // Permission was already granted (e.g. a previous attempt whose
+          // subscribe/save silently failed) — that state hides the "Enable
+          // push" banner entirely, so self-heal instead of leaving it stuck.
+          if (permission === "granted") {
+            await subscribeAndSave(reg);
+          }
+        } catch (err) {
+          console.error("[push] setup failed:", err);
+          setPushError((err as Error)?.message || String(err));
+        }
+      })();
     }
+
     load();
     const t = setInterval(load, 45000);
     return () => clearInterval(t);
@@ -130,44 +168,8 @@ export function NotificationBell() {
         setPushState(permission as "denied" | "default");
         return;
       }
-      const vapidRes = await fetch("/api/push/vapid");
-      if (!vapidRes.ok) throw new Error(`Couldn't reach the server (HTTP ${vapidRes.status})`);
-      const vapid = await vapidRes.json();
-      if (!vapid.key) {
-        // Push isn't configured on the server yet — permission is granted, but
-        // we can't subscribe. Leave it; in-app notifications still work.
-        setPushError("The server doesn't have push keys configured yet (VAPID_PUBLIC_KEY missing).");
-        setPushState("granted");
-        return;
-      }
-
-      let reg: ServiceWorkerRegistration;
-      try {
-        reg = await navigator.serviceWorker.ready;
-      } catch (err) {
-        throw new Error("Service worker never became ready: " + ((err as Error)?.message || String(err)));
-      }
-
-      // A stale subscription from a previous VAPID key pair can't be reused —
-      // the browser rejects a second subscribe() with a different key silently
-      // otherwise, so drop any existing one first.
-      const existing = await reg.pushManager.getSubscription();
-      if (existing) await existing.unsubscribe().catch(() => {});
-
-      const sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(vapid.key),
-      });
-
-      const saveRes = await fetch("/api/push/subscribe", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(sub),
-      });
-      if (!saveRes.ok) {
-        const errBody = await saveRes.json().catch(() => ({}));
-        throw new Error(errBody.error || `Server rejected the subscription (HTTP ${saveRes.status})`);
-      }
+      const reg = await navigator.serviceWorker.ready;
+      await subscribeAndSave(reg);
       setPushState("granted");
     } catch (err) {
       console.error("[push] enable failed:", err);
