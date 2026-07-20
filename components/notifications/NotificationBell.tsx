@@ -44,7 +44,8 @@ export function NotificationBell() {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<Notification[]>([]);
   const [unread, setUnread] = useState(0);
-  const [pushState, setPushState] = useState<"unsupported" | "default" | "granted" | "denied" | "busy">("default");
+  const [pushState, setPushState] = useState<"unsupported" | "ios-not-installed" | "default" | "granted" | "denied" | "busy">("default");
+  const [pushError, setPushError] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
@@ -62,10 +63,22 @@ export function NotificationBell() {
   // Register the service worker + poll for new notifications
   useEffect(() => {
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/sw.js").catch(() => {});
+      navigator.serviceWorker.register("/sw.js").catch((err) => {
+        console.error("[push] service worker registration failed:", err);
+        setPushError("Service worker failed to register: " + (err?.message || String(err)));
+      });
     }
+
+    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    // iOS Safari only exposes Notification/PushManager to a PWA that's been
+    // added to the Home Screen and opened from there — a regular tab has
+    // neither API, which otherwise looks identical to "unsupported browser".
+    const isStandalone =
+      window.matchMedia("(display-mode: standalone)").matches ||
+      (navigator as unknown as { standalone?: boolean }).standalone === true;
+
     if (!("Notification" in window) || !("PushManager" in window)) {
-      setPushState("unsupported");
+      setPushState(isIOS && !isStandalone ? "ios-not-installed" : "unsupported");
     } else {
       setPushState(Notification.permission as "default" | "granted" | "denied");
     }
@@ -110,32 +123,55 @@ export function NotificationBell() {
 
   async function enablePush() {
     setPushState("busy");
+    setPushError(null);
     try {
       const permission = await Notification.requestPermission();
       if (permission !== "granted") {
         setPushState(permission as "denied" | "default");
         return;
       }
-      const vapid = await fetch("/api/push/vapid").then((r) => r.json());
+      const vapidRes = await fetch("/api/push/vapid");
+      if (!vapidRes.ok) throw new Error(`Couldn't reach the server (HTTP ${vapidRes.status})`);
+      const vapid = await vapidRes.json();
       if (!vapid.key) {
         // Push isn't configured on the server yet — permission is granted, but
         // we can't subscribe. Leave it; in-app notifications still work.
+        setPushError("The server doesn't have push keys configured yet (VAPID_PUBLIC_KEY missing).");
         setPushState("granted");
         return;
       }
-      const reg = await navigator.serviceWorker.ready;
+
+      let reg: ServiceWorkerRegistration;
+      try {
+        reg = await navigator.serviceWorker.ready;
+      } catch (err) {
+        throw new Error("Service worker never became ready: " + ((err as Error)?.message || String(err)));
+      }
+
+      // A stale subscription from a previous VAPID key pair can't be reused —
+      // the browser rejects a second subscribe() with a different key silently
+      // otherwise, so drop any existing one first.
+      const existing = await reg.pushManager.getSubscription();
+      if (existing) await existing.unsubscribe().catch(() => {});
+
       const sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(vapid.key),
       });
-      await fetch("/api/push/subscribe", {
+
+      const saveRes = await fetch("/api/push/subscribe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(sub),
       });
+      if (!saveRes.ok) {
+        const errBody = await saveRes.json().catch(() => ({}));
+        throw new Error(errBody.error || `Server rejected the subscription (HTTP ${saveRes.status})`);
+      }
       setPushState("granted");
     } catch (err) {
-      console.error("Enable push failed:", err);
+      console.error("[push] enable failed:", err);
+      setPushError((err as Error)?.message || String(err));
       setPushState(Notification.permission as "default" | "granted" | "denied");
     }
   }
@@ -167,21 +203,36 @@ export function NotificationBell() {
           </div>
 
           {/* Push opt-in banner */}
-          {pushState !== "granted" && pushState !== "unsupported" && (
-            <button
-              onClick={enablePush}
-              disabled={pushState === "busy" || pushState === "denied"}
-              className="w-full flex items-start gap-2.5 px-4 py-3 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-70 text-left transition-colors border-b border-indigo-100"
-            >
-              <BellRing className="w-4 h-4 text-indigo-600 mt-0.5 flex-shrink-0" />
-              <span className="text-xs text-indigo-900 leading-snug">
-                {pushState === "denied"
-                  ? "Push is blocked in your browser settings. Allow notifications for this site to get phone alerts."
-                  : pushState === "busy"
-                  ? "Enabling…"
-                  : "Get alerts on your phone even when StayHQ is closed. Tap to enable push notifications."}
+          {pushState === "ios-not-installed" ? (
+            <div className="w-full flex items-start gap-2.5 px-4 py-3 bg-amber-50 border-b border-amber-100">
+              <BellRing className="w-4 h-4 text-amber-700 mt-0.5 flex-shrink-0" />
+              <span className="text-xs text-amber-900 leading-snug">
+                To get phone alerts on iPhone: tap Share → <strong>Add to Home Screen</strong>, then open StayHQ from
+                that icon (not from Safari) and enable push here again.
               </span>
-            </button>
+            </div>
+          ) : (
+            pushState !== "granted" && pushState !== "unsupported" && (
+              <button
+                onClick={enablePush}
+                disabled={pushState === "busy" || pushState === "denied"}
+                className="w-full flex items-start gap-2.5 px-4 py-3 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-70 text-left transition-colors border-b border-indigo-100"
+              >
+                <BellRing className="w-4 h-4 text-indigo-600 mt-0.5 flex-shrink-0" />
+                <span className="text-xs text-indigo-900 leading-snug">
+                  {pushState === "denied"
+                    ? "Push is blocked in your browser settings. Allow notifications for this site to get phone alerts."
+                    : pushState === "busy"
+                    ? "Enabling…"
+                    : "Get alerts on your phone even when StayHQ is closed. Tap to enable push notifications."}
+                </span>
+              </button>
+            )
+          )}
+          {pushError && (
+            <div className="w-full px-4 py-2.5 bg-rose-50 border-b border-rose-100 text-xs text-rose-700 leading-snug">
+              Couldn&apos;t enable push: {pushError}
+            </div>
           )}
 
           <div className="max-h-[380px] overflow-y-auto">
