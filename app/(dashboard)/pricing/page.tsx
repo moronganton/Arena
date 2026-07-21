@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
-import { Plus, Trash2, Edit, DollarSign } from "lucide-react";
+import Link from "next/link";
+import { Plus, Trash2, Edit, DollarSign, CalendarDays } from "lucide-react";
 
 interface Property {
   id: string;
@@ -108,18 +109,23 @@ export default function PricingPage() {
 
   return (
     <div className="p-4 md:p-8 max-w-5xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Pricing</h1>
           <p className="text-slate-500 text-sm mt-0.5">Manage rates and pricing rules</p>
         </div>
-        <button
-          onClick={() => setShowForm(true)}
-          className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition"
-        >
-          <Plus className="w-4 h-4" />
-          Add Rule
-        </button>
+        <div className="flex items-center gap-2">
+          <Link href="/pricing/calendar" className="flex items-center gap-2 border border-slate-200 text-slate-700 hover:bg-slate-50 px-4 py-2.5 rounded-xl text-sm font-medium transition">
+            <CalendarDays className="w-4 h-4" /> Live prices
+          </Link>
+          <button
+            onClick={() => setShowForm(true)}
+            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition"
+          >
+            <Plus className="w-4 h-4" />
+            Add Rule
+          </button>
+        </div>
       </div>
 
       {/* Property Selector */}

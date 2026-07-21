@@ -106,6 +106,37 @@ export async function smoobuPost(storedCred: string, path: string, bodyObj: unkn
   return res.json().catch(() => ({}));
 }
 
+export interface DayRate { price: number | null; minStay: number | null; available: number | null; }
+
+// Read the live rate calendar for one apartment from Smoobu (set by whatever
+// manages pricing there, e.g. PriceLabs). Read-only — never writes. The working
+// query format is apartments%5B%5D=<id> (encoded brackets), verified against
+// the account; other formats 401/422.
+export async function getSmoobuRates(
+  userId: string,
+  apartmentId: string,
+  startDate: string,
+  endDate: string
+): Promise<Record<string, DayRate>> {
+  const account = await prisma.smoobuAccount.findUnique({ where: { userId } });
+  if (!account) throw new Error("Smoobu not connected");
+
+  const path = `/rates?apartments%5B%5D=${apartmentId}&start_date=${startDate}&end_date=${endDate}`;
+  const data = await smoobuFetch(account.apiKey, path);
+  const apt: Record<string, { price?: number; min_length_of_stay?: number; available?: number }> =
+    data?.data?.[apartmentId] ?? data?.data?.[Number(apartmentId)] ?? {};
+
+  const out: Record<string, DayRate> = {};
+  for (const [date, v] of Object.entries(apt)) {
+    out[date] = {
+      price: typeof v?.price === "number" ? v.price : null,
+      minStay: typeof v?.min_length_of_stay === "number" ? v.min_length_of_stay : null,
+      available: typeof v?.available === "number" ? v.available : null,
+    };
+  }
+  return out;
+}
+
 // Pull the message thread for a Smoobu reservation and import any messages
 // StayHQ doesn't have yet. Returns the ids of newly imported inbound messages
 // so callers can hand them to the AI assistant.
