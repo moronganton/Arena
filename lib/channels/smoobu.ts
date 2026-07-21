@@ -315,3 +315,44 @@ export async function syncSmoobuBookings(userId: string): Promise<{
 
   return result;
 }
+
+// Pull new guest messages from Smoobu for one user's recent reservations and
+// run each through the AI. Shared by the background cron and the Messages tab's
+// on-load refresh, so new messages appear without waiting for a webhook or for
+// the host to open a specific thread.
+export async function syncUserSmoobuMessages(
+  userId: string,
+  limit = 60
+): Promise<{ checked: number; newMessages: number }> {
+  const account = await prisma.smoobuAccount.findUnique({ where: { userId } });
+  if (!account) return { checked: 0, newMessages: 0 };
+
+  const cutoff = new Date(Date.now() - 7 * 86400000);
+  const reservations = await prisma.reservation.findMany({
+    where: {
+      property: { ownerId: userId },
+      externalId: { startsWith: "smoobu-" },
+      status: { not: "CANCELLED" },
+      checkOut: { gte: cutoff },
+    },
+    select: { id: true, externalId: true },
+    orderBy: { checkIn: "asc" },
+    take: limit,
+  });
+
+  let checked = 0;
+  let newMessages = 0;
+  for (const r of reservations) {
+    checked++;
+    try {
+      const newIds = await syncSmoobuMessagesForReservation(userId, r);
+      for (const id of newIds) {
+        await processIncomingMessage(id);
+        newMessages++;
+      }
+    } catch (err) {
+      console.error(`[sync-messages] ${r.externalId} failed:`, err);
+    }
+  }
+  return { checked, newMessages };
+}
