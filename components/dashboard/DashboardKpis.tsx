@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { Building2, TrendingUp, PlaneLanding, Bot, Brush, Eye, EyeOff } from "lucide-react";
+import { Building2, TrendingUp, PlaneLanding, Bot, Brush, MessageSquareWarning, Eye, EyeOff } from "lucide-react";
 
 interface Props {
   properties: number;
@@ -10,6 +10,7 @@ interface Props {
   aiRepliesToday: number;
   cleaningDone: number;
   cleaningTotal: number;
+  needsReply: number;
 }
 
 function useHidden(key: string) {
@@ -20,14 +21,15 @@ function useHidden(key: string) {
 }
 
 function Tile({
-  icon: Icon, label, value, href, hidden, onToggle,
+  icon: Icon, label, value, href, hidden, onToggle, tone = "indigo",
 }: {
   icon: typeof Building2; label: string; value: React.ReactNode; href?: string;
-  hidden?: boolean; onToggle?: () => void;
+  hidden?: boolean; onToggle?: () => void; tone?: "indigo" | "rose";
 }) {
+  const toneCls = tone === "rose" ? "bg-rose-50 text-rose-600" : "bg-indigo-50 text-indigo-600";
   const inner = (
     <div className="bg-white rounded-xl border border-slate-100 p-2.5 flex items-center gap-2.5 h-full hover:border-indigo-200 transition-colors">
-      <span className="w-6 h-6 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+      <span className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 ${toneCls}`}>
         <Icon className="w-3.5 h-3.5" />
       </span>
       <div className="flex flex-col min-w-0 leading-tight">
@@ -48,17 +50,18 @@ function Tile({
   return href ? <Link href={href} className="block h-full">{inner}</Link> : inner;
 }
 
-export function DashboardKpis({ properties, revenue, checkInsToday, aiRepliesToday, cleaningDone, cleaningTotal }: Props) {
+export function DashboardKpis({ properties, revenue, checkInsToday, aiRepliesToday, cleaningDone, cleaningTotal, needsReply }: Props) {
   const [propHidden, togglePropHidden] = useHidden("dash.hide.properties");
   const [revHidden, toggleRevHidden] = useHidden("dash.hide.revenue");
 
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-5 gap-2 mb-4">
+    <div className="grid grid-cols-2 lg:grid-cols-6 gap-2 mb-4">
       <Tile icon={Building2} label="Properties" value={properties} hidden={propHidden} onToggle={togglePropHidden} />
       <Tile icon={TrendingUp} label="Revenue this month" value={revenue} hidden={revHidden} onToggle={toggleRevHidden} />
       <Tile icon={PlaneLanding} label="Check-ins today" value={checkInsToday} href="/calendar" />
       <Tile icon={Bot} label="AI replies today" value={aiRepliesToday} href="/messages" />
       <Tile icon={Brush} label="Cleaning done today" value={`${cleaningDone}/${cleaningTotal}`} href="/cleaning" />
+      <Tile icon={MessageSquareWarning} label="Needs your reply" value={needsReply} href="/messages" tone="rose" />
     </div>
   );
 }

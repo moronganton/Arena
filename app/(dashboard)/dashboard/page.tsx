@@ -2,7 +2,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { formatCurrency, formatShortDate, SOURCE_COLORS, SOURCE_LABELS } from "@/lib/utils";
 import Link from "next/link";
-import { ArrowRight, MessageSquare, ListChecks, CalendarRange } from "lucide-react";
+import { ArrowRight, MessageSquareWarning, Bot, ListChecks, CalendarRange } from "lucide-react";
 import { DashboardKpis } from "@/components/dashboard/DashboardKpis";
 import { OpenTasks, type Task } from "@/components/dashboard/OpenTasks";
 
@@ -21,7 +21,7 @@ async function getDashboardData(userId: string) {
   const [
     properties, monthRevenue, checkInsToday, aiRepliesToday,
     cleaningTotalToday, cleaningDoneToday,
-    attentionRaw, noteTasks, damageTasks, gapProps, gapRes, gapBlocks, recentReservations,
+    attentionRaw, needsReplyCount, aiRepliedRaw, noteTasks, damageTasks, gapProps, gapRes, gapBlocks, recentReservations,
   ] = await Promise.all([
     prisma.property.count({ where: { ownerId: userId, active: true } }),
     prisma.reservation.aggregate({
@@ -40,6 +40,14 @@ async function getDashboardData(userId: string) {
       where: { needsHostReply: true, direction: "INBOUND", reservation: { property: { ownerId: userId } } },
       include: { reservation: { select: { id: true, guest: { select: { name: true } }, property: { select: { name: true } } } } },
       orderBy: { createdAt: "desc" }, take: 8,
+    }),
+    prisma.message.count({
+      where: { needsHostReply: true, direction: "INBOUND", reservation: { property: { ownerId: userId } } },
+    }),
+    prisma.message.findMany({
+      where: { isAiGenerated: true, direction: "OUTBOUND", reservation: { property: { ownerId: userId } } },
+      include: { reservation: { select: { id: true, guest: { select: { name: true } }, property: { select: { name: true } } } } },
+      orderBy: { createdAt: "desc" }, take: 10,
     }),
     prisma.message.findMany({
       where: { channel: "INTERNAL", taskDone: false, reservation: { property: { ownerId: userId } } },
@@ -97,9 +105,14 @@ async function getDashboardData(userId: string) {
     properties,
     monthRevenue: monthRevenue._sum.totalAmount || 0,
     checkInsToday, aiRepliesToday, cleaningTotalToday, cleaningDoneToday,
+    needsReplyCount,
     attention: attentionRaw.map((m) => ({
       reservationId: m.reservation.id, property: m.reservation.property.name,
       guest: m.reservation.guest.name, question: m.body.replace(/\s+/g, " ").trim().slice(0, 120),
+    })),
+    aiReplied: aiRepliedRaw.map((m) => ({
+      reservationId: m.reservation.id, property: m.reservation.property.name,
+      guest: m.reservation.guest.name, reply: m.body.replace(/\s+/g, " ").trim().slice(0, 130),
     })),
     tasks: tasks.map(({ at: _at, ...t }) => t) as Task[],
     occupancy,
@@ -129,15 +142,16 @@ export default async function DashboardPage() {
         aiRepliesToday={d.aiRepliesToday}
         cleaningDone={d.cleaningDoneToday}
         cleaningTotal={d.cleaningTotalToday}
+        needsReply={d.needsReplyCount}
       />
 
-      {/* ⑥ needs reply + ⑦ open tasks */}
+      {/* ⑥ needs reply + AI replied (monitor how the AI answers) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
         <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
           <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-100">
-            <MessageSquare className="w-4 h-4 text-indigo-500" />
+            <MessageSquareWarning className="w-4 h-4 text-rose-500" />
             <span className="text-sm font-semibold text-slate-900">Needs your reply</span>
-            {d.attention.length > 0 && <span className="ml-auto text-[11px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">{d.attention.length}</span>}
+            {d.needsReplyCount > 0 && <span className="ml-auto text-[11px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded-full">{d.needsReplyCount}</span>}
           </div>
           {d.attention.length === 0 ? (
             <p className="px-4 py-8 text-center text-sm text-slate-400">No guest questions waiting. 🎉</p>
@@ -152,14 +166,35 @@ export default async function DashboardPage() {
           )}
         </div>
 
+        {/* AI replied — review how the assistant is answering (esp. at launch) */}
         <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
           <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-100">
-            <ListChecks className="w-4 h-4 text-indigo-500" />
-            <span className="text-sm font-semibold text-slate-900">Open tasks</span>
-            {d.tasks.length > 0 && <span className="ml-auto text-[11px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded-full">{d.tasks.length}</span>}
+            <Bot className="w-4 h-4 text-indigo-500" />
+            <span className="text-sm font-semibold text-slate-900">AI replied</span>
+            <span className="text-[10px] text-slate-400">recent — tap to review</span>
           </div>
-          <OpenTasks initial={d.tasks} />
+          {d.aiReplied.length === 0 ? (
+            <p className="px-4 py-8 text-center text-sm text-slate-400">No AI replies yet.</p>
+          ) : (
+            d.aiReplied.map((a, i) => (
+              <Link key={i} href={`/reservations/${a.reservationId}`} className="flex items-start gap-3 px-4 py-2.5 border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-colors">
+                <span className="text-[11px] text-indigo-600 font-bold whitespace-nowrap max-w-[110px] truncate mt-px">{a.property}</span>
+                <span className="text-[13px] text-slate-700 flex-1 min-w-0 line-clamp-2">{a.reply}</span>
+                <ArrowRight className="w-3.5 h-3.5 text-slate-300 shrink-0 mt-px" />
+              </Link>
+            ))
+          )}
         </div>
+      </div>
+
+      {/* ⑦ open tasks */}
+      <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden mb-4">
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-100">
+          <ListChecks className="w-4 h-4 text-indigo-500" />
+          <span className="text-sm font-semibold text-slate-900">Open tasks</span>
+          {d.tasks.length > 0 && <span className="ml-auto text-[11px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded-full">{d.tasks.length}</span>}
+        </div>
+        <OpenTasks initial={d.tasks} />
       </div>
 
       {/* ⑧ gap occupancy */}
