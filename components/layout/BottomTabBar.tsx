@@ -3,8 +3,8 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  LayoutDashboard, MessageSquare, BookOpen, CalendarDays, MoreHorizontal,
-  Home, DollarSign, Sparkles, Wallet, RefreshCw, Key, Bot, LogOut, X, Lightbulb,
+  LayoutDashboard, MessageSquare, MessageSquareText, BookOpen, CalendarDays, MoreHorizontal,
+  Home, Sparkles, Wallet, RefreshCw, Key, Bot, LogOut, X, Lightbulb,
 } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { cn } from "@/lib/utils";
@@ -16,8 +16,8 @@ interface Activity {
 }
 
 const MORE_LINKS = [
+  { href: "/templates", label: "Templates", icon: MessageSquareText },
   { href: "/properties", label: "Properties", icon: Home },
-  { href: "/pricing", label: "Pricing", icon: DollarSign },
   { href: "/cleaning", label: "Cleaning", icon: Sparkles },
   { href: "/finance", label: "Finance", icon: Wallet },
   { href: "/settings/smoobu", label: "Smoobu", icon: RefreshCw },
