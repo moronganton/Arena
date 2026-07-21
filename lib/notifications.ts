@@ -10,19 +10,20 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-// Email a rendered template to the host themselves, so they can see exactly
-// what a guest would receive before turning the template on. Clearly marked
-// as a test so it's never mistaken for a real guest message.
-export async function sendTemplateTestEmail(params: { to: string; subject: string; bodyText: string }): Promise<void> {
-  const { to, subject, bodyText } = params;
+// Email a rendered template to the host's own address — a clean copy of exactly
+// what a guest would receive. `labeled` adds a small TEST banner; leave it off
+// for a real-looking copy.
+export async function sendTemplateCopyEmail(params: { to: string; subject: string; bodyText: string; labeled?: boolean }): Promise<void> {
+  const { to, subject, bodyText, labeled } = params;
+  const banner = labeled
+    ? `<div style="background:#eef2ff; color:#4338ca; font-size:12px; font-weight:bold; padding:9px 12px; border-radius:8px; margin-bottom:16px;">TEST PREVIEW — this is how your guest would see the message</div>`
+    : "";
   const html = `
     <!DOCTYPE html><html><body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-      <div style="background:#eef2ff; color:#4338ca; font-size:12px; font-weight:bold; padding:9px 12px; border-radius:8px; margin-bottom:16px;">
-        TEST PREVIEW — this is how your guest would see the message
-      </div>
+      ${banner}
       <div style="white-space:pre-wrap; color:#1a1a2e; font-size:15px; line-height:1.6;">${escapeHtml(bodyText)}</div>
     </body></html>`;
-  await getResend().emails.send({ from: FROM, to, subject: `[TEST] ${subject}`, html });
+  await getResend().emails.send({ from: FROM, to, subject: labeled ? `[TEST] ${subject}` : (subject || "Message from your host"), html });
 }
 
 interface AccessCodeEmailParams {

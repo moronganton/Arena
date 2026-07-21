@@ -7,7 +7,7 @@ export async function GET() {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const [templates, properties] = await Promise.all([
+  const [templates, properties, user] = await Promise.all([
     prisma.messageTemplate.findMany({
       where: { userId: session.user.id },
       orderBy: { createdAt: "asc" },
@@ -18,9 +18,10 @@ export async function GET() {
       select: { id: true, name: true },
       orderBy: { name: "asc" },
     }),
+    prisma.user.findUnique({ where: { id: session.user.id }, select: { email: true } }),
   ]);
 
-  return NextResponse.json({ templates, properties });
+  return NextResponse.json({ templates, properties, userEmail: user?.email || "" });
 }
 
 // POST /api/templates — create a template

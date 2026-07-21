@@ -2,20 +2,25 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { renderTemplate, valuesFromReservation, SAMPLE_VALUES, type TemplateReservation } from "@/lib/templates";
-import { sendTemplateTestEmail } from "@/lib/notifications";
+import { sendTemplateCopyEmail } from "@/lib/notifications";
 
-// POST /api/templates/send-test { subject, body, reservationId? }
-// Renders the template and emails it to the HOST's own address (never the
-// guest), so they can see the real thing before turning it on.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// POST /api/templates/send-copy { subject, body, reservationId?, to? }
+// Sends a clean copy of the rendered template to any email address (defaults to
+// the host's account email). The guest is never messaged.
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { subject, body, reservationId } = await req.json();
+  const { subject, body, reservationId, to } = await req.json();
   if (typeof body !== "string" || !body.trim()) return NextResponse.json({ error: "body required" }, { status: 400 });
 
   const user = await prisma.user.findUnique({ where: { id: session.user.id }, select: { email: true, name: true } });
-  if (!user?.email) return NextResponse.json({ error: "Your account has no email address to send the test to." }, { status: 400 });
+  const recipient = (typeof to === "string" && to.trim()) || user?.email || "";
+  if (!EMAIL_RE.test(recipient)) {
+    return NextResponse.json({ error: "Enter a valid email address to send to." }, { status: 400 });
+  }
 
   let values = SAMPLE_VALUES;
   if (reservationId) {
@@ -28,14 +33,14 @@ export async function POST(req: NextRequest) {
       },
     });
     if (!reservation) return NextResponse.json({ error: "Reservation not found" }, { status: 404 });
-    values = valuesFromReservation(reservation as unknown as TemplateReservation, user.name);
+    values = valuesFromReservation(reservation as unknown as TemplateReservation, user?.name);
   }
 
   const rendered = renderTemplate(body, values).trim();
   try {
-    await sendTemplateTestEmail({ to: user.email, subject: subject?.trim() || "Message from your host", bodyText: rendered });
-    return NextResponse.json({ success: true, to: user.email });
+    await sendTemplateCopyEmail({ to: recipient, subject: subject?.trim() || "Message from your host", bodyText: rendered });
+    return NextResponse.json({ success: true, to: recipient });
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : "Failed to send test email" }, { status: 502 });
+    return NextResponse.json({ error: err instanceof Error ? err.message : "Failed to send email" }, { status: 502 });
   }
 }

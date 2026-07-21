@@ -36,8 +36,11 @@ export default function TemplatesPage() {
   const [previewResId, setPreviewResId] = useState("");
   const [realPreview, setRealPreview] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState(false);
-  const [sendingTest, setSendingTest] = useState(false);
-  const [testMsg, setTestMsg] = useState("");
+  const [copyEmail, setCopyEmail] = useState("");
+  const [sendingCopy, setSendingCopy] = useState(false);
+  const [copyMsg, setCopyMsg] = useState("");
+  const [sendingGuest, setSendingGuest] = useState(false);
+  const [guestMsg, setGuestMsg] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -51,6 +54,7 @@ export default function TemplatesPage() {
     setFields(s.fields || []);
     setTriggers(s.triggers || []);
     setReservations(r.reservations || []);
+    setCopyEmail((prev) => prev || t.userEmail || "");
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -73,17 +77,33 @@ export default function TemplatesPage() {
     return () => clearTimeout(h);
   }, [previewResId, form.body]);
 
-  async function sendTest() {
-    setSendingTest(true);
-    setTestMsg("");
-    const res = await fetch("/api/templates/send-test", {
+  async function sendCopy() {
+    setSendingCopy(true);
+    setCopyMsg("");
+    const res = await fetch("/api/templates/send-copy", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ subject: form.subject, body: form.body, reservationId: previewResId || undefined }),
+      body: JSON.stringify({ subject: form.subject, body: form.body, reservationId: previewResId || undefined, to: copyEmail }),
     });
     const data = await res.json();
-    setSendingTest(false);
-    setTestMsg(res.ok ? `Sent to ${data.to} ✓` : (data.error || "Failed to send"));
-    setTimeout(() => setTestMsg(""), 6000);
+    setSendingCopy(false);
+    setCopyMsg(res.ok ? `Sent to ${data.to} ✓` : (data.error || "Failed to send"));
+    setTimeout(() => setCopyMsg(""), 7000);
+  }
+
+  async function sendGuest() {
+    if (!previewResId) return;
+    const resv = reservations.find((r) => r.id === previewResId);
+    if (!confirm(`Send this message to the GUEST on:\n\n${resv?.label}\n\nThis reaches the real guest via their booking channel and email.`)) return;
+    setSendingGuest(true);
+    setGuestMsg("");
+    const res = await fetch("/api/templates/send-now", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ templateId: "id" in form ? form.id : undefined, body: form.body, reservationId: previewResId }),
+    });
+    const data = await res.json();
+    setSendingGuest(false);
+    setGuestMsg(res.ok ? `Sent to ${data.guest} ✓` : (data.error || "Failed to send"));
+    setTimeout(() => setGuestMsg(""), 7000);
   }
 
   const selectedTrigger = triggers.find((t) => t.value === form.trigger);
@@ -376,17 +396,46 @@ export default function TemplatesPage() {
               {previewResId ? "Showing this template filled with the selected reservation's real details." : "Showing sample values. Pick a reservation above to preview real guest data."}
             </p>
 
-            <div className="flex items-center gap-3 mt-3 pt-3 border-t border-slate-100 flex-wrap">
-              <button
-                onClick={sendTest}
-                disabled={sendingTest || !form.body.trim()}
-                className="flex items-center gap-2 border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-50 px-3.5 py-2 rounded-xl text-sm font-medium transition"
-              >
-                {sendingTest ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                Send test to my email
-              </button>
-              <span className="text-xs text-slate-500">Emails it to <strong>you</strong>{previewResId ? " with this reservation's data" : " with sample data"} — the guest is never messaged.</span>
-              {testMsg && <span className="text-xs font-medium text-emerald-600">{testMsg}</span>}
+            <div className="mt-3 pt-3 border-t border-slate-100 space-y-3">
+              {/* Send a copy to any email address */}
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Send a copy to</label>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <input
+                    type="email"
+                    value={copyEmail}
+                    onChange={(e) => setCopyEmail(e.target.value)}
+                    placeholder="you@example.com"
+                    className="flex-1 min-w-[200px] border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <button
+                    onClick={sendCopy}
+                    disabled={sendingCopy || !form.body.trim() || !copyEmail.trim()}
+                    className="flex items-center gap-2 border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-50 px-3.5 py-2 rounded-xl text-sm font-medium transition whitespace-nowrap"
+                  >
+                    {sendingCopy ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                    Send copy
+                  </button>
+                  {copyMsg && <span className="text-xs font-medium text-emerald-600">{copyMsg}</span>}
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">A clean copy to this address{previewResId ? " with the selected reservation's data" : " with sample data"}. The guest is never messaged.</p>
+              </div>
+
+              {/* Send for real to the guest */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={sendGuest}
+                  disabled={sendingGuest || !form.body.trim() || !previewResId}
+                  className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-3.5 py-2 rounded-xl text-sm font-medium transition"
+                >
+                  {sendingGuest ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  Send to guest now
+                </button>
+                <span className="text-xs text-slate-500">
+                  {previewResId ? "Delivers to the real guest (booking channel + email)." : "Pick a reservation above to enable."}
+                </span>
+                {guestMsg && <span className="text-xs font-medium text-emerald-600">{guestMsg}</span>}
+              </div>
             </div>
           </div>
 
