@@ -75,6 +75,17 @@ async function getDashboardData(userId: string) {
     }),
   ]);
 
+  // For each AI reply, find the guest question it answered (the most recent
+  // inbound, non-internal message just before it in the same thread).
+  const aiQuestions = await Promise.all(
+    aiRepliedRaw.map((m) =>
+      prisma.message.findFirst({
+        where: { reservationId: m.reservationId, direction: "INBOUND", channel: { not: "INTERNAL" }, createdAt: { lt: m.createdAt } },
+        orderBy: { createdAt: "desc" }, select: { body: true },
+      })
+    )
+  );
+
   // --- Gap occupancy: for each property, the state of the next HORIZON nights ---
   const nights = Array.from({ length: HORIZON }, (_, i) => new Date(utcToday.getTime() + i * 86400000).getTime());
   const occupancy = gapProps.map((p) => {
@@ -110,9 +121,10 @@ async function getDashboardData(userId: string) {
       reservationId: m.reservation.id, property: m.reservation.property.name,
       guest: m.reservation.guest.name, question: m.body.replace(/\s+/g, " ").trim().slice(0, 120),
     })),
-    aiReplied: aiRepliedRaw.map((m) => ({
+    aiReplied: aiRepliedRaw.map((m, i) => ({
       reservationId: m.reservation.id, property: m.reservation.property.name,
-      guest: m.reservation.guest.name, reply: m.body.replace(/\s+/g, " ").trim().slice(0, 130),
+      question: aiQuestions[i]?.body ? aiQuestions[i]!.body.replace(/\s+/g, " ").trim().slice(0, 110) : null,
+      reply: m.body.replace(/\s+/g, " ").trim().slice(0, 160),
     })),
     tasks: tasks.map(({ at: _at, ...t }) => t) as Task[],
     occupancy,
@@ -177,10 +189,19 @@ export default async function DashboardPage() {
             <p className="px-4 py-8 text-center text-sm text-slate-400">No AI replies yet.</p>
           ) : (
             d.aiReplied.map((a, i) => (
-              <Link key={i} href={`/reservations/${a.reservationId}`} className="flex items-start gap-3 px-4 py-2.5 border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-colors">
-                <span className="text-[11px] text-indigo-600 font-bold whitespace-nowrap max-w-[110px] truncate mt-px">{a.property}</span>
-                <span className="text-[13px] text-slate-700 flex-1 min-w-0 line-clamp-2">{a.reply}</span>
-                <ArrowRight className="w-3.5 h-3.5 text-slate-300 shrink-0 mt-px" />
+              <Link key={i} href={`/reservations/${a.reservationId}`} className="flex items-start gap-2 px-3 py-2 border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-colors">
+                <span className="text-[9px] text-indigo-600 font-bold leading-tight w-11 shrink-0 truncate mt-0.5" title={a.property}>{a.property}</span>
+                <div className="flex-1 min-w-0">
+                  {a.question && (
+                    <p className="text-[10px] text-slate-500 truncate leading-snug">
+                      <span className="font-bold text-slate-400">Q</span> {a.question}
+                    </p>
+                  )}
+                  <p className="text-[10.5px] text-slate-800 line-clamp-2 leading-snug">
+                    <span className="font-bold text-indigo-400">A</span> {a.reply}
+                  </p>
+                </div>
+                <ArrowRight className="w-3.5 h-3.5 text-slate-300 shrink-0 mt-0.5" />
               </Link>
             ))
           )}
