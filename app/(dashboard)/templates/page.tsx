@@ -31,19 +31,60 @@ export default function TemplatesPage() {
   const [showEmojis, setShowEmojis] = useState(false);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
 
+  // Real-data preview + test send
+  const [reservations, setReservations] = useState<{ id: string; label: string }[]>([]);
+  const [previewResId, setPreviewResId] = useState("");
+  const [realPreview, setRealPreview] = useState<string | null>(null);
+  const [previewing, setPreviewing] = useState(false);
+  const [sendingTest, setSendingTest] = useState(false);
+  const [testMsg, setTestMsg] = useState("");
+
   const load = useCallback(async () => {
     setLoading(true);
-    const [t, s] = await Promise.all([
+    const [t, s, r] = await Promise.all([
       fetch("/api/templates").then((r) => r.json()),
       fetch("/api/templates/schema").then((r) => r.json()),
+      fetch("/api/templates/reservations").then((r) => r.json()),
     ]);
     setTemplates(t.templates || []);
     setProperties(t.properties || []);
     setFields(s.fields || []);
     setTriggers(s.triggers || []);
+    setReservations(r.reservations || []);
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
+
+  // When a real reservation is chosen, render the template with its real data
+  // (debounced so it keeps up as you type).
+  useEffect(() => {
+    if (!previewResId) { setRealPreview(null); return; }
+    setPreviewing(true);
+    const h = setTimeout(async () => {
+      try {
+        const res = await fetch("/api/templates/preview", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ body: form.body, reservationId: previewResId }),
+        });
+        const data = await res.json();
+        setRealPreview(res.ok ? data.rendered : null);
+      } finally { setPreviewing(false); }
+    }, 400);
+    return () => clearTimeout(h);
+  }, [previewResId, form.body]);
+
+  async function sendTest() {
+    setSendingTest(true);
+    setTestMsg("");
+    const res = await fetch("/api/templates/send-test", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ subject: form.subject, body: form.body, reservationId: previewResId || undefined }),
+    });
+    const data = await res.json();
+    setSendingTest(false);
+    setTestMsg(res.ok ? `Sent to ${data.to} ✓` : (data.error || "Failed to send"));
+    setTimeout(() => setTestMsg(""), 6000);
+  }
 
   const selectedTrigger = triggers.find((t) => t.value === form.trigger);
   const showOffset = selectedTrigger?.usesOffset;
@@ -307,14 +348,45 @@ export default function TemplatesPage() {
             <p className="text-xs text-slate-400 mt-2">Type <span className="font-mono text-slate-500">[Field]</span> tags or use “Insert field”. They're replaced with each guest's real details when sent.</p>
           </div>
 
-          {/* Live preview */}
+          {/* Live preview + test */}
           <div className="bg-white rounded-2xl border border-slate-100 p-5">
-            <div className="flex items-center gap-2 mb-3">
-              <Send className="w-4 h-4 text-indigo-500" />
-              <h3 className="text-sm font-medium text-slate-800">Preview <span className="text-slate-400 font-normal">(with sample data)</span></h3>
+            <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+              <div className="flex items-center gap-2">
+                <Send className="w-4 h-4 text-indigo-500" />
+                <h3 className="text-sm font-medium text-slate-800">Preview</h3>
+              </div>
+              <select
+                value={previewResId}
+                onChange={(e) => setPreviewResId(e.target.value)}
+                className="border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs max-w-[240px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                title="Preview with a real reservation's data"
+              >
+                <option value="">Sample data</option>
+                {reservations.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+              </select>
             </div>
+
             <div className="bg-slate-50 border border-slate-100 rounded-xl p-4 text-sm text-slate-800 whitespace-pre-wrap min-h-[80px]">
-              {preview || <span className="text-slate-400">Your message preview will appear here…</span>}
+              {previewResId
+                ? (previewing ? <span className="text-slate-400">Rendering with real data…</span> : (realPreview || <span className="text-slate-400">No preview.</span>))
+                : (preview || <span className="text-slate-400">Your message preview will appear here…</span>)}
+            </div>
+
+            <p className="text-[11px] text-slate-400 mt-2">
+              {previewResId ? "Showing this template filled with the selected reservation's real details." : "Showing sample values. Pick a reservation above to preview real guest data."}
+            </p>
+
+            <div className="flex items-center gap-3 mt-3 pt-3 border-t border-slate-100 flex-wrap">
+              <button
+                onClick={sendTest}
+                disabled={sendingTest || !form.body.trim()}
+                className="flex items-center gap-2 border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-50 px-3.5 py-2 rounded-xl text-sm font-medium transition"
+              >
+                {sendingTest ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                Send test to my email
+              </button>
+              <span className="text-xs text-slate-500">Emails it to <strong>you</strong>{previewResId ? " with this reservation's data" : " with sample data"} — the guest is never messaged.</span>
+              {testMsg && <span className="text-xs font-medium text-emerald-600">{testMsg}</span>}
             </div>
           </div>
 
