@@ -9,9 +9,20 @@ interface Reservation {
   checkOut: string;
   status: string;
   source: string;
+  totalAmount?: number | null;
+  currency?: string;
+  createdAt?: string;
   guest: { name: string };
   property: { id: string; name: string; city: string };
 }
+
+const CUR: Record<string, string> = { EUR: "€", USD: "$", GBP: "£", RON: "lei ", CHF: "CHF " };
+const curSym = (c?: string) => (c ? CUR[c] || c + " " : "");
+const ddmm = (iso?: string) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}`;
+};
 
 interface Block {
   id: string;
@@ -347,8 +358,14 @@ export default function CalendarPage() {
                       >
                         <span className="text-[11px] font-bold leading-tight truncate">{res.guest.name}</span>
                         {pos.span > 1 && (
-                          <span className="text-[9px] opacity-90 truncate">
-                            {nights} night{nights > 1 ? "s" : ""}
+                          <span className="flex items-center justify-between gap-1 text-[9px] opacity-90 leading-tight">
+                            <span className="truncate">
+                              {nights}
+                              {res.totalAmount != null ? ` · ${curSym(res.currency)}${res.totalAmount.toLocaleString()}` : ""}
+                            </span>
+                            {res.createdAt && (
+                              <span className="shrink-0 opacity-80" title={`Booked ${ddmm(res.createdAt)}`}>{ddmm(res.createdAt)}</span>
+                            )}
                           </span>
                         )}
                       </Link>
