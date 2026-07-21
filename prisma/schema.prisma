@@ -30,6 +30,51 @@ model User {
   smoobuAccount SmoobuAccount?
   notifications      Notification[]
   pushSubscriptions  PushSubscription[]
+  messageTemplates   MessageTemplate[]
+}
+
+// A reusable guest-message template the host designs in StayHQ. Rendered with
+// live reservation data (merge fields like [Full Name]) and sent automatically
+// when its trigger fires (e.g. 2 days before check-in), or manually. This lets
+// StayHQ own the whole messaging timeline instead of Smoobu's templates.
+model MessageTemplate {
+  id         String   @id @default(cuid())
+  name       String
+  // NEW_RESERVATION | BEFORE_CHECKIN | CHECKIN_DAY | DURING_STAY |
+  // BEFORE_CHECKOUT | CHECKOUT_DAY | AFTER_CHECKOUT | MANUAL
+  trigger    String
+  offsetDays Int      @default(0) // days before/after the anchor for time-based triggers
+  sendHour   Int      @default(10) // hour of day (0-23) to send scheduled messages
+  subject    String   @default("Message from your host") // used when delivered by email
+  body       String   // template text with [merge fields] and emojis
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // null = applies to all properties; otherwise scoped to one
+  propertyId String?
+  property   Property? @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  sends MessageTemplateSend[]
+
+  @@index([userId])
+}
+
+// One row per (template, reservation) actually sent — the dedupe ledger so a
+// scheduled template fires at most once per booking.
+model MessageTemplateSend {
+  id            String   @id @default(cuid())
+  reservationId String
+  sentAt        DateTime @default(now())
+
+  templateId String
+  template   MessageTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, reservationId])
+  @@index([reservationId])
 }
 
 // An in-app notification shown in the bell menu. Created for events the host
@@ -159,6 +204,7 @@ model Property {
   expenses      Expense[]
   recurringExpenses RecurringExpense[]
   knowledge     PropertyKnowledge[]
+  messageTemplates MessageTemplate[]
 
   @@index([ownerId])
 }
