@@ -407,6 +407,8 @@ model Message {
   isRead    Boolean  @default(false)
   // Inbound message the AI looked at but couldn't answer — host must reply
   needsHostReply Boolean @default(false)
+  // For INTERNAL notes used as to-dos on the dashboard: flagged complete
+  taskDone Boolean @default(false)
   // Outbound message whose relay to the booking channel (Booking.com/Airbnb via
   // Smoobu) failed — shown in the UI with a Retry action so it's never silent
   channelFailed Boolean @default(false)

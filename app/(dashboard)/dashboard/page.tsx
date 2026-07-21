@@ -1,298 +1,218 @@
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { formatCurrency, formatShortDate, SOURCE_COLORS, SOURCE_LABELS, STATUS_COLORS } from "@/lib/utils";
+import { formatCurrency, formatShortDate, SOURCE_COLORS, SOURCE_LABELS } from "@/lib/utils";
 import Link from "next/link";
-import {
-  Building2,
-  CalendarDays,
-  MessageSquare,
-  TrendingUp,
-  ArrowRight,
-  Clock,
-} from "lucide-react";
+import { ArrowRight, MessageSquare, ListChecks, CalendarRange } from "lucide-react";
+import { DashboardKpis } from "@/components/dashboard/DashboardKpis";
+import { OpenTasks, type Task } from "@/components/dashboard/OpenTasks";
+
+const HORIZON = 10; // nights shown in gap occupancy
 
 async function getDashboardData(userId: string) {
-  const today = new Date();
-  const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-  const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-  const next30 = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
-  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const now = new Date();
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const todayEnd = new Date(todayStart.getTime() + 86400000);
-  const dayAgo = new Date(Date.now() - 86400000);
+  // UTC day boundaries for the occupancy grid (matches how OTA dates are stored)
+  const utcToday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const utcHorizonEnd = new Date(utcToday.getTime() + HORIZON * 86400000);
 
-  const [properties, totalReservations, monthRevenue, upcomingCheckIns, activeGuests, unreadMessages, recentReservations] =
-    await Promise.all([
-      prisma.property.count({ where: { ownerId: userId, active: true } }),
-      prisma.reservation.count({
-        where: { property: { ownerId: userId }, status: { not: "CANCELLED" } },
-      }),
-      prisma.reservation.aggregate({
-        where: {
-          property: { ownerId: userId },
-          status: { notIn: ["CANCELLED"] },
-          checkIn: { gte: startOfMonth, lte: endOfMonth },
-        },
-        _sum: { totalAmount: true },
-      }),
-      prisma.reservation.count({
-        where: {
-          property: { ownerId: userId },
-          status: "CONFIRMED",
-          checkIn: { gte: today, lte: next30 },
-        },
-      }),
-      prisma.reservation.count({
-        where: {
-          property: { ownerId: userId },
-          status: "CHECKED_IN",
-        },
-      }),
-      prisma.message.count({
-        where: {
-          reservation: { property: { ownerId: userId } },
-          isRead: false,
-          direction: "INBOUND",
-        },
-      }),
-      prisma.reservation.findMany({
-        where: { property: { ownerId: userId }, status: { not: "CANCELLED" } },
-        include: {
-          guest: true,
-          property: { select: { name: true } },
-        },
-        orderBy: { createdAt: "desc" },
-        take: 8,
-      }),
-    ]);
-
-  // "What's new" strip — live shortcuts to where something needs the host
-  const [needsReply, newBookings, checkInsToday, checkOutsToday, cleaningDue] = await Promise.all([
+  const [
+    properties, monthRevenue, checkInsToday, aiRepliesToday,
+    cleaningTotalToday, cleaningDoneToday,
+    attentionRaw, noteTasks, damageTasks, gapProps, gapRes, gapBlocks, recentReservations,
+  ] = await Promise.all([
+    prisma.property.count({ where: { ownerId: userId, active: true } }),
+    prisma.reservation.aggregate({
+      where: { property: { ownerId: userId }, status: { not: "CANCELLED" }, checkIn: { gte: startOfMonth, lte: endOfMonth } },
+      _sum: { totalAmount: true },
+    }),
+    prisma.reservation.count({
+      where: { property: { ownerId: userId }, status: { notIn: ["CANCELLED", "NO_SHOW"] }, checkIn: { gte: todayStart, lt: todayEnd } },
+    }),
     prisma.message.count({
+      where: { isAiGenerated: true, direction: "OUTBOUND", createdAt: { gte: todayStart, lt: todayEnd }, reservation: { property: { ownerId: userId } } },
+    }),
+    prisma.cleaningTask.count({ where: { scheduledDate: { gte: todayStart, lt: todayEnd }, property: { ownerId: userId } } }),
+    prisma.cleaningTask.count({ where: { scheduledDate: { gte: todayStart, lt: todayEnd }, status: "COMPLETED", property: { ownerId: userId } } }),
+    prisma.message.findMany({
       where: { needsHostReply: true, direction: "INBOUND", reservation: { property: { ownerId: userId } } },
+      include: { reservation: { select: { id: true, guest: { select: { name: true } }, property: { select: { name: true } } } } },
+      orderBy: { createdAt: "desc" }, take: 8,
     }),
-    prisma.reservation.count({
-      where: { createdAt: { gte: dayAgo }, status: { not: "CANCELLED" }, property: { ownerId: userId } },
+    prisma.message.findMany({
+      where: { channel: "INTERNAL", taskDone: false, reservation: { property: { ownerId: userId } } },
+      include: { reservation: { select: { id: true, property: { select: { name: true } } } } },
+      orderBy: { createdAt: "desc" }, take: 12,
     }),
-    prisma.reservation.count({
-      where: {
-        checkIn: { gte: todayStart, lt: todayEnd },
-        status: { notIn: ["CANCELLED", "NO_SHOW"] },
-        property: { ownerId: userId },
-      },
+    prisma.damageReport.findMany({
+      where: { status: "OPEN", property: { ownerId: userId } },
+      include: { property: { select: { name: true } } },
+      orderBy: { createdAt: "desc" }, take: 12,
     }),
-    prisma.reservation.count({
-      where: {
-        checkOut: { gte: todayStart, lt: todayEnd },
-        status: { notIn: ["CANCELLED", "NO_SHOW"] },
-        property: { ownerId: userId },
-      },
+    prisma.property.findMany({ where: { ownerId: userId, active: true }, select: { id: true, name: true, city: true } }),
+    prisma.reservation.findMany({
+      where: { property: { ownerId: userId }, status: { not: "CANCELLED" }, checkOut: { gt: utcToday }, checkIn: { lt: utcHorizonEnd } },
+      select: { propertyId: true, checkIn: true, checkOut: true },
     }),
-    prisma.cleaningTask.count({
-      where: {
-        scheduledDate: { gte: todayStart, lt: todayEnd },
-        status: { not: "COMPLETED" },
-        property: { ownerId: userId },
-      },
+    prisma.calendarBlock.findMany({
+      where: { property: { ownerId: userId }, endDate: { gte: utcToday }, startDate: { lt: utcHorizonEnd } },
+      select: { propertyId: true, startDate: true, endDate: true },
+    }),
+    prisma.reservation.findMany({
+      where: { property: { ownerId: userId }, status: { not: "CANCELLED" } },
+      include: { guest: true, property: { select: { name: true } } },
+      orderBy: { createdAt: "desc" }, take: 6,
     }),
   ]);
 
+  // --- Gap occupancy: for each property, the state of the next HORIZON nights ---
+  const nights = Array.from({ length: HORIZON }, (_, i) => new Date(utcToday.getTime() + i * 86400000).getTime());
+  const occupancy = gapProps.map((p) => {
+    const res = gapRes.filter((r) => r.propertyId === p.id);
+    const blk = gapBlocks.filter((b) => b.propertyId === p.id);
+    const states = nights.map((n) => {
+      if (res.some((r) => r.checkIn.getTime() <= n && r.checkOut.getTime() > n)) return "b"; // booked
+      if (blk.some((b) => b.startDate.getTime() <= n && b.endDate.getTime() >= n)) return "x"; // blocked
+      return "o"; // open / gap
+    });
+    const firstGap = states.indexOf("o");
+    return { id: p.id, name: p.name, city: p.city, states, firstGap: firstGap === -1 ? 999 : firstGap };
+  }).sort((a, b) => a.firstGap - b.firstGap || a.name.localeCompare(b.name));
+
+  // --- Merge tasks (internal notes + open damages), newest first ---
+  const tasks: (Task & { at: number })[] = [
+    ...noteTasks.map((m) => ({
+      kind: "note" as const, id: m.id, text: m.body.replace(/\s+/g, " ").trim().slice(0, 120),
+      property: m.reservation.property.name, meta: "internal note", href: `/reservations/${m.reservation.id}`, at: m.createdAt.getTime(),
+    })),
+    ...damageTasks.map((d) => ({
+      kind: "damage" as const, id: d.id, text: d.description.replace(/\s+/g, " ").trim().slice(0, 120),
+      property: d.property.name, meta: "reported by cleaner", href: "/cleaning", at: d.createdAt.getTime(),
+    })),
+  ].sort((a, b) => b.at - a.at).slice(0, 12);
+
   return {
     properties,
-    totalReservations,
     monthRevenue: monthRevenue._sum.totalAmount || 0,
-    upcomingCheckIns,
-    activeGuests,
-    unreadMessages,
+    checkInsToday, aiRepliesToday, cleaningTotalToday, cleaningDoneToday,
+    attention: attentionRaw.map((m) => ({
+      reservationId: m.reservation.id, property: m.reservation.property.name,
+      guest: m.reservation.guest.name, question: m.body.replace(/\s+/g, " ").trim().slice(0, 120),
+    })),
+    tasks: tasks.map(({ at: _at, ...t }) => t) as Task[],
+    occupancy,
     recentReservations,
-    needsReply,
-    newBookings,
-    checkInsToday,
-    checkOutsToday,
-    cleaningDue,
   };
 }
 
 export default async function DashboardPage() {
   const session = await auth();
-  const data = await getDashboardData(session!.user.id);
-
-  // "What's new" chips — only rendered when there's actually news
-  const TONES = {
-    rose: { chip: "bg-rose-50 text-rose-700 border-rose-200", dot: "bg-rose-500" },
-    indigo: { chip: "bg-indigo-50 text-indigo-700 border-indigo-200", dot: "bg-indigo-500" },
-    green: { chip: "bg-green-50 text-green-700 border-green-200", dot: "bg-green-500" },
-    amber: { chip: "bg-amber-50 text-amber-700 border-amber-200", dot: "bg-amber-500" },
-  } as const;
-  const chips: Array<{ href: string; label: string; tone: keyof typeof TONES }> = [];
-  if (data.needsReply > 0)
-    chips.push({ href: "/messages", label: `${data.needsReply} need${data.needsReply === 1 ? "s" : ""} your reply`, tone: "rose" });
-  if (data.unreadMessages > 0)
-    chips.push({ href: "/messages", label: `${data.unreadMessages} unread message${data.unreadMessages === 1 ? "" : "s"}`, tone: "indigo" });
-  if (data.newBookings > 0)
-    chips.push({ href: "/reservations?sort=newest", label: `${data.newBookings} new booking${data.newBookings === 1 ? "" : "s"}`, tone: "indigo" });
-  if (data.checkInsToday > 0)
-    chips.push({ href: "/calendar", label: `${data.checkInsToday} check-in${data.checkInsToday === 1 ? "" : "s"} today`, tone: "green" });
-  if (data.checkOutsToday > 0)
-    chips.push({ href: "/cleaning", label: `${data.checkOutsToday} check-out${data.checkOutsToday === 1 ? "" : "s"} today`, tone: "green" });
-  if (data.cleaningDue > 0)
-    chips.push({ href: "/cleaning", label: `${data.cleaningDue} cleaning${data.cleaningDue === 1 ? "" : "s"} due today`, tone: "amber" });
-
-  const stats = [
-    {
-      label: "Properties",
-      value: data.properties,
-      icon: Building2,
-      color: "bg-indigo-50 text-indigo-600",
-      href: "/properties",
-    },
-    {
-      label: "Revenue This Month",
-      value: formatCurrency(data.monthRevenue),
-      icon: TrendingUp,
-      color: "bg-green-50 text-green-600",
-      href: "/reservations",
-    },
-    {
-      label: "Upcoming Check-ins",
-      value: data.upcomingCheckIns,
-      icon: CalendarDays,
-      color: "bg-blue-50 text-blue-600",
-      href: "/calendar",
-    },
-    {
-      label: "Unread Messages",
-      value: data.unreadMessages,
-      icon: MessageSquare,
-      color: "bg-rose-50 text-rose-600",
-      href: "/messages",
-    },
-  ];
+  const d = await getDashboardData(session!.user.id);
+  const firstName = (session!.user.name || "").split(" ")[0];
 
   return (
     <div className="p-4 md:p-8 max-w-7xl mx-auto">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
-        <p className="text-slate-500 mt-1">
-          {new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
+      <div className="mb-4">
+        <h1 className="text-2xl font-bold text-slate-900">{firstName ? `Good day, ${firstName}` : "Dashboard"} 👋</h1>
+        <p className="text-slate-500 text-sm mt-0.5">
+          {new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })} · here&apos;s your day
         </p>
       </div>
 
-      {/* What's new — tap a chip to jump straight there */}
-      {chips.length > 0 && (
-        <div className="flex gap-2 overflow-x-auto pb-2 mb-6 -mx-1 px-1">
-          {chips.map((chip) => (
-            <Link
-              key={chip.label}
-              href={chip.href}
-              className={`flex-none inline-flex items-center gap-2 text-sm font-medium px-3.5 py-2 rounded-full border transition hover:shadow-sm ${TONES[chip.tone].chip}`}
-            >
-              <span className={`w-2 h-2 rounded-full ${TONES[chip.tone].dot}`} />
-              {chip.label}
-            </Link>
-          ))}
-        </div>
-      )}
+      {/* ①–⑤ compact KPIs */}
+      <DashboardKpis
+        properties={d.properties}
+        revenue={formatCurrency(d.monthRevenue)}
+        checkInsToday={d.checkInsToday}
+        aiRepliesToday={d.aiRepliesToday}
+        cleaningDone={d.cleaningDoneToday}
+        cleaningTotal={d.cleaningTotalToday}
+      />
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        {stats.map((stat) => (
-          <Link key={stat.label} href={stat.href}>
-            <div className="bg-white rounded-2xl border border-slate-100 p-6 hover:shadow-md transition-shadow">
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-sm font-medium text-slate-500">{stat.label}</p>
-                  <p className="text-2xl font-bold text-slate-900 mt-1">{stat.value}</p>
-                </div>
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${stat.color}`}>
-                  <stat.icon className="w-5 h-5" />
-                </div>
-              </div>
-            </div>
-          </Link>
-        ))}
+      {/* ⑥ needs reply + ⑦ open tasks */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+        <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
+          <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-100">
+            <MessageSquare className="w-4 h-4 text-indigo-500" />
+            <span className="text-sm font-semibold text-slate-900">Needs your reply</span>
+            {d.attention.length > 0 && <span className="ml-auto text-[11px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">{d.attention.length}</span>}
+          </div>
+          {d.attention.length === 0 ? (
+            <p className="px-4 py-8 text-center text-sm text-slate-400">No guest questions waiting. 🎉</p>
+          ) : (
+            d.attention.map((a) => (
+              <Link key={a.reservationId} href={`/reservations/${a.reservationId}`} className="flex items-center gap-3 px-4 py-2.5 border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-colors">
+                <span className="text-[11px] text-indigo-600 font-bold whitespace-nowrap max-w-[110px] truncate">{a.property}</span>
+                <span className="text-[13px] text-slate-800 flex-1 min-w-0 truncate">{a.question}</span>
+                <ArrowRight className="w-3.5 h-3.5 text-slate-300 shrink-0" />
+              </Link>
+            ))
+          )}
+        </div>
+
+        <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
+          <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-100">
+            <ListChecks className="w-4 h-4 text-indigo-500" />
+            <span className="text-sm font-semibold text-slate-900">Open tasks</span>
+            {d.tasks.length > 0 && <span className="ml-auto text-[11px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded-full">{d.tasks.length}</span>}
+          </div>
+          <OpenTasks initial={d.tasks} />
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Recent Reservations */}
-        <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 p-6">
-          <div className="flex items-center justify-between mb-5">
-            <h2 className="font-semibold text-slate-900">Recent Reservations</h2>
-            <Link href="/reservations" className="text-sm text-indigo-600 hover:underline flex items-center gap-1">
-              View all <ArrowRight className="w-4 h-4" />
-            </Link>
-          </div>
-
-          <div className="space-y-3">
-            {data.recentReservations.length === 0 && (
-              <p className="text-slate-400 text-sm py-4 text-center">No reservations yet</p>
-            )}
-            {data.recentReservations.map((r) => (
-              <Link key={r.id} href={`/reservations/${r.id}`}>
-                <div className="flex items-center justify-between py-3 border-b border-slate-50 last:border-0 hover:bg-slate-50 -mx-2 px-2 rounded-lg transition-colors">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-9 h-9 bg-slate-100 rounded-full flex items-center justify-center text-slate-600 font-semibold text-sm flex-shrink-0">
-                      {r.guest.name[0].toUpperCase()}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="font-medium text-slate-900 text-sm truncate">{r.guest.name}</p>
-                      <p className="text-xs text-slate-500 truncate">{r.property.name}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3 flex-shrink-0 ml-4">
-                    <div className="text-right">
-                      <p className="text-sm text-slate-700">{formatShortDate(r.checkIn)} — {formatShortDate(r.checkOut)}</p>
-                      {r.totalAmount && (
-                        <p className="text-xs text-slate-500">{formatCurrency(r.totalAmount, r.currency)}</p>
-                      )}
-                    </div>
-                    <span className={`text-xs font-medium px-2 py-1 rounded-full ${SOURCE_COLORS[r.source] || "bg-slate-100 text-slate-600"}`}>
-                      {SOURCE_LABELS[r.source] || r.source}
-                    </span>
-                  </div>
-                </div>
+      {/* ⑧ gap occupancy */}
+      <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden mb-4">
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-100">
+          <CalendarRange className="w-4 h-4 text-indigo-500" />
+          <span className="text-sm font-semibold text-slate-900">Gap occupancy — next {HORIZON} nights</span>
+          <span className="ml-auto flex items-center gap-2 text-[10px] text-slate-400">
+            <span className="flex items-center gap-1"><i className="w-2.5 h-2.5 rounded-sm bg-emerald-500 inline-block" /> booked</span>
+            <span className="flex items-center gap-1"><i className="w-2.5 h-2.5 rounded-sm bg-rose-500 inline-block" /> open</span>
+          </span>
+        </div>
+        {d.occupancy.length === 0 ? (
+          <p className="px-4 py-8 text-center text-sm text-slate-400">No properties yet.</p>
+        ) : (
+          <div className="max-h-[360px] overflow-y-auto">
+            {d.occupancy.map((p) => (
+              <Link key={p.id} href="/calendar" className="flex items-center gap-3 px-4 py-2.5 border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-colors">
+                <span className="text-[12px] font-semibold text-slate-800 flex-1 min-w-0 truncate">
+                  {p.name} <span className="text-slate-400 font-normal">· {p.city}</span>
+                </span>
+                <span className="flex gap-[3px] shrink-0">
+                  {p.states.map((s, i) => (
+                    <i key={i} className={`w-[15px] h-[15px] rounded-[4px] inline-block ${s === "b" ? "bg-emerald-500" : s === "x" ? "bg-slate-300" : "bg-rose-500"}`} title={s === "b" ? "Booked" : s === "x" ? "Blocked" : "Open"} />
+                  ))}
+                </span>
               </Link>
             ))}
           </div>
-        </div>
+        )}
+      </div>
 
-        {/* Quick Actions */}
-        <div className="space-y-4">
-          <div className="bg-white rounded-2xl border border-slate-100 p-6">
-            <h2 className="font-semibold text-slate-900 mb-4">Quick Actions</h2>
-            <div className="space-y-2">
-              <Link href="/reservations?new=true" className="flex items-center justify-between p-3 rounded-xl border border-slate-100 hover:border-indigo-200 hover:bg-indigo-50 transition group">
-                <span className="text-sm font-medium text-slate-700 group-hover:text-indigo-700">New Reservation</span>
-                <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-indigo-600" />
-              </Link>
-              <Link href="/settings/channels" className="flex items-center justify-between p-3 rounded-xl border border-slate-100 hover:border-indigo-200 hover:bg-indigo-50 transition group">
-                <span className="text-sm font-medium text-slate-700 group-hover:text-indigo-700">Sync Channels</span>
-                <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-indigo-600" />
-              </Link>
-              <Link href="/messages" className="flex items-center justify-between p-3 rounded-xl border border-slate-100 hover:border-indigo-200 hover:bg-indigo-50 transition group">
-                <span className="text-sm font-medium text-slate-700 group-hover:text-indigo-700">
-                  Check Messages
-                  {data.unreadMessages > 0 && (
-                    <span className="ml-2 bg-rose-500 text-white text-xs px-1.5 py-0.5 rounded-full">{data.unreadMessages}</span>
-                  )}
-                </span>
-                <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-indigo-600" />
-              </Link>
-              <Link href="/calendar" className="flex items-center justify-between p-3 rounded-xl border border-slate-100 hover:border-indigo-200 hover:bg-indigo-50 transition group">
-                <span className="text-sm font-medium text-slate-700 group-hover:text-indigo-700">View Calendar</span>
-                <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-indigo-600" />
-              </Link>
-            </div>
-          </div>
-
-          <div className="bg-indigo-600 rounded-2xl p-6 text-white">
-            <div className="flex items-center gap-2 mb-2">
-              <Clock className="w-5 h-5 text-indigo-300" />
-              <span className="text-sm font-medium text-indigo-200">Active Guests</span>
-            </div>
-            <p className="text-4xl font-bold">{data.activeGuests}</p>
-            <p className="text-indigo-300 text-sm mt-1">Currently checked in</p>
-          </div>
+      {/* ⑨ existing reservations (kept, below everything) */}
+      <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+          <span className="text-sm font-semibold text-slate-900">Recent reservations</span>
+          <Link href="/reservations" className="text-xs text-indigo-600 hover:underline flex items-center gap-1">View all <ArrowRight className="w-3.5 h-3.5" /></Link>
         </div>
+        {d.recentReservations.length === 0 ? (
+          <p className="px-4 py-8 text-center text-sm text-slate-400">No reservations yet</p>
+        ) : (
+          d.recentReservations.map((r) => (
+            <Link key={r.id} href={`/reservations/${r.id}`} className="flex items-center gap-3 px-4 py-2.5 border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-colors">
+              <span className="w-8 h-8 bg-slate-100 rounded-full flex items-center justify-center text-slate-600 font-semibold text-xs shrink-0">{r.guest.name[0]?.toUpperCase()}</span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[13px] font-medium text-slate-900 truncate">{r.guest.name}</p>
+                <p className="text-[11px] text-slate-500 truncate">{r.property.name} · {formatShortDate(r.checkIn)}–{formatShortDate(r.checkOut)}</p>
+              </div>
+              {r.totalAmount != null && <span className="text-[12.5px] font-semibold text-slate-700 tabular-nums shrink-0">{formatCurrency(r.totalAmount, r.currency)}</span>}
+              <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full shrink-0 ${SOURCE_COLORS[r.source] || "bg-slate-100 text-slate-600"}`}>{SOURCE_LABELS[r.source] || r.source}</span>
+            </Link>
+          ))
+        )}
       </div>
     </div>
   );
