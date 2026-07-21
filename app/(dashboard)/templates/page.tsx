@@ -27,6 +27,7 @@ export default function TemplatesPage() {
   const [form, setForm] = useState<Template | Omit<Template, "id">>(BLANK);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [filterProp, setFilterProp] = useState(""); // "" = all, "GLOBAL" = all-properties, or a propertyId
   const [showFields, setShowFields] = useState(false);
   const [showEmojis, setShowEmojis] = useState(false);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
@@ -169,11 +170,17 @@ export default function TemplatesPage() {
     return `${tr.label} · ${String(t.sendHour).padStart(2, "0")}:00`;
   }
 
+  const visibleTemplates = templates.filter((t) =>
+    filterProp === "" ? true : filterProp === "GLOBAL" ? t.propertyId === null : t.propertyId === filterProp
+  );
+  const countFor = (val: string) =>
+    templates.filter((t) => (val === "GLOBAL" ? t.propertyId === null : t.propertyId === val)).length;
+
   // ---------- LIST VIEW ----------
   if (view === "list") {
     return (
       <div className="p-4 md:p-8 max-w-4xl mx-auto">
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-5 gap-3 flex-wrap">
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Message Templates</h1>
             <p className="text-slate-500 text-sm mt-0.5">Design guest messages once — StayHQ personalizes and sends them automatically.</p>
@@ -182,6 +189,34 @@ export default function TemplatesPage() {
             <Plus className="w-4 h-4" /> New Template
           </button>
         </div>
+
+        {/* Filter by property */}
+        {!loading && templates.length > 0 && (
+          <div className="flex items-center gap-2 mb-5 flex-wrap">
+            <span className="text-xs font-medium text-slate-500 inline-flex items-center gap-1.5"><Building2 className="w-3.5 h-3.5" /> View</span>
+            <button
+              onClick={() => setFilterProp("")}
+              className={`text-xs px-3 py-1.5 rounded-lg border transition ${filterProp === "" ? "bg-indigo-600 border-indigo-600 text-white" : "border-slate-200 text-slate-600 hover:border-indigo-300"}`}
+            >
+              All ({templates.length})
+            </button>
+            <button
+              onClick={() => setFilterProp("GLOBAL")}
+              className={`text-xs px-3 py-1.5 rounded-lg border transition ${filterProp === "GLOBAL" ? "bg-indigo-600 border-indigo-600 text-white" : "border-slate-200 text-slate-600 hover:border-indigo-300"}`}
+            >
+              All properties ({countFor("GLOBAL")})
+            </button>
+            {properties.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => setFilterProp(p.id)}
+                className={`text-xs px-3 py-1.5 rounded-lg border transition ${filterProp === p.id ? "bg-indigo-600 border-indigo-600 text-white" : "border-slate-200 text-slate-600 hover:border-indigo-300"}`}
+              >
+                {p.name} ({countFor(p.id)})
+              </button>
+            ))}
+          </div>
+        )}
 
         {loading ? (
           <p className="text-sm text-slate-400">Loading…</p>
@@ -194,9 +229,14 @@ export default function TemplatesPage() {
               <Plus className="w-4 h-4" /> New Template
             </button>
           </div>
+        ) : visibleTemplates.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-slate-100 p-8 text-center text-sm text-slate-500">
+            No templates for this property yet.
+            <button onClick={newTemplate} className="ml-1 text-indigo-600 font-medium hover:underline">Create one</button>.
+          </div>
         ) : (
           <div className="space-y-3">
-            {templates.map((t) => (
+            {visibleTemplates.map((t) => (
               <div key={t.id} className="bg-white rounded-2xl border border-slate-100 p-4 flex items-start gap-4">
                 <button onClick={() => editTemplate(t)} className="flex-1 text-left min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
