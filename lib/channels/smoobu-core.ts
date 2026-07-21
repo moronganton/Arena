@@ -137,6 +137,39 @@ export async function getSmoobuRates(
   return out;
 }
 
+// Read rates for MANY apartments in one call (for the calendar overlay).
+// Returns { [apartmentId]: { [date]: DayRate } }.
+export async function getSmoobuRatesMulti(
+  userId: string,
+  apartmentIds: string[],
+  startDate: string,
+  endDate: string
+): Promise<Record<string, Record<string, DayRate>>> {
+  const account = await prisma.smoobuAccount.findUnique({ where: { userId } });
+  if (!account) throw new Error("Smoobu not connected");
+  if (apartmentIds.length === 0) return {};
+
+  const aptParams = apartmentIds.map((id) => `apartments%5B%5D=${id}`).join("&");
+  const path = `/rates?${aptParams}&start_date=${startDate}&end_date=${endDate}`;
+  const data = await smoobuFetch(account.apiKey, path);
+  const root: Record<string, Record<string, { price?: number; min_length_of_stay?: number; available?: number }>> =
+    data?.data ?? {};
+
+  const out: Record<string, Record<string, DayRate>> = {};
+  for (const [aptId, byDate] of Object.entries(root)) {
+    const days: Record<string, DayRate> = {};
+    for (const [date, v] of Object.entries(byDate || {})) {
+      days[date] = {
+        price: typeof v?.price === "number" ? v.price : null,
+        minStay: typeof v?.min_length_of_stay === "number" ? v.min_length_of_stay : null,
+        available: typeof v?.available === "number" ? v.available : null,
+      };
+    }
+    out[aptId] = days;
+  }
+  return out;
+}
+
 // Pull the message thread for a Smoobu reservation and import any messages
 // StayHQ doesn't have yet. Returns the ids of newly imported inbound messages
 // so callers can hand them to the AI assistant.

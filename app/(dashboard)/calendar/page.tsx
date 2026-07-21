@@ -64,6 +64,10 @@ function addDays(d: Date, n: number) {
 function dayIndex(from: Date, date: Date) {
   return Math.round((startOfDay(date).getTime() - startOfDay(from).getTime()) / 86400000);
 }
+// Local calendar-day key (YYYY-MM-DD) to match Smoobu's per-night rate keys
+function ymdLocal(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 
 // Clamp a [start,end) range to the visible window; returns 0-indexed start day + span
 function placeBar(from: Date, start: Date, end: Date) {
@@ -82,6 +86,8 @@ export default function CalendarPage() {
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
   const [loading, setLoading] = useState(true);
+  const [prices, setPrices] = useState<Record<string, Record<string, number>>>({});
+  const [currency, setCurrency] = useState<Record<string, string>>({});
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const windowEnd = addDays(windowStart, WINDOW);
@@ -108,6 +114,24 @@ export default function CalendarPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Live Smoobu prices for the visible window (read-only overlay). Separate from
+  // the main load so the calendar renders immediately and prices fill in after.
+  useEffect(() => {
+    const start = ymdLocal(windowStart);
+    const end = ymdLocal(addDays(windowStart, WINDOW - 1));
+    let cancelled = false;
+    fetch(`/api/pricing/live-batch?start=${start}&end=${end}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled) return;
+        setPrices(data.prices || {});
+        setCurrency(data.currency || {});
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [windowStart]);
 
   // Scroll so "today" sits near the left edge whenever it's in range
   useEffect(() => {
@@ -253,19 +277,26 @@ export default function CalendarPage() {
                   );
                 })}
 
-                {/* Background cells */}
+                {/* Background cells — with the live Smoobu rate for that day */}
                 {properties.map((p, r) =>
                   days.map((d, i) => {
                     const isToday = dayIndex(today, d) === 0;
                     const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+                    const price = prices[p.id]?.[ymdLocal(d)];
                     return (
                       <div
                         key={`c-${p.id}-${i}`}
-                        className={`border-b border-r border-slate-50 ${
+                        className={`border-b border-r border-slate-50 flex items-end justify-center pb-1 ${
                           isToday ? "bg-indigo-50/40" : isWeekend ? "bg-slate-50/50" : ""
                         }`}
                         style={{ gridRow: r + 2, gridColumn: i + 1 }}
-                      />
+                      >
+                        {price != null && (
+                          <span className="text-[9px] font-medium text-slate-400 tabular-nums leading-none">
+                            {currency[p.id] || ""}{price.toLocaleString()}
+                          </span>
+                        )}
+                      </div>
                     );
                   })
                 )}
