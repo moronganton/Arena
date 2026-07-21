@@ -12,7 +12,9 @@ import { SMOOBU_BASE_URL, parseCredential, buildHeaders } from "@/lib/channels/s
 const TEST_PRICE = 13579;
 
 async function getRates(cred: ReturnType<typeof parseCredential>, apartmentId: string, date: string) {
-  const path = `/rates?apartments=${apartmentId}&start_date=${date}&end_date=${date}`;
+  // Smoobu expects the apartments array param, not a scalar — the earlier
+  // "No apartments found" 422 was this format being wrong, not the write failing.
+  const path = `/rates?apartments[]=${apartmentId}&start_date=${date}&end_date=${date}`;
   const res = await fetch(`${SMOOBU_BASE_URL}${path}`, {
     headers: { ...buildHeaders(cred, "GET", path), "Cache-Control": "no-cache" },
   });
@@ -71,6 +73,8 @@ export async function GET(req: NextRequest) {
 
     const post = await postRates(cred, apartmentId, testDate, TEST_PRICE);
 
+    const postSucceeded = post.status < 300 && /success|true/i.test(post.raw);
+
     await new Promise((r) => setTimeout(r, 1500));
     const after = await getRates(cred, apartmentId, testDate);
     const applied = extractPrice(after.raw, apartmentId, testDate) === TEST_PRICE || after.raw.includes(String(TEST_PRICE));
@@ -90,13 +94,15 @@ export async function GET(req: NextRequest) {
       testDate,
       testPrice: TEST_PRICE,
       originalPriceRead: originalPrice,
-      post: { httpStatus: post.status, body: post.raw },
+      post: { httpStatus: post.status, body: post.raw, succeeded: postSucceeded },
       readBack: { httpStatus: after.status, sample: after.raw.slice(0, 400) },
       applied,
       restored,
       verdict: applied
-        ? "Rate WRITE works — Smoobu applied the test price and read it back. Pricing push from StayHQ is technically possible on this account."
-        : `Rate write did NOT take effect (POST HTTP ${post.status}, but read-back doesn't show the test price). Same pattern as messaging — likely gated on the trial / requires a paid plan.`,
+        ? "Rate WRITE works — Smoobu accepted the push AND read the test price back. Pricing push from StayHQ is technically possible on this account."
+        : postSucceeded
+        ? "Rate write returned success ({success:true}), but read-back couldn't confirm the value. Likely the WRITE works (unlike messaging) — check the price on 2027-12-03 in Smoobu/PriceLabs to confirm."
+        : `Rate write did NOT succeed (POST HTTP ${post.status}). Same accept-but-ignore pattern as messaging — likely gated on the trial.`,
     });
   } catch (err) {
     return NextResponse.json({ apartment: { id: apartmentId }, authInfo, error: err instanceof Error ? err.message : String(err) });
