@@ -2,11 +2,11 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, RefreshCw, CalendarDays, Info } from "lucide-react";
+import { formatCurrency } from "@/lib/utils";
 
 interface Property { id: string; name: string; currency: string; }
 interface DayRate { price: number | null; minStay: number | null; available: number | null; }
 
-const CUR: Record<string, string> = { EUR: "€", USD: "$", GBP: "£", RON: "lei", CHF: "CHF" };
 const WD = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 function ymd(d: Date) { return d.toISOString().slice(0, 10); }
@@ -28,7 +28,7 @@ export default function LivePricingCalendar() {
   }, []);
 
   const property = properties.find((p) => p.id === propId);
-  const cur = property ? (CUR[property.currency] || property.currency + " ") : "";
+  const curCode = property?.currency || "EUR";
   const year = cursor.getUTCFullYear();
   const month = cursor.getUTCMonth();
   const first = new Date(Date.UTC(year, month, 1));
@@ -113,7 +113,7 @@ export default function LivePricingCalendar() {
                       {loading ? (
                         <span className="text-xs text-slate-300">…</span>
                       ) : r?.price != null ? (
-                        <span className={`text-sm font-semibold ${unavailable ? "text-slate-400 line-through" : "text-slate-900"}`}>{cur}{r.price.toLocaleString()}</span>
+                        <span className={`text-sm font-semibold ${unavailable ? "text-slate-400 line-through" : "text-slate-900"}`}>{formatCurrency(r.price, curCode)}</span>
                       ) : (
                         <span className="text-xs text-slate-300">—</span>
                       )}

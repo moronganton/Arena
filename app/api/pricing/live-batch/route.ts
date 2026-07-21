@@ -3,8 +3,6 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getSmoobuRatesMulti } from "@/lib/channels/smoobu-core";
 
-const CUR: Record<string, string> = { EUR: "€", USD: "$", GBP: "£", RON: "lei", CHF: "CHF" };
-
 // GET /api/pricing/live-batch?start=YYYY-MM-DD&end=YYYY-MM-DD
 // Live Smoobu prices for ALL of the host's Smoobu-mapped properties over a date
 // range, in one call — used to overlay rates on the calendar. Read-only.
@@ -25,8 +23,9 @@ export async function GET(req: NextRequest) {
 
   const apartmentIds = mappings.map((m) => m.listingId!) as string[];
   const aptToProperty = new Map(mappings.map((m) => [m.listingId!, m.propertyId]));
+  // Return the ISO code; the client formats it with Intl (correct symbol + placement)
   const currency: Record<string, string> = {};
-  for (const m of mappings) currency[m.propertyId] = CUR[m.property.currency] || m.property.currency + " ";
+  for (const m of mappings) currency[m.propertyId] = m.property.currency;
 
   try {
     const byApt = await getSmoobuRatesMulti(session.user.id, apartmentIds, start, end);

@@ -6,12 +6,18 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export function formatCurrency(amount: number, currency = "EUR"): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency,
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount);
+  const code = (currency || "EUR").toUpperCase();
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: code,
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(amount);
+  } catch {
+    // Unknown/invalid ISO code → show the code before the number so it's never wrong
+    return `${code} ${Math.round(amount).toLocaleString()}`;
+  }
 }
 
 export function formatDate(date: Date | string, options?: Intl.DateTimeFormatOptions): string {

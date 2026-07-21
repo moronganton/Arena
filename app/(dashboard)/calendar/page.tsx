@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, Download, Plus, CalendarDays } from "lucide-react";
+import { formatCurrency } from "@/lib/utils";
 
 interface Reservation {
   id: string;
@@ -16,8 +17,6 @@ interface Reservation {
   property: { id: string; name: string; city: string };
 }
 
-const CUR: Record<string, string> = { EUR: "€", USD: "$", GBP: "£", RON: "lei ", CHF: "CHF " };
-const curSym = (c?: string) => (c ? CUR[c] || c + " " : "");
 const ddmm = (iso?: string) => {
   if (!iso) return "";
   const d = new Date(iso);
@@ -304,7 +303,7 @@ export default function CalendarPage() {
                       >
                         {price != null && (
                           <span className="text-[9px] font-medium text-slate-400 tabular-nums leading-none">
-                            {currency[p.id] || ""}{price.toLocaleString()}
+                            {formatCurrency(price, currency[p.id] || "EUR")}
                           </span>
                         )}
                       </div>
@@ -361,7 +360,7 @@ export default function CalendarPage() {
                           <span className="flex items-center justify-between gap-1 text-[9px] opacity-90 leading-tight">
                             <span className="truncate">
                               {nights}
-                              {res.totalAmount != null ? ` · ${curSym(res.currency)}${res.totalAmount.toLocaleString()}` : ""}
+                              {res.totalAmount != null ? ` · ${formatCurrency(res.totalAmount, res.currency || "EUR")}` : ""}
                             </span>
                             {res.createdAt && (
                               <span className="shrink-0 opacity-80" title={`Booked ${ddmm(res.createdAt)}`}>{ddmm(res.createdAt)}</span>

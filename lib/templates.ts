@@ -1,3 +1,5 @@
+import { formatCurrency } from "@/lib/utils";
+
 // Message template engine: the merge fields a host can drop into a template,
 // the triggers that fire it, and the renderer that fills a template with a
 // real reservation's data. Inspired by Airbnb/Booking.com scheduled messages,
@@ -98,7 +100,7 @@ export interface TemplateReservation {
 export function valuesFromReservation(res: TemplateReservation, hostName?: string | null): Record<string, string> {
   const first = res.guest.name.trim().split(/\s+/)[0] || res.guest.name;
   const nights = Math.max(1, Math.round((res.checkOut.getTime() - res.checkIn.getTime()) / 86400000));
-  const total = res.totalAmount != null ? `${res.currency === "EUR" ? "€" : res.currency + " "}${res.totalAmount.toLocaleString()}` : "";
+  const total = res.totalAmount != null ? formatCurrency(res.totalAmount, res.currency) : "";
   return {
     "[Full Name]": res.guest.name,
     "[First Name]": first,
