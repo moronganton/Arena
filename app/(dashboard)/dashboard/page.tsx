@@ -169,10 +169,10 @@ export default async function DashboardPage() {
             <p className="px-4 py-8 text-center text-sm text-slate-400">No guest questions waiting. 🎉</p>
           ) : (
             d.attention.map((a) => (
-              <Link key={a.reservationId} href={`/reservations/${a.reservationId}`} className="flex items-center gap-3 px-4 py-2.5 border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-colors">
-                <span className="text-[11px] text-indigo-600 font-bold whitespace-nowrap max-w-[110px] truncate">{a.property}</span>
-                <span className="text-[13px] text-slate-800 flex-1 min-w-0 truncate">{a.question}</span>
-                <ArrowRight className="w-3.5 h-3.5 text-slate-300 shrink-0" />
+              <Link key={a.reservationId} href={`/reservations/${a.reservationId}`} className="flex items-start gap-2 px-3 py-2 border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-colors">
+                <span className="text-[9px] text-indigo-600 font-bold leading-tight w-11 shrink-0 truncate mt-0.5" title={a.property}>{a.property}</span>
+                <span className="text-[10px] text-slate-800 flex-1 min-w-0 truncate mt-0.5">{a.question}</span>
+                <ArrowRight className="w-3.5 h-3.5 text-slate-300 shrink-0 mt-0.5" />
               </Link>
             ))
           )}
