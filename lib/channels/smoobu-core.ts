@@ -226,15 +226,24 @@ export async function syncSmoobuMessagesForReservation(
       continue;
     }
 
-    // Direction: Smoobu's type field alone is unreliable — some genuine guest
-    // messages (e.g. relayed by email instead of the channel thread) arrive as
-    // type 2 just like host messages. Genuinely host-sent messages always carry
-    // a non-empty htmlMessage (rendered email HTML or Smoobu-composed text);
-    // guest-authored messages never do. So: type 2 + htmlMessage → host,
-    // everything else → guest.
+    // Direction: Smoobu's `type` is authoritative — 1 = written by the guest,
+    // 2 = written by the host.
+    //
+    // An earlier version additionally required a non-empty htmlMessage before
+    // calling a message host-sent. That field is only filled in when the
+    // message was composed through Smoobu itself: replies typed in the
+    // Booking.com extranet arrive as type 2 with htmlMessage "", so every one
+    // of them was imported as a guest message.
+    //
+    // (type 2, htmlMessage "") is genuinely ambiguous — an email-relayed guest
+    // message can look identical, and no other field in the payload separates
+    // them. Host is the safer reading of the two: filing a host message as the
+    // guest feeds the AI the host's own words as if the guest had said them,
+    // and it answers a question the host already answered. The reverse merely
+    // puts a message on the wrong side. Duplicate guest text arriving as an
+    // outgoing entry is caught by the echo checks below instead.
     const type = Number(m.type ?? 0);
-    const htmlBody = String(m.htmlMessage ?? m.messageHtml ?? "").trim();
-    const direction = type === 2 && htmlBody ? "OUTBOUND" : "INBOUND";
+    const direction = type === 2 ? "OUTBOUND" : "INBOUND";
 
     const exists = await prisma.message.findFirst({ where: { externalId: msgId } });
     if (!exists) {
@@ -263,29 +272,27 @@ export async function syncSmoobuMessagesForReservation(
           continue;
         }
       }
-      // Repair guest messages imported as host-sent under the old type-only
-      // mapping: flip them back to INBOUND and let the AI process them.
-      // (Only this direction — host rows are never flipped to guest.)
+      // Repair rows stored with the wrong direction under an earlier mapping,
+      // in both directions. Only importer-created rows are ever touched, never
+      // StayHQ's own sends or AI replies.
       if (
         exists.source === "smoobu" &&
-        exists.direction === "OUTBOUND" &&
-        direction === "INBOUND" &&
+        exists.direction !== direction &&
         !exists.senderId &&
         !exists.isAiGenerated
       ) {
         await prisma.message.update({
           where: { id: exists.id },
-          data: { direction: "INBOUND" },
+          data:
+            direction === "INBOUND"
+              ? { direction: "INBOUND" }
+              : // A host message filed as the guest's also left a false "needs
+                // your reply" flag and an unread badge behind — clear both.
+                { direction: "OUTBOUND", needsHostReply: false, isRead: true },
         });
-        console.log(`[smoobu-messages] repaired ${msgId}: OUTBOUND -> INBOUND (guest message mislabeled type=2)`);
-        newInboundIds.push(exists.id);
+        console.log(`[smoobu-messages] repaired ${msgId}: ${exists.direction} -> ${direction}`);
+        if (direction === "INBOUND") newInboundIds.push(exists.id);
         continue;
-      }
-      if (exists.source === "smoobu" && exists.direction !== direction) {
-        console.log(
-          `[smoobu-messages] note ${msgId}: stored=${exists.direction} but heuristic says ${direction}; ` +
-          `keeping stored direction; raw: ${JSON.stringify(m).slice(0, 300)}`
-        );
       }
       continue;
     }
