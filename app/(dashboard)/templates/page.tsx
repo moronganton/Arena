@@ -406,7 +406,7 @@ export default function TemplatesPage() {
               placeholder={"Dear [First Name] 👋\n\nWe're looking forward to welcoming you to [Property Name] on [Check-in Date]. Your door code is [Access Code].\n\nAny questions, just reply here!\n[Host Name]"}
               className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-y font-mono leading-relaxed"
             />
-            <p className=”text-xs text-slate-400 mt-2”>Type <span className=”font-mono text-slate-500”>[Field]</span> tags or use “Insert field”. They're replaced with each guest's real details when sent.</p>
+            <p className=”text-xs text-slate-400 mt-2”>Type <span className=”font-mono text-slate-500”>[Field]</span> tags or use “Insert field”. They&apos;re replaced with each guest&apos;s real details when sent.</p>
           </div>
 
           {/* Images */}
