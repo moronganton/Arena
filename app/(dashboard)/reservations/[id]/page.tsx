@@ -6,6 +6,7 @@ import Link from "next/link";
 import { ArrowLeft, Key, MessageSquare, Edit3, Mail, Phone } from "lucide-react";
 import { MessageThread } from "@/components/messages/MessageThread";
 import ReservationActions from "./ReservationActions";
+import { AccessCodeGenerator } from "@/components/reservations/AccessCodeGenerator";
 
 export default async function ReservationDetailPage({
   params,
@@ -150,16 +151,17 @@ export default async function ReservationDetailPage({
                 <Key className="w-4 h-4 text-slate-500" />
                 Access Codes
               </h3>
+              <AccessCodeGenerator
+                reservationId={reservation.id}
+                guestName={reservation.guest.name}
+                propertyName={reservation.property.name}
+                locks={reservation.property.locks}
+                externalId={reservation.externalId}
+              />
             </div>
             {reservation.accessCodes.length === 0 ? (
               <div className="text-center py-4">
-                <p className="text-slate-400 text-sm mb-3">No access codes generated</p>
-                <Link
-                  href={`/settings/locks?generate=${reservation.id}`}
-                  className="text-sm text-indigo-600 hover:underline"
-                >
-                  Generate Code
-                </Link>
+                <p className="text-slate-400 text-sm">No access codes generated yet</p>
               </div>
             ) : (
               <div className="space-y-3">
