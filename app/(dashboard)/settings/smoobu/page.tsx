@@ -338,9 +338,10 @@ export default function SmoobuPage() {
               Pulls all bookings (arrivals in the last 90 days and future) from Smoobu.
             </p>
 
-            {/* Automation toggle */}
-            <div className={`flex items-start gap-3 rounded-xl border p-3 mb-4 ${automation ? "bg-green-50 border-green-200" : "bg-amber-50 border-amber-200"}`}>
-              <label className="relative inline-flex items-center cursor-pointer mt-0.5">
+            {/* PIN generation toggle. Import never messages the guest — codes are
+                pushed to the lock only; sending is driven from templates. */}
+            <div className="flex items-center gap-3 mb-4">
+              <label className="relative inline-flex items-center cursor-pointer">
                 <input
                   type="checkbox"
                   checked={automation}
@@ -349,16 +350,9 @@ export default function SmoobuPage() {
                 />
                 <div className="w-10 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
               </label>
-              <div className="text-sm">
-                <p className="font-medium text-slate-800">
-                  PIN codes &amp; guest emails: {automation ? "ON" : "OFF (testing mode)"}
-                </p>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  {automation
-                    ? "Imported confirmed bookings will push a PIN to your smart lock and email the guest."
-                    : "Imported bookings only create reservations in StayHQ — no lock codes, no guest emails. Turn on when you go live."}
-                </p>
-              </div>
+              <p className="text-sm font-medium text-slate-800">
+                PIN code generation: {automation ? "ON" : "OFF (testing mode)"}
+              </p>
             </div>
 
             <button
