@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { MessageSquarePlus, Save, Trash2, RefreshCw, ChevronLeft, Plus, Clock, Building2, Smile, Braces, Info, Send } from "lucide-react";
+import { ImageGallery } from "@/components/templates/ImageGallery";
 
 interface Field { token: string; key: string; label: string; description: string; example: string; }
 interface Trigger { value: string; label: string; description: string; usesOffset: boolean; offsetDir: "before" | "after" | null; anchor: string | null; }
@@ -405,8 +406,15 @@ export default function TemplatesPage() {
               placeholder={"Dear [First Name] 👋\n\nWe're looking forward to welcoming you to [Property Name] on [Check-in Date]. Your door code is [Access Code].\n\nAny questions, just reply here!\n[Host Name]"}
               className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-y font-mono leading-relaxed"
             />
-            <p className="text-xs text-slate-400 mt-2">Type <span className="font-mono text-slate-500">[Field]</span> tags or use “Insert field”. They're replaced with each guest's real details when sent.</p>
+            <p className=”text-xs text-slate-400 mt-2”>Type <span className=”font-mono text-slate-500”>[Field]</span> tags or use “Insert field”. They're replaced with each guest's real details when sent.</p>
           </div>
+
+          {/* Images */}
+          {“id” in form && (
+            <div className=”bg-white rounded-2xl border border-slate-100 p-5”>
+              <ImageGallery templateId={form.id as string} />
+            </div>
+          )}
 
           {/* Live preview + test */}
           <div className="bg-white rounded-2xl border border-slate-100 p-5">
