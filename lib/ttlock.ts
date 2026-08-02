@@ -325,11 +325,41 @@ export async function generateAccessCode(params: {
   return code;
 }
 
-// Parse time string (HH:mm) and apply to a date
-function applyTimeToDate(date: Date, timeStr: string): Date {
+// Parse time string (HH:mm) and apply to a date in CET timezone
+function applyTimeToDateCET(date: Date, timeStr: string): Date {
   const [hours, minutes] = timeStr.split(":").map(Number);
-  const result = new Date(date);
-  result.setHours(hours, minutes, 0, 0);
+
+  // Create a formatter for CET to get the offset
+  const cetFormatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Europe/Berlin', // CET/CEST timezone
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+
+  // Get the CET date parts for our input date
+  const cetParts = cetFormatter.formatToParts(date);
+  const cetYear = parseInt(cetParts.find(p => p.type === 'year')!.value);
+  const cetMonth = parseInt(cetParts.find(p => p.type === 'month')!.value) - 1; // 0-indexed
+  const cetDay = parseInt(cetParts.find(p => p.type === 'day')!.value);
+
+  // Create a new date in UTC that represents the desired CET time
+  // First, create a UTC date for the CET date at 00:00
+  const utcMidnight = new Date(Date.UTC(cetYear, cetMonth, cetDay, 0, 0, 0, 0));
+
+  // Get the offset between UTC and CET for this date (handles DST)
+  const cetMidnightStr = cetFormatter.format(utcMidnight);
+  const cetMidnightParts = cetFormatter.formatToParts(utcMidnight);
+  const cetMidnightHour = parseInt(cetMidnightParts.find(p => p.type === 'hour')!.value);
+  const offset = cetMidnightHour; // Hours offset from UTC
+
+  // Create the target UTC time by subtracting the offset
+  const result = new Date(Date.UTC(cetYear, cetMonth, cetDay, hours - offset, minutes, 0, 0));
+
   return result;
 }
 
@@ -350,8 +380,8 @@ export async function autoGenerateCodesForReservation(
   const errors: string[] = [];
   for (const lock of locks) {
     try {
-      const validFrom = applyTimeToDate(reservation.checkIn, lock.checkInTime);
-      const validTo = applyTimeToDate(reservation.checkOut, lock.checkOutTime);
+      const validFrom = applyTimeToDateCET(reservation.checkIn, lock.checkInTime);
+      const validTo = applyTimeToDateCET(reservation.checkOut, lock.checkOutTime);
       const code = await generateAccessCode({
         lockId: lock.id,
         reservationId,

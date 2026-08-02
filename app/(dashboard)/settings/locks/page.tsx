@@ -536,22 +536,24 @@ export default function LocksPage() {
                         </select>
                       </div>
                       <div>
-                        <label className="block text-xs font-medium text-slate-600 mb-1">Check-in Time</label>
+                        <label className="block text-xs font-medium text-slate-600 mb-1">Check-in Time <span className="text-slate-400 font-normal">(CET)</span></label>
                         <input
                           type="time"
                           value={editForm.checkInTime}
                           onChange={(e) => setEditForm({ ...editForm, checkInTime: e.target.value })}
                           className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                         />
+                        <p className="text-[10px] text-slate-400 mt-1">Guest can enter from this time on check-in day</p>
                       </div>
                       <div>
-                        <label className="block text-xs font-medium text-slate-600 mb-1">Check-out Time</label>
+                        <label className="block text-xs font-medium text-slate-600 mb-1">Check-out Time <span className="text-slate-400 font-normal">(CET)</span></label>
                         <input
                           type="time"
                           value={editForm.checkOutTime}
                           onChange={(e) => setEditForm({ ...editForm, checkOutTime: e.target.value })}
                           className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                         />
+                        <p className="text-[10px] text-slate-400 mt-1">Code expires at this time on checkout day</p>
                       </div>
                     </div>
                     <div className="flex items-center gap-3 mt-3">
