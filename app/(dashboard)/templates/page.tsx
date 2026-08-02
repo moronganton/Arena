@@ -410,11 +410,11 @@ export default function TemplatesPage() {
           </div>
 
           {/* Images */}
-          {“id” in form && (
+          {“id” in form ? (
             <div className=”bg-white rounded-2xl border border-slate-100 p-5”>
-              <ImageGallery templateId={form.id as string} />
+              <ImageGallery templateId={(form as any).id} />
             </div>
-          )}
+          ) : null}
 
           {/* Live preview + test */}
           <div className="bg-white rounded-2xl border border-slate-100 p-5">
