@@ -59,8 +59,25 @@ model MessageTemplate {
   property   Property? @relation(fields: [propertyId], references: [id], onDelete: Cascade)
 
   sends MessageTemplateSend[]
+  images TemplateImage[]
 
   @@index([userId])
+}
+
+// Images attached to a message template (instruction photos, diagrams, etc.)
+model TemplateImage {
+  id        String   @id @default(cuid())
+  url       String   // URL to the image (stored via Resend or file service)
+  fileName  String   // original filename
+  size      Int      // file size in bytes
+  mimeType  String   @default("image/jpeg") // image/jpeg, image/png, etc.
+  order     Int      @default(0) // display order
+  createdAt DateTime @default(now())
+
+  templateId String
+  template   MessageTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@index([templateId])
 }
 
 // One row per (template, reservation) actually sent — the dedupe ledger so a
