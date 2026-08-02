@@ -225,6 +225,7 @@ model Property {
   checklistItems CleaningChecklistItem[]
   expenses      Expense[]
   recurringExpenses RecurringExpense[]
+  perReservationCosts PerReservationCost[]
   knowledge     PropertyKnowledge[]
   messageTemplates MessageTemplate[]
 
@@ -264,6 +265,29 @@ model RecurringExpense {
 
   ownerId String
   propertyId String?
+  property   Property? @relation(fields: [propertyId], references: [id])
+
+  @@index([ownerId])
+}
+
+// A cost incurred once per reservation (cleaning, laundry, welcome pack).
+// Deliberately NOT stored as Expense rows: the month's total is amount x the
+// number of reservations, recomputed on every report, so it tracks bookings
+// added, moved or cancelled during the month without anyone editing a figure.
+// Same approach as PlatformFeeSetting, which derives fees from revenue.
+model PerReservationCost {
+  id          String   @id @default(cuid())
+  category    String
+  description String
+  amount      Float    // cost for ONE reservation
+  currency    String   @default("EUR")
+  startDate   DateTime // first month it applies to
+  endDate     DateTime? // null = still active
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  ownerId String
+  propertyId String? // null = applies to every property
   property   Property? @relation(fields: [propertyId], references: [id])
 
   @@index([ownerId])

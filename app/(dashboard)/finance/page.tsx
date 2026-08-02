@@ -34,6 +34,17 @@ interface Expense {
   property?: { id: string; name: string } | null;
 }
 
+interface PerReservationCost {
+  id: string;
+  category: string;
+  description: string;
+  amount: number;      // cost for ONE reservation
+  currency: string;
+  property: { id: string; name: string } | null;
+  reservations: number; // check-outs counted this month
+  total: number;        // amount x reservations
+}
+
 interface RecurringCost {
   id: string;
   category: string;
@@ -50,6 +61,7 @@ interface Report {
   costsByCategory: Record<string, number>;
   platformFees: Array<{ channel: string; percent: number; base: number; fee: number }>;
   recurringCosts: RecurringCost[];
+  perReservationCosts: PerReservationCost[];
   properties: Array<{
     id: string; name: string; city: string; currency: string;
     revenue: number; costs: number; net: number; margin: number | null; reservationCount: number;
@@ -83,7 +95,9 @@ const emptyForm = {
   propertyId: "",
   invoiceImage: "",
   aiExtracted: false,
-  recurring: false,
+  // "once" = a single dated expense, "monthly" = same amount every month,
+  // "perReservation" = amount x however many bookings the month has.
+  kind: "once" as "once" | "monthly" | "perReservation",
 };
 
 const FEE_CHANNELS = ["BOOKING", "AIRBNB", "VRBO", "EXPEDIA"];
@@ -149,7 +163,7 @@ export default function FinancePage() {
           propertyId: data.propertyId || "",
           invoiceImage: image,
           aiExtracted: true,
-          recurring: false,
+          kind: "once" as const,
         });
         setExtractNote(
           `AI extracted with ${Math.round((data.confidence || 0.5) * 100)}% confidence — please verify before saving.`
@@ -163,17 +177,19 @@ export default function FinancePage() {
 
   async function saveExpense() {
     setSaving(true);
-    const res = form.recurring
-      ? await fetch("/api/recurring-expenses", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...form, startMonth: month }),
-        })
-      : await fetch("/api/expenses", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(form),
-        });
+    const endpoint =
+      form.kind === "monthly"
+        ? "/api/recurring-expenses"
+        : form.kind === "perReservation"
+        ? "/api/per-reservation-costs"
+        : "/api/expenses";
+    const payload =
+      form.kind === "once" ? form : { ...form, startMonth: month };
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
     setSaving(false);
     if (res.ok) {
       setShowForm(false);
@@ -207,6 +223,28 @@ export default function FinancePage() {
   async function endRecurring(r: RecurringCost) {
     if (!confirm(`Stop "${r.description}" from ${month} onward? Past months keep it.`)) return;
     await fetch(`/api/recurring-expenses?id=${r.id}&month=${month}`, { method: "DELETE" });
+    await loadData();
+  }
+
+  async function modifyPerReservation(r: PerReservationCost) {
+    const input = prompt(
+      `New cost per reservation for "${r.description}" (effective from ${month}):`,
+      String(r.amount)
+    );
+    if (input === null) return;
+    const amount = parseFloat(input);
+    if (isNaN(amount) || amount < 0) return alert("Invalid amount");
+    await fetch("/api/per-reservation-costs", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: r.id, amount, effectiveMonth: month }),
+    });
+    await loadData();
+  }
+
+  async function endPerReservation(r: PerReservationCost) {
+    if (!confirm(`Stop "${r.description}" from ${month} onward? Past months keep it.`)) return;
+    await fetch(`/api/per-reservation-costs?id=${r.id}&month=${month}`, { method: "DELETE" });
     await loadData();
   }
 
@@ -481,7 +519,7 @@ export default function FinancePage() {
                   {["EUR", "RON", "CZK", "USD", "GBP", "CHF"].map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
-              {!form.recurring && (
+              {form.kind === "once" && (
                 <div className="col-span-2">
                   <label className="block text-xs font-medium text-slate-500 mb-1">Date</label>
                   <input
@@ -492,24 +530,35 @@ export default function FinancePage() {
                   />
                 </div>
               )}
-              <div className="col-span-2 flex items-start gap-3 bg-slate-50 rounded-xl p-3">
-                <label className="relative inline-flex items-center cursor-pointer mt-0.5">
-                  <input
-                    type="checkbox"
-                    checked={form.recurring}
-                    onChange={(e) => setForm({ ...form, recurring: e.target.checked })}
-                    className="sr-only peer"
-                  />
-                  <div className="w-10 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
-                </label>
-                <div className="text-xs">
-                  <p className="font-medium text-slate-700">Recurring monthly cost</p>
-                  <p className="text-slate-500 mt-0.5">
-                    {form.recurring
-                      ? `Will appear automatically every month starting ${month} (electricity, internet, building fees...). You can modify or stop it later.`
-                      : "One-off cost for the selected date only (e.g. yearly insurance, a repair, a bill recalculation)."}
-                  </p>
+              <div className="col-span-2 bg-slate-50 rounded-xl p-3">
+                <label className="block text-xs font-medium text-slate-500 mb-2">How is this cost incurred?</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {([
+                    ["once", "One-off"],
+                    ["monthly", "Every month"],
+                    ["perReservation", "Per reservation"],
+                  ] as const).map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setForm({ ...form, kind: value })}
+                      className={`text-xs font-medium px-2 py-2 rounded-lg border transition ${
+                        form.kind === value
+                          ? "bg-indigo-600 border-indigo-600 text-white"
+                          : "border-slate-200 bg-white text-slate-600 hover:border-indigo-300"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
                 </div>
+                <p className="text-xs text-slate-500 mt-2">
+                  {form.kind === "monthly"
+                    ? `The same amount every month from ${month} (electricity, internet, building fees). You can change or stop it later.`
+                    : form.kind === "perReservation"
+                    ? `Charged once per booking from ${month}. Enter the cost for ONE reservation — the month's total is worked out from the number of check-outs and updates itself as bookings change.`
+                    : "A single cost on the date above (a repair, a yearly insurance bill)."}
+                </p>
               </div>
             </div>
 
@@ -625,6 +674,51 @@ export default function FinancePage() {
                   </button>
                   <button
                     onClick={() => endRecurring(r)}
+                    className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Per-reservation costs */}
+      {report && report.perReservationCosts.length > 0 && (
+        <div className="bg-white rounded-2xl border border-emerald-200 p-5 mb-4">
+          <h3 className="font-semibold text-slate-900 text-sm mb-1 flex items-center gap-2">
+            <RefreshCw className="w-3.5 h-3.5 text-emerald-500" />
+            Per-Reservation Costs
+          </h3>
+          <p className="text-xs text-slate-400 mb-3">
+            Recalculated from the number of check-outs in {month} — the total moves on its own as bookings are added or cancelled.
+          </p>
+          <div className="space-y-1.5">
+            {report.perReservationCosts.map((r) => (
+              <div key={r.id} className="flex items-center justify-between bg-emerald-50/50 border border-emerald-100 rounded-lg px-3 py-2 gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-slate-900 truncate">{r.description}</p>
+                  <p className="text-xs text-slate-500">
+                    {CATEGORY_LABELS[r.category]} · {r.property?.name || "All properties"}
+                  </p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {r.amount.toLocaleString()} {r.currency} × {r.reservations} reservation{r.reservations === 1 ? "" : "s"}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <span className="text-sm font-semibold text-slate-900">
+                    {r.total.toLocaleString()} {r.currency}
+                  </span>
+                  <button
+                    onClick={() => modifyPerReservation(r)}
+                    className="text-xs bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 px-2 py-1 rounded-lg transition"
+                  >
+                    Modify
+                  </button>
+                  <button
+                    onClick={() => endPerReservation(r)}
                     className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
                   >
                     <Trash2 className="w-3.5 h-3.5" />

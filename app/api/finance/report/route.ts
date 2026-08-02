@@ -53,6 +53,16 @@ export async function GET(req: NextRequest) {
     include: { property: { select: { id: true, name: true } } },
   });
 
+  // Per-reservation cost rules active in this month (cleaning, laundry, ...)
+  const perReservation = await prisma.perReservationCost.findMany({
+    where: {
+      ownerId: session.user.id,
+      startDate: { lt: end },
+      OR: [{ endDate: null }, { endDate: { gte: start } }],
+    },
+    include: { property: { select: { id: true, name: true } } },
+  });
+
   // Platform fee settings (% per channel)
   const feeSettings = await prisma.platformFeeSetting.findMany({
     where: { ownerId: session.user.id },
@@ -141,6 +151,53 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // Apply per-reservation costs: amount x however many reservations the month
+  // actually has. Derived here rather than stored, so adding, moving or
+  // cancelling a booking changes the figure with no bookkeeping.
+  //
+  // The count is reservations CHECKING OUT in the month, the same basis as
+  // revenue above — which is also when a cleaning is actually incurred.
+  const perReservationLines: Array<{
+    id: string; category: string; description: string; amount: number;
+    currency: string; property: { id: string; name: string } | null;
+    reservations: number; total: number;
+  }> = [];
+
+  for (const pr of perReservation) {
+    let count = 0;
+    if (pr.propertyId) {
+      count = propertyMap.get(pr.propertyId)?.reservationCount ?? 0;
+    } else {
+      // Portfolio-wide rule — every reservation across all properties.
+      for (const entry of propertyMap.values()) count += entry.reservationCount;
+    }
+
+    const total = Math.round(pr.amount * count * 100) / 100;
+
+    // A rule that matched no reservations is still reported, so a zero is
+    // visibly a zero rather than a rule silently doing nothing.
+    perReservationLines.push({
+      id: pr.id,
+      category: pr.category,
+      description: pr.description,
+      amount: pr.amount,
+      currency: pr.currency,
+      property: pr.property,
+      reservations: count,
+      total,
+    });
+    if (total === 0) continue;
+
+    if (pr.propertyId && propertyMap.has(pr.propertyId)) {
+      const entry = propertyMap.get(pr.propertyId)!;
+      entry.costs += total;
+      entry.costsByCategory[pr.category] = (entry.costsByCategory[pr.category] || 0) + total;
+    } else if (!pr.propertyId) {
+      generalCosts[pr.category] = (generalCosts[pr.category] || 0) + total;
+      generalCostTotal += total;
+    }
+  }
+
   // Auto-compute platform fees (% of channel revenue per property)
   const platformFees: Array<{ channel: string; percent: number; base: number; fee: number }> = [];
   const feeTotalsByChannel: Record<string, { base: number; fee: number; percent: number }> = {};
@@ -205,6 +262,7 @@ export async function GET(req: NextRequest) {
       currency: r.currency,
       property: r.property,
     })),
+    perReservationCosts: perReservationLines,
     properties: properties.sort((a, b) => b.net - a.net),
   });
 }
