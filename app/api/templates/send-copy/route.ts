@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { renderTemplate, valuesFromReservation, SAMPLE_VALUES, type TemplateReservation } from "@/lib/templates";
 import { sendTemplateCopyEmail } from "@/lib/notifications";
+import { getTemplateImages, appendImageLinks, toEmailAttachments, publicBaseUrl } from "@/lib/template-images";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -13,7 +14,7 @@ export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { subject, body, reservationId, to } = await req.json();
+  const { subject, body, reservationId, to, templateId } = await req.json();
   if (typeof body !== "string" || !body.trim()) return NextResponse.json({ error: "body required" }, { status: 400 });
 
   const user = await prisma.user.findUnique({ where: { id: session.user.id }, select: { email: true, name: true } });
@@ -37,9 +38,28 @@ export async function POST(req: NextRequest) {
   }
 
   const rendered = renderTemplate(body, values).trim();
+
+  // Mirror the guest email exactly: the stored body a guest receives already
+  // carries the photo links, and their email carries the files themselves.
+  const images = await getTemplateImages(templateId);
+  const baseUrl = publicBaseUrl();
+  const bodyText = appendImageLinks(rendered, images, baseUrl);
+  const imageUrls = baseUrl ? images.map((img) => `${baseUrl}/api/templates/images/${img.id}/raw`) : [];
+
   try {
-    await sendTemplateCopyEmail({ to: recipient, subject: subject?.trim() || "Message from your host", bodyText: rendered });
-    return NextResponse.json({ success: true, to: recipient });
+    await sendTemplateCopyEmail({
+      to: recipient,
+      subject: subject?.trim() || "Message from your host",
+      bodyText,
+      attachments: toEmailAttachments(images),
+      imageUrls,
+    });
+    return NextResponse.json({
+      success: true,
+      to: recipient,
+      imagesAttached: images.length,
+      imageLinksOmitted: images.length > 0 && !baseUrl,
+    });
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Failed to send email" }, { status: 502 });
   }

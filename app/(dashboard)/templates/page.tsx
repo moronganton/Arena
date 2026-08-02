@@ -79,16 +79,30 @@ export default function TemplatesPage() {
     return () => clearTimeout(h);
   }, [previewResId, form.body]);
 
+  // Photos ride along with a saved template; say so, and call out the case
+  // where NEXTAUTH_URL is unusable so the links were dropped.
+  function photoNote(data: { imagesAttached?: number; imageLinksOmitted?: boolean }): string {
+    if (data.imageLinksOmitted) return " (photo links skipped \u2014 app URL not configured)";
+    if (!data.imagesAttached) return "";
+    return ` with ${data.imagesAttached} photo${data.imagesAttached === 1 ? "" : "s"}`;
+  }
+
   async function sendCopy() {
     setSendingCopy(true);
     setCopyMsg("");
     const res = await fetch("/api/templates/send-copy", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ subject: form.subject, body: form.body, reservationId: previewResId || undefined, to: copyEmail }),
+      body: JSON.stringify({
+        subject: form.subject,
+        body: form.body,
+        reservationId: previewResId || undefined,
+        to: copyEmail,
+        templateId: "id" in form ? form.id : undefined,
+      }),
     });
     const data = await res.json();
     setSendingCopy(false);
-    setCopyMsg(res.ok ? `Sent to ${data.to} ✓` : (data.error || "Failed to send"));
+    setCopyMsg(res.ok ? `Sent to ${data.to}${photoNote(data)} ✓` : (data.error || "Failed to send"));
     setTimeout(() => setCopyMsg(""), 7000);
   }
 
@@ -104,7 +118,7 @@ export default function TemplatesPage() {
     });
     const data = await res.json();
     setSendingGuest(false);
-    setGuestMsg(res.ok ? `Sent to ${data.guest} ✓` : (data.error || "Failed to send"));
+    setGuestMsg(res.ok ? `Sent to ${data.guest}${photoNote(data)} ✓` : (data.error || "Failed to send"));
     setTimeout(() => setGuestMsg(""), 7000);
   }
 

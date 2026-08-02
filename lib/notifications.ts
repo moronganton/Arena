@@ -13,17 +13,46 @@ function escapeHtml(s: string): string {
 // Email a rendered template to the host's own address — a clean copy of exactly
 // what a guest would receive. `labeled` adds a small TEST banner; leave it off
 // for a real-looking copy.
-export async function sendTemplateCopyEmail(params: { to: string; subject: string; bodyText: string; labeled?: boolean }): Promise<void> {
-  const { to, subject, bodyText, labeled } = params;
+export async function sendTemplateCopyEmail(params: {
+  to: string;
+  subject: string;
+  bodyText: string;
+  labeled?: boolean;
+  // Same files the guest's email carries, so the copy is a true preview.
+  attachments?: { filename: string; content: string }[];
+  // Public image URLs, rendered inline so the host can actually see the photos
+  // rather than only find them as attachments.
+  imageUrls?: string[];
+}): Promise<void> {
+  const { to, subject, bodyText, labeled, attachments, imageUrls } = params;
   const banner = labeled
     ? `<div style="background:#eef2ff; color:#4338ca; font-size:12px; font-weight:bold; padding:9px 12px; border-radius:8px; margin-bottom:16px;">TEST PREVIEW — this is how your guest would see the message</div>`
     : "";
+  const photos =
+    imageUrls && imageUrls.length
+      ? `<div style="margin-top:22px; padding-top:16px; border-top:1px solid #eee;">
+           <p style="margin:0 0 10px; color:#666; font-size:13px;">Attached photo${imageUrls.length === 1 ? "" : "s"} (${imageUrls.length})</p>
+           ${imageUrls
+             .map(
+               (u) =>
+                 `<img src="${u}" alt="" style="max-width:100%; border-radius:8px; margin-bottom:10px; display:block;" />`
+             )
+             .join("")}
+         </div>`
+      : "";
   const html = `
     <!DOCTYPE html><html><body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
       ${banner}
       <div style="white-space:pre-wrap; color:#1a1a2e; font-size:15px; line-height:1.6;">${escapeHtml(bodyText)}</div>
+      ${photos}
     </body></html>`;
-  await getResend().emails.send({ from: FROM, to, subject: labeled ? `[TEST] ${subject}` : (subject || "Message from your host"), html });
+  await getResend().emails.send({
+    from: FROM,
+    to,
+    subject: labeled ? `[TEST] ${subject}` : (subject || "Message from your host"),
+    html,
+    ...(attachments && attachments.length ? { attachments } : {}),
+  });
 }
 
 interface AccessCodeEmailParams {
