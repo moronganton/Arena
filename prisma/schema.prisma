@@ -58,6 +58,11 @@ model MessageTemplate {
   propertyId String?
   property   Property? @relation(fields: [propertyId], references: [id], onDelete: Cascade)
 
+  // Short public code for the guest photo page (/g/<shareCode>). Generated
+  // lazily on the first send that carries images, so existing templates keep
+  // working without a backfill.
+  shareCode String? @unique
+
   sends MessageTemplateSend[]
   images TemplateImage[]
 

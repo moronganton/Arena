@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { deliverAiMessage } from "@/lib/ai";
 import { valuesFromReservation, renderTemplate, type TemplateReservation } from "@/lib/templates";
-import { getTemplateImages, appendImageLinks, toEmailAttachments, publicBaseUrl } from "@/lib/template-images";
+import { getTemplateImages, appendGalleryLink, ensureShareCode, toEmailAttachments, publicBaseUrl } from "@/lib/template-images";
 
 // Scheduler: call this on a schedule (hourly is ideal) to send any template
 // whose trigger is due for a reservation today. Protect it with the same
@@ -84,6 +84,7 @@ export async function GET(req: NextRequest) {
     // Same photos for every reservation on this template — fetch once per run.
     const images = await getTemplateImages(t.id);
     const emailAttachments = toEmailAttachments(images);
+    const shareCode = images.length > 0 ? await ensureShareCode(t.id) : null;
 
     // Skip the ones already sent for this template
     const already = await prisma.messageTemplateSend.findMany({
@@ -99,7 +100,7 @@ export async function GET(req: NextRequest) {
       const values = valuesFromReservation(r as unknown as TemplateReservation, t.user.name);
       const rendered = renderTemplate(t.body, values).trim();
       if (!rendered) continue; // guard before links, or photos alone would send an empty message
-      const bodyText = appendImageLinks(rendered, images, baseUrl);
+      const bodyText = appendGalleryLink(rendered, images, baseUrl, shareCode);
 
       try {
         // Claim the slot first so a concurrent run can't double-send

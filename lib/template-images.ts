@@ -1,3 +1,4 @@
+import { randomBytes } from "crypto";
 import { prisma } from "@/lib/prisma";
 
 export interface OutboundImage {
@@ -30,15 +31,53 @@ export async function getTemplateImages(templateId: string | null | undefined): 
   });
 }
 
+// Unambiguous alphabet — no 0/o/1/l/i, so a guest reading the link aloud or
+// retyping it from a screenshot cannot land on the wrong page.
+const CODE_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
+
+function makeCode(len = 8): string {
+  const bytes = randomBytes(len);
+  let out = "";
+  for (let i = 0; i < len; i++) out += CODE_ALPHABET[bytes[i] % CODE_ALPHABET.length];
+  return out;
+}
+
+// Guests get ONE short link to a photo page rather than a wall of raw image
+// URLs. Generated on first use so existing templates need no backfill.
+export async function ensureShareCode(templateId: string): Promise<string | null> {
+  const existing = await prisma.messageTemplate.findUnique({
+    where: { id: templateId },
+    select: { shareCode: true },
+  });
+  if (!existing) return null;
+  if (existing.shareCode) return existing.shareCode;
+
+  // Retry on the (vanishingly rare) collision against the unique index.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const code = makeCode();
+    try {
+      await prisma.messageTemplate.update({ where: { id: templateId }, data: { shareCode: code } });
+      return code;
+    } catch {
+      const raced = await prisma.messageTemplate.findUnique({
+        where: { id: templateId },
+        select: { shareCode: true },
+      });
+      if (raced?.shareCode) return raced.shareCode; // a concurrent send won
+    }
+  }
+  return null;
+}
+
 // Booking.com/Airbnb chat, reached through Smoobu's send-message-to-guest
-// endpoint, accepts a plain `messageBody` string and nothing else — there is no
-// attachment parameter anywhere in that path. So the only way a photo reaches
-// an OTA guest is as a link they can tap. Append one public URL per image.
-export function appendImageLinks(body: string, images: OutboundImage[], baseUrl: string | null): string {
-  if (images.length === 0 || !baseUrl) return body;
-  const links = images.map((img) => `${baseUrl}/api/templates/images/${img.id}/raw`);
-  const heading = images.length === 1 ? "Photo:" : "Photos:";
-  return `${body}\n\n${heading}\n${links.join("\n")}`;
+// endpoint, accepts a plain `messageBody` string and nothing else — no HTML, no
+// markdown, no attachment parameter. A photo cannot be embedded in the chat
+// bubble itself, so the best available form is a single tidy link to a page
+// that shows them all.
+export function appendGalleryLink(body: string, images: OutboundImage[], baseUrl: string | null, shareCode: string | null): string {
+  if (images.length === 0 || !baseUrl || !shareCode) return body;
+  const label = images.length === 1 ? "Photo" : `Photos (${images.length})`;
+  return `${body}\n\n${label}: ${baseUrl}/g/${shareCode}`;
 }
 
 // Email is the one channel that can carry the real files, so guests with an

@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { renderTemplate, valuesFromReservation, SAMPLE_VALUES, type TemplateReservation } from "@/lib/templates";
 import { sendTemplateCopyEmail } from "@/lib/notifications";
-import { getTemplateImages, appendImageLinks, toEmailAttachments, publicBaseUrl } from "@/lib/template-images";
+import { getTemplateImages, appendGalleryLink, ensureShareCode, toEmailAttachments, publicBaseUrl } from "@/lib/template-images";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -43,7 +43,8 @@ export async function POST(req: NextRequest) {
   // carries the photo links, and their email carries the files themselves.
   const images = await getTemplateImages(templateId);
   const baseUrl = publicBaseUrl();
-  const bodyText = appendImageLinks(rendered, images, baseUrl);
+  const shareCode = images.length > 0 ? await ensureShareCode(templateId) : null;
+  const bodyText = appendGalleryLink(rendered, images, baseUrl, shareCode);
   const imageUrls = baseUrl ? images.map((img) => `${baseUrl}/api/templates/images/${img.id}/raw`) : [];
 
   try {
@@ -58,7 +59,7 @@ export async function POST(req: NextRequest) {
       success: true,
       to: recipient,
       imagesAttached: images.length,
-      imageLinksOmitted: images.length > 0 && !baseUrl,
+      imageLinksOmitted: images.length > 0 && (!baseUrl || !shareCode),
     });
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Failed to send email" }, { status: 502 });
