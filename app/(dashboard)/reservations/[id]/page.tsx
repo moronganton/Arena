@@ -7,6 +7,8 @@ import { ArrowLeft, Key, MessageSquare, Edit3, Mail, Phone } from "lucide-react"
 import { MessageThread } from "@/components/messages/MessageThread";
 import ReservationActions from "./ReservationActions";
 import { AccessCodeGenerator } from "@/components/reservations/AccessCodeGenerator";
+import { AccessCodeValidityEditor } from "@/components/reservations/AccessCodeValidityEditor";
+import { toCetInputValue, formatCet } from "@/lib/cet";
 
 export default async function ReservationDetailPage({
   params,
@@ -182,8 +184,13 @@ export default async function ReservationDetailPage({
                       </div>
                     </div>
                     <p className="text-xs text-slate-500 mt-2">
-                      Valid: {formatDate(code.validFrom)} — {formatDate(code.validTo)}
+                      Valid: {formatCet(code.validFrom)} — {formatCet(code.validTo)} <span className="text-slate-400">CET</span>
                     </p>
+                    <AccessCodeValidityEditor
+                      accessCodeId={code.id}
+                      initialFrom={toCetInputValue(code.validFrom)}
+                      initialTo={toCetInputValue(code.validTo)}
+                    />
                   </div>
                 ))}
               </div>

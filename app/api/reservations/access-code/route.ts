@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { generateAccessCode } from "@/lib/ttlock";
+import { generateAccessCode, updateAccessCodeValidity } from "@/lib/ttlock";
+import { cetInputValueToUtc } from "@/lib/cet";
 
 function applyTimeToDateCET(date: Date, timeStr: string): Date {
   const [hours, minutes] = timeStr.split(":").map(Number);
@@ -79,5 +80,47 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     console.error("Failed to generate access code:", err);
     return NextResponse.json({ error: "Failed to generate code" }, { status: 500 });
+  }
+}
+
+// PATCH /api/reservations/access-code { accessCodeId, validFrom, validTo }
+// Adjusts an existing code's validity window — an early check-in or late
+// check-out. Both times arrive as "YYYY-MM-DDTHH:mm" CET wall-clock strings and
+// are converted here, so the result never depends on the host device's timezone.
+export async function PATCH(req: NextRequest) {
+  const session = await auth();
+  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { accessCodeId, validFrom, validTo } = await req.json();
+  if (!accessCodeId) return NextResponse.json({ error: "accessCodeId required" }, { status: 400 });
+
+  const from = typeof validFrom === "string" ? cetInputValueToUtc(validFrom) : null;
+  const to = typeof validTo === "string" ? cetInputValueToUtc(validTo) : null;
+  if (!from || !to) {
+    return NextResponse.json({ error: "Enter a valid start and end date/time." }, { status: 400 });
+  }
+  if (to <= from) {
+    return NextResponse.json({ error: "The end time must be after the start time." }, { status: 400 });
+  }
+
+  try {
+    const { ok, lockError } = await updateAccessCodeValidity(accessCodeId, session.user.id, from, to);
+
+    // 207: StayHQ was updated but the physical lock refused — the host must know,
+    // because the guest's door will still be running the old window.
+    return NextResponse.json(
+      {
+        success: ok,
+        validFrom: from.toISOString(),
+        validTo: to.toISOString(),
+        lockError,
+      },
+      { status: ok ? 200 : 207 }
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Failed to update validity";
+    const status = msg === "Access code not found" ? 404 : 500;
+    console.error("Failed to update access code validity:", err);
+    return NextResponse.json({ error: msg }, { status });
   }
 }

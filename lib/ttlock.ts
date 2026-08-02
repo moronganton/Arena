@@ -439,6 +439,102 @@ export async function revokeAccessCodesForReservation(reservationId: string, own
 
 // Update the validity period of all active access codes for a reservation,
 // both on the physical locks and in the database.
+// Push one code's new validity window to the physical lock. Returns an error
+// string to surface to the host, or null on success. Shared by the whole-stay
+// update (dates changed on the booking) and the per-code edit (early check-in /
+// late check-out for a single door).
+async function applyCodePeriodOnLock(
+  code: { id: string; code: string; ttlockKeyId: string | null; lock: { ttlockId: string | null; name: string } },
+  accessToken: string | null,
+  validFrom: Date,
+  validTo: Date,
+  guestName?: string
+): Promise<string | null> {
+  if (!code.lock.ttlockId) return null; // not a physical lock — DB update is enough
+
+  if (!accessToken) {
+    return `Code ${code.code}: TTLock account not connected — validity was NOT updated on the lock`;
+  }
+
+  try {
+    let keyId = code.ttlockKeyId;
+    if (!keyId) {
+      const onLock = await listPasscodes(accessToken, code.lock.ttlockId);
+      const match = onLock.find((p) => p.keyboardPwd === code.code);
+      keyId = match ? String(match.keyboardPwdId) : null;
+      if (keyId) {
+        await prisma.accessCode.update({ where: { id: code.id }, data: { ttlockKeyId: keyId } });
+      }
+    }
+    if (!keyId) {
+      return `Code ${code.code}: not found on lock "${code.lock.name}" — validity not updated`;
+    }
+
+    try {
+      await changePasscodePeriod(accessToken, code.lock.ttlockId, keyId, validFrom, validTo);
+    } catch (err) {
+      // TTLock error -3008: a passcode never used on the lock can't be changed.
+      // Workaround: delete it and re-create the same digits with the new period.
+      if (err instanceof Error && err.message.includes("-3008")) {
+        await deletePasscode(accessToken, code.lock.ttlockId, keyId);
+        const recreated = await createPasscode(
+          accessToken,
+          code.lock.ttlockId,
+          code.code,
+          validFrom,
+          validTo,
+          guestName
+        );
+        await prisma.accessCode.update({
+          where: { id: code.id },
+          data: { ttlockKeyId: String(recreated.keyboardPwdId) },
+        });
+      } else {
+        throw err;
+      }
+    }
+    return null;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`Failed to update passcode period for ${code.id}:`, err);
+    return `Code ${code.code} on "${code.lock.name}": ${msg}`;
+  }
+}
+
+// Change the validity window of ONE existing code — an early check-in or a late
+// check-out normally affects a single door, not the whole stay.
+export async function updateAccessCodeValidity(
+  accessCodeId: string,
+  ownerId: string,
+  validFrom: Date,
+  validTo: Date
+): Promise<{ ok: boolean; lockError: string | null }> {
+  const code = await prisma.accessCode.findFirst({
+    where: { id: accessCodeId, reservation: { property: { ownerId } } },
+    include: { lock: true, reservation: { include: { guest: true } } },
+  });
+  if (!code) throw new Error("Access code not found");
+
+  const accessToken = await getValidAccessToken(ownerId);
+  const lockError = await applyCodePeriodOnLock(
+    code,
+    accessToken,
+    validFrom,
+    validTo,
+    code.reservation.guest.name
+  );
+
+  // Keep StayHQ in step with the lock even when the push failed, so the record
+  // reflects what the host asked for and the error is reported rather than
+  // silently discarded.
+  await prisma.accessCode.update({
+    where: { id: code.id },
+    data: { validFrom, validTo },
+  });
+
+  return { ok: lockError === null, lockError };
+}
+
 export async function updateAccessCodePeriodsForReservation(
   reservationId: string,
   ownerId: string,
@@ -460,54 +556,16 @@ export async function updateAccessCodePeriodsForReservation(
   const lockErrors: string[] = [];
 
   for (const code of codes) {
-    if (code.lock.ttlockId) {
-      if (!accessToken) {
-        lockErrors.push(`Code ${code.code}: TTLock account not connected — validity was NOT updated on the lock`);
-        continue;
-      }
-      try {
-        let keyId = code.ttlockKeyId;
-        if (!keyId) {
-          const onLock = await listPasscodes(accessToken, code.lock.ttlockId);
-          const match = onLock.find((p) => p.keyboardPwd === code.code);
-          keyId = match ? String(match.keyboardPwdId) : null;
-          if (keyId) {
-            await prisma.accessCode.update({ where: { id: code.id }, data: { ttlockKeyId: keyId } });
-          }
-        }
-        if (!keyId) {
-          lockErrors.push(`Code ${code.code}: not found on lock "${code.lock.name}" — validity not updated`);
-          continue;
-        }
-        try {
-          await changePasscodePeriod(accessToken, code.lock.ttlockId, keyId, validFrom, validTo);
-        } catch (err) {
-          // TTLock error -3008: a passcode never used on the lock can't be changed.
-          // Workaround: delete it and re-create the same digits with the new period.
-          if (err instanceof Error && err.message.includes("-3008")) {
-            await deletePasscode(accessToken, code.lock.ttlockId, keyId);
-            const recreated = await createPasscode(
-              accessToken,
-              code.lock.ttlockId,
-              code.code,
-              validFrom,
-              validTo,
-              reservation?.guest.name
-            );
-            await prisma.accessCode.update({
-              where: { id: code.id },
-              data: { ttlockKeyId: String(recreated.keyboardPwdId) },
-            });
-          } else {
-            throw err;
-          }
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        lockErrors.push(`Code ${code.code} on "${code.lock.name}": ${msg}`);
-        console.error(`Failed to update passcode period for ${code.id}:`, err);
-        continue;
-      }
+    const lockError = await applyCodePeriodOnLock(
+      code,
+      accessToken,
+      validFrom,
+      validTo,
+      reservation?.guest.name
+    );
+    if (lockError) {
+      lockErrors.push(lockError);
+      continue; // leave the stored window alone when the lock rejected the change
     }
     await prisma.accessCode.update({
       where: { id: code.id },
