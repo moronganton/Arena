@@ -141,7 +141,8 @@ model Beds24Account {
   refreshToken String
   token        String?
   expiresAt    DateTime?
-  // When true, imported bookings trigger PIN generation + guest emails
+  // When true, imported bookings generate PIN codes. Nothing is sent to the
+  // guest on import — all guest messaging is driven from templates.
   automationEnabled Boolean @default(false)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -272,7 +273,8 @@ model RecurringExpense {
 model SmoobuAccount {
   id     String @id @default(cuid())
   apiKey String
-  // When true, imported bookings trigger PIN generation + guest emails
+  // When true, imported bookings generate PIN codes. Nothing is sent to the
+  // guest on import — all guest messaging is driven from templates.
   automationEnabled Boolean @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
