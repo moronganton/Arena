@@ -3,7 +3,6 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { deliverAiMessage } from "@/lib/ai";
 import { renderTemplate, valuesFromReservation, type TemplateReservation } from "@/lib/templates";
-import { getTemplateImages, appendGalleryLink, ensureShareCode, toEmailAttachments, publicBaseUrl } from "@/lib/template-images";
 
 // POST /api/templates/send-now { templateId?, body, reservationId }
 // Sends the rendered template to the GUEST for real — relays via the booking
@@ -33,19 +32,10 @@ export async function POST(req: NextRequest) {
   const rendered = renderTemplate(body, values).trim();
   if (!rendered) return NextResponse.json({ error: "Message is empty after filling in the fields." }, { status: 400 });
 
-  // Template photos. The OTA chat can only carry text, so the links go into the
-  // stored body (which is exactly what gets relayed); email gets the real files.
-  const images = await getTemplateImages(templateId);
-  const baseUrl = publicBaseUrl();
-  const shareCode = images.length > 0 ? await ensureShareCode(templateId) : null;
-  const withImages = appendGalleryLink(rendered, images, baseUrl, shareCode);
-
   const message = await prisma.message.create({
-    data: { body: withImages, direction: "OUTBOUND", channel: "PLATFORM", isRead: true, reservationId },
+    data: { body: rendered, direction: "OUTBOUND", channel: "PLATFORM", isRead: true, reservationId },
   });
-  const channelOk = await deliverAiMessage(message.id, {
-    attachments: toEmailAttachments(images),
-  }); // Smoobu relay + guest email
+  const channelOk = await deliverAiMessage(message.id); // Smoobu relay + guest email
 
   // Keep the scheduler from double-sending this template to this booking
   if (templateId) {
@@ -54,12 +44,5 @@ export async function POST(req: NextRequest) {
       .catch(() => {}); // ignore if already recorded
   }
 
-  return NextResponse.json({
-    success: true,
-    channelDelivered: channelOk,
-    guest: reservation.guest.name,
-    imagesAttached: images.length,
-    // Surfaces the one misconfiguration that silently drops photo links
-    imageLinksOmitted: images.length > 0 && (!baseUrl || !shareCode),
-  });
+  return NextResponse.json({ success: true, channelDelivered: channelOk, guest: reservation.guest.name });
 }

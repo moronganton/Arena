@@ -58,18 +58,17 @@ model MessageTemplate {
   propertyId String?
   property   Property? @relation(fields: [propertyId], references: [id], onDelete: Cascade)
 
-  // Short public code for the guest photo page (/g/<shareCode>). Generated
-  // lazily on the first send that carries images, so existing templates keep
-  // working without a backfill.
-  shareCode String? @unique
-
   sends MessageTemplateSend[]
   images TemplateImage[]
 
   @@index([userId])
 }
 
-// Images attached to a message template (instruction photos, diagrams, etc.)
+// UNUSED — retained deliberately. Photo sending was dropped in favour of hosts
+// pasting their own image links (e.g. a shared Google Drive folder) into the
+// message body. The table still holds previously uploaded images, and
+// `prisma db push` on boot would refuse to drop it without --accept-data-loss,
+// crashing the start command. Remove it in a deliberate migration instead.
 model TemplateImage {
   id        String   @id @default(cuid())
   url       String   // URL to the image (stored via Resend or file service)

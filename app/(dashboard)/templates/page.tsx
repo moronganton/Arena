@@ -1,7 +1,6 @@
 "use client";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { MessageSquarePlus, Save, Trash2, RefreshCw, ChevronLeft, Plus, Clock, Building2, Smile, Braces, Info, Send } from "lucide-react";
-import { ImageGallery } from "@/components/templates/ImageGallery";
 
 interface Field { token: string; key: string; label: string; description: string; example: string; }
 interface Trigger { value: string; label: string; description: string; usesOffset: boolean; offsetDir: "before" | "after" | null; anchor: string | null; }
@@ -79,30 +78,16 @@ export default function TemplatesPage() {
     return () => clearTimeout(h);
   }, [previewResId, form.body]);
 
-  // Photos ride along with a saved template; say so, and call out the case
-  // where NEXTAUTH_URL is unusable so the links were dropped.
-  function photoNote(data: { imagesAttached?: number; imageLinksOmitted?: boolean }): string {
-    if (data.imageLinksOmitted) return " (photo links skipped \u2014 app URL not configured)";
-    if (!data.imagesAttached) return "";
-    return ` with ${data.imagesAttached} photo${data.imagesAttached === 1 ? "" : "s"}`;
-  }
-
   async function sendCopy() {
     setSendingCopy(true);
     setCopyMsg("");
     const res = await fetch("/api/templates/send-copy", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        subject: form.subject,
-        body: form.body,
-        reservationId: previewResId || undefined,
-        to: copyEmail,
-        templateId: "id" in form ? form.id : undefined,
-      }),
+      body: JSON.stringify({ subject: form.subject, body: form.body, reservationId: previewResId || undefined, to: copyEmail }),
     });
     const data = await res.json();
     setSendingCopy(false);
-    setCopyMsg(res.ok ? `Sent to ${data.to}${photoNote(data)} ✓` : (data.error || "Failed to send"));
+    setCopyMsg(res.ok ? `Sent to ${data.to} ✓` : (data.error || "Failed to send"));
     setTimeout(() => setCopyMsg(""), 7000);
   }
 
@@ -118,7 +103,7 @@ export default function TemplatesPage() {
     });
     const data = await res.json();
     setSendingGuest(false);
-    setGuestMsg(res.ok ? `Sent to ${data.guest}${photoNote(data)} ✓` : (data.error || "Failed to send"));
+    setGuestMsg(res.ok ? `Sent to ${data.guest} ✓` : (data.error || "Failed to send"));
     setTimeout(() => setGuestMsg(""), 7000);
   }
 
@@ -422,13 +407,6 @@ export default function TemplatesPage() {
             />
             <p className="text-xs text-slate-400 mt-2">Type <span className="font-mono text-slate-500">{"[Field]"}</span> tags or use the Insert field button. They are replaced with each guest real details when sent.</p>
           </div>
-
-          {/* Images */}
-          {"id" in form ? (
-            <div className="bg-white rounded-2xl border border-slate-100 p-5">
-              <ImageGallery templateId={(form as any).id} />
-            </div>
-          ) : null}
 
           {/* Live preview + test */}
           <div className="bg-white rounded-2xl border border-slate-100 p-5">
