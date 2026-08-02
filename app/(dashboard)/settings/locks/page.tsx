@@ -14,6 +14,8 @@ interface SmartLock {
   batteryLevel?: number;
   lockType: string;
   isActive: boolean;
+  checkInTime: string;
+  checkOutTime: string;
   property: { id: string; name: string };
   _count: { accessCodes: number };
 }
@@ -177,12 +179,12 @@ export default function LocksPage() {
 
   // Edit lock state
   const [editingLock, setEditingLock] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState({ name: "", propertyId: "", isActive: true });
+  const [editForm, setEditForm] = useState({ name: "", propertyId: "", isActive: true, checkInTime: "15:00", checkOutTime: "10:00" });
   const [savingEdit, setSavingEdit] = useState(false);
 
   function startEdit(lock: SmartLock) {
     setEditingLock(lock.id);
-    setEditForm({ name: lock.name, propertyId: lock.property.id, isActive: lock.isActive });
+    setEditForm({ name: lock.name, propertyId: lock.property.id, isActive: lock.isActive, checkInTime: lock.checkInTime, checkOutTime: lock.checkOutTime });
   }
 
   async function saveEdit() {
@@ -196,6 +198,8 @@ export default function LocksPage() {
         name: editForm.name,
         propertyId: editForm.propertyId,
         isActive: editForm.isActive,
+        checkInTime: editForm.checkInTime,
+        checkOutTime: editForm.checkOutTime,
       }),
     });
     setSavingEdit(false);
@@ -530,6 +534,24 @@ export default function LocksPage() {
                             <option key={p.id} value={p.id}>{p.name}</option>
                           ))}
                         </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-600 mb-1">Check-in Time</label>
+                        <input
+                          type="time"
+                          value={editForm.checkInTime}
+                          onChange={(e) => setEditForm({ ...editForm, checkInTime: e.target.value })}
+                          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-600 mb-1">Check-out Time</label>
+                        <input
+                          type="time"
+                          value={editForm.checkOutTime}
+                          onChange={(e) => setEditForm({ ...editForm, checkOutTime: e.target.value })}
+                          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
                       </div>
                     </div>
                     <div className="flex items-center gap-3 mt-3">

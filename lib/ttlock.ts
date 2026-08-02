@@ -325,6 +325,14 @@ export async function generateAccessCode(params: {
   return code;
 }
 
+// Parse time string (HH:mm) and apply to a date
+function applyTimeToDate(date: Date, timeStr: string): Date {
+  const [hours, minutes] = timeStr.split(":").map(Number);
+  const result = new Date(date);
+  result.setHours(hours, minutes, 0, 0);
+  return result;
+}
+
 // Generate access codes for every active lock on a property (used on new reservations)
 export async function autoGenerateCodesForReservation(
   reservationId: string,
@@ -342,11 +350,13 @@ export async function autoGenerateCodesForReservation(
   const errors: string[] = [];
   for (const lock of locks) {
     try {
+      const validFrom = applyTimeToDate(reservation.checkIn, lock.checkInTime);
+      const validTo = applyTimeToDate(reservation.checkOut, lock.checkOutTime);
       const code = await generateAccessCode({
         lockId: lock.id,
         reservationId,
-        validFrom: reservation.checkIn,
-        validTo: reservation.checkOut,
+        validFrom,
+        validTo,
       });
       codes.push(code);
     } catch (err) {

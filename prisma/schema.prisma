@@ -484,6 +484,8 @@ model SmartLock {
   batteryLevel Int?
   lockType   String  @default("PIN") // PIN, CARD, FINGERPRINT
   isActive   Boolean @default(true)
+  checkInTime String @default("15:00") // time of day for check-in (HH:mm format)
+  checkOutTime String @default("10:00") // time of day for check-out (HH:mm format)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 

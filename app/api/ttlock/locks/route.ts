@@ -79,6 +79,8 @@ export async function PATCH(req: NextRequest) {
       isActive: data.isActive,
       batteryLevel: data.batteryLevel,
       propertyId: data.propertyId,
+      checkInTime: data.checkInTime,
+      checkOutTime: data.checkOutTime,
     },
     include: {
       property: { select: { id: true, name: true } },
