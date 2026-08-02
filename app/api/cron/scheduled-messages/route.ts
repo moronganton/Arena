@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { deliverAiMessage } from "@/lib/ai";
 import { valuesFromReservation, renderTemplate, type TemplateReservation } from "@/lib/templates";
+import { getTemplateImages, appendImageLinks, toEmailAttachments, publicBaseUrl } from "@/lib/template-images";
 
 // Scheduler: call this on a schedule (hourly is ideal) to send any template
 // whose trigger is due for a reservation today. Protect it with the same
@@ -42,6 +43,7 @@ export async function GET(req: NextRequest) {
   }
 
   const now = new Date();
+  const baseUrl = publicBaseUrl();
   const today = dayStartUTC(now);
   const hour = now.getUTCHours();
 
@@ -79,6 +81,10 @@ export async function GET(req: NextRequest) {
     });
     if (reservations.length === 0) continue;
 
+    // Same photos for every reservation on this template — fetch once per run.
+    const images = await getTemplateImages(t.id);
+    const emailAttachments = toEmailAttachments(images);
+
     // Skip the ones already sent for this template
     const already = await prisma.messageTemplateSend.findMany({
       where: { templateId: t.id, reservationId: { in: reservations.map((r) => r.id) } },
@@ -91,8 +97,9 @@ export async function GET(req: NextRequest) {
       if (doneIds.has(r.id)) continue;
 
       const values = valuesFromReservation(r as unknown as TemplateReservation, t.user.name);
-      const bodyText = renderTemplate(t.body, values).trim();
-      if (!bodyText) continue;
+      const rendered = renderTemplate(t.body, values).trim();
+      if (!rendered) continue; // guard before links, or photos alone would send an empty message
+      const bodyText = appendImageLinks(rendered, images, baseUrl);
 
       try {
         // Claim the slot first so a concurrent run can't double-send
@@ -111,7 +118,7 @@ export async function GET(req: NextRequest) {
             reservationId: r.id,
           },
         });
-        await deliverAiMessage(msg.id); // relays via Smoobu + emails the guest
+        await deliverAiMessage(msg.id, { attachments: emailAttachments }); // relays via Smoobu + emails the guest
         sent++;
         results.push({ template: t.name, reservation: r.id, guest: r.guest.name });
       } catch (err) {

@@ -193,10 +193,13 @@ interface MessageNotificationParams {
   propertyName: string;
   messageBody: string;
   reservationId: string;
+  // Template photos, base64-encoded. Email is the only guest channel that can
+  // carry the real files (OTA chat gets links instead).
+  attachments?: { filename: string; content: string }[];
 }
 
 export async function sendMessageToGuest(params: MessageNotificationParams): Promise<void> {
-  const { guestName, guestEmail, propertyName, messageBody, reservationId } = params;
+  const { guestName, guestEmail, propertyName, messageBody, reservationId, attachments } = params;
 
   const html = `
     <!DOCTYPE html>
@@ -217,6 +220,7 @@ export async function sendMessageToGuest(params: MessageNotificationParams): Pro
     to: guestEmail,
     subject: `Message from your host — ${propertyName}`,
     html,
+    ...(attachments && attachments.length ? { attachments } : {}),
   });
 }
 

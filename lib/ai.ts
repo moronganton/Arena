@@ -140,7 +140,10 @@ CHECK_IN_INFO, CHECK_OUT_INFO, ACCESS_CODE, WIFI, PARKING, AMENITIES, COMPLAINT,
 // booking channel when possible, and email if the guest has an address.
 // Returns false if the channel relay failed (so callers can skip a redundant
 // "replied" notification — deliverAiMessage already sent a delivery_failed one).
-export async function deliverAiMessage(messageId: string): Promise<boolean> {
+export async function deliverAiMessage(
+  messageId: string,
+  opts?: { attachments?: { filename: string; content: string }[] }
+): Promise<boolean> {
   const message = await prisma.message.findUnique({
     where: { id: messageId },
     include: { reservation: { include: { guest: true, property: true } } },
@@ -180,6 +183,7 @@ export async function deliverAiMessage(messageId: string): Promise<boolean> {
         propertyName: reservation.property.name,
         messageBody: message.body,
         reservationId: reservation.id,
+        attachments: opts?.attachments,
       });
     } catch (err) {
       console.error("[ai] email delivery failed:", err);
