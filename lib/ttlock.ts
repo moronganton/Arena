@@ -1,6 +1,4 @@
 import { prisma } from "@/lib/prisma";
-import { sendAccessCodeEmail } from "@/lib/notifications";
-import { sendSmoobuGuestMessage } from "@/lib/channels/smoobu-core";
 
 const BASE_URL = process.env.TTLOCK_BASE_URL || "https://euapi.ttlock.com";
 const CLIENT_ID = process.env.TTLOCK_CLIENT_ID || "";
@@ -322,68 +320,7 @@ export async function generateAccessCode(params: {
     },
   });
 
-  // Send code to guest via email
-  if (reservation.guest.email) {
-    try {
-      await sendAccessCodeEmail({
-        guestName: reservation.guest.name,
-        guestEmail: reservation.guest.email,
-        propertyName: reservation.property.name,
-        code,
-        validFrom: params.validFrom,
-        validTo: params.validTo,
-      });
-      console.log(`[codes] PIN email sent to ${reservation.guest.email}`);
-
-      await prisma.accessCode.update({
-        where: { id: accessCode.id },
-        data: { sentToGuest: true, sentAt: new Date() },
-      });
-    } catch (err) {
-      console.error(`[codes] PIN email to ${reservation.guest.email} FAILED:`, err);
-    }
-  } else {
-    console.log(
-      `[codes] reservation ${params.reservationId}: guest "${reservation.guest.name}" has NO email — PIN email skipped`
-    );
-  }
-
-  // Also post the code into the reservation's message thread
-  const fmt = (d: Date) =>
-    d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-  const guestMessage =
-    `Hi ${reservation.guest.name}! Your door access code for ${reservation.property.name} is: ${code}\n` +
-    `It is valid from ${fmt(params.validFrom)} until ${fmt(params.validTo)}. ` +
-    `Please don't share it with others. Safe travels!`;
-
-  try {
-    await prisma.message.create({
-      data: {
-        reservationId: params.reservationId,
-        direction: "OUTBOUND",
-        channel: "EMAIL",
-        body: guestMessage,
-        isRead: true,
-      },
-    });
-  } catch (err) {
-    console.error("Failed to post access code message:", err);
-  }
-
-  // If the booking came through Smoobu, also relay the same message via the
-  // booking channel (Booking.com / Airbnb inbox) so the guest sees it there too.
-  if (reservation.externalId?.startsWith("smoobu-")) {
-    try {
-      const sent = await sendSmoobuGuestMessage(
-        reservation.property.ownerId,
-        reservation.externalId,
-        guestMessage
-      );
-      if (sent) console.log(`[codes] PIN message relayed via Smoobu for ${reservation.externalId}`);
-    } catch (err) {
-      console.error("Failed to relay PIN message via Smoobu:", err);
-    }
-  }
+  console.log(`[codes] access code generated for reservation ${params.reservationId}: ${code} (valid ${params.validFrom.toISOString()} to ${params.validTo.toISOString()})`);
 
   return code;
 }
