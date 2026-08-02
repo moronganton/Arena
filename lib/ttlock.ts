@@ -399,6 +399,61 @@ export async function autoGenerateCodesForReservation(
 
 // Deactivate all access codes for a reservation and remove them from the physical locks.
 // Returns a report so failures can be surfaced instead of hidden.
+// Remove one code from the physical lock. Returns an error string to surface to
+// the host, or null on success. A code that simply isn't on the lock counts as
+// success — there is nothing left to remove.
+async function removeCodeFromLock(
+  code: { id: string; code: string; ttlockKeyId: string | null; lock: { ttlockId: string | null; name: string } },
+  accessToken: string | null
+): Promise<string | null> {
+  if (!code.lock.ttlockId) return null; // not a physical lock
+
+  if (!accessToken) {
+    return `Code ${code.code}: TTLock account not connected — code was NOT removed from the lock`;
+  }
+
+  try {
+    let keyId = code.ttlockKeyId;
+    if (!keyId) {
+      const onLock = await listPasscodes(accessToken, code.lock.ttlockId);
+      const match = onLock.find((p) => p.keyboardPwd === code.code);
+      keyId = match ? String(match.keyboardPwdId) : null;
+    }
+    if (keyId) {
+      await deletePasscode(accessToken, code.lock.ttlockId, keyId);
+    }
+    return null;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`Failed to delete passcode ${code.id} from lock:`, err);
+    return `Code ${code.code} on "${code.lock.name}": ${msg}`;
+  }
+}
+
+// Delete ONE code: remove it from the door, then drop the record.
+//
+// The record is kept when the lock push fails. Deleting it anyway would hide a
+// PIN that still opens the door — the host would believe it was revoked while
+// the guest could still walk in.
+export async function deleteAccessCode(
+  accessCodeId: string,
+  ownerId: string
+): Promise<{ deleted: boolean; lockError: string | null }> {
+  const code = await prisma.accessCode.findFirst({
+    where: { id: accessCodeId, reservation: { property: { ownerId } } },
+    include: { lock: true },
+  });
+  if (!code) throw new Error("Access code not found");
+
+  const accessToken = await getValidAccessToken(ownerId);
+  const lockError = await removeCodeFromLock(code, accessToken);
+  if (lockError) return { deleted: false, lockError };
+
+  await prisma.accessCode.delete({ where: { id: code.id } });
+  console.log(`[codes] access code ${code.code} deleted for reservation ${code.reservationId}`);
+  return { deleted: true, lockError: null };
+}
+
 export async function revokeAccessCodesForReservation(reservationId: string, ownerId: string) {
   const codes = await prisma.accessCode.findMany({
     where: { reservationId, isActive: true },
@@ -410,35 +465,16 @@ export async function revokeAccessCodesForReservation(reservationId: string, own
   const lockErrors: string[] = [];
 
   for (const code of codes) {
-    if (code.lock.ttlockId) {
-      if (!accessToken) {
-        lockErrors.push(`Code ${code.code}: TTLock account not connected — code was NOT removed from the lock`);
-      } else {
-        try {
-          let keyId = code.ttlockKeyId;
-          if (!keyId) {
-            const onLock = await listPasscodes(accessToken, code.lock.ttlockId);
-            const match = onLock.find((p) => p.keyboardPwd === code.code);
-            keyId = match ? String(match.keyboardPwdId) : null;
-          }
-          if (keyId) {
-            await deletePasscode(accessToken, code.lock.ttlockId, keyId);
-          }
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          lockErrors.push(`Code ${code.code} on "${code.lock.name}": ${msg}`);
-          console.error(`Failed to delete passcode ${code.id} from lock:`, err);
-        }
-      }
-    }
+    const lockError = await removeCodeFromLock(code, accessToken);
+    if (lockError) lockErrors.push(lockError);
+    // Deactivated either way: a cancelled stay must never leave a code the host
+    // believes is live, and any lock failure is reported back to them.
     await prisma.accessCode.update({ where: { id: code.id }, data: { isActive: false } });
   }
 
   return { revoked: codes.length, lockErrors };
 }
 
-// Update the validity period of all active access codes for a reservation,
-// both on the physical locks and in the database.
 // Push one code's new validity window to the physical lock. Returns an error
 // string to surface to the host, or null on success. Shared by the whole-stay
 // update (dates changed on the booking) and the per-code edit (early check-in /
@@ -535,6 +571,8 @@ export async function updateAccessCodeValidity(
   return { ok: lockError === null, lockError };
 }
 
+// Update the validity period of all active access codes for a reservation,
+// both on the physical locks and in the database.
 export async function updateAccessCodePeriodsForReservation(
   reservationId: string,
   ownerId: string,

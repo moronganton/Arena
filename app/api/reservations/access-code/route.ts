@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { generateAccessCode, updateAccessCodeValidity } from "@/lib/ttlock";
+import { generateAccessCode, updateAccessCodeValidity, deleteAccessCode } from "@/lib/ttlock";
 import { cetInputValueToUtc } from "@/lib/cet";
 
 function applyTimeToDateCET(date: Date, timeStr: string): Date {
@@ -121,6 +121,31 @@ export async function PATCH(req: NextRequest) {
     const msg = err instanceof Error ? err.message : "Failed to update validity";
     const status = msg === "Access code not found" ? 404 : 500;
     console.error("Failed to update access code validity:", err);
+    return NextResponse.json({ error: msg }, { status });
+  }
+}
+
+// DELETE /api/reservations/access-code?accessCodeId=...
+// Removes the PIN from the physical lock and then deletes the record. If the
+// lock refuses, the record is kept and 409 returned — a code that still opens
+// the door must never disappear from the host's list.
+export async function DELETE(req: NextRequest) {
+  const session = await auth();
+  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const accessCodeId = new URL(req.url).searchParams.get("accessCodeId");
+  if (!accessCodeId) return NextResponse.json({ error: "accessCodeId required" }, { status: 400 });
+
+  try {
+    const { deleted, lockError } = await deleteAccessCode(accessCodeId, session.user.id);
+    if (!deleted) {
+      return NextResponse.json({ success: false, lockError }, { status: 409 });
+    }
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Failed to delete code";
+    const status = msg === "Access code not found" ? 404 : 500;
+    console.error("Failed to delete access code:", err);
     return NextResponse.json({ error: msg }, { status });
   }
 }

@@ -1,25 +1,30 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Clock, RefreshCw, AlertTriangle, Check } from "lucide-react";
+import { Clock, RefreshCw, AlertTriangle, Check, Trash2 } from "lucide-react";
 
 interface Props {
   accessCodeId: string;
+  code: string;
+  lockName: string;
   // CET wall-clock values ("YYYY-MM-DDTHH:mm"), computed server-side so the
   // form shows property-local time whatever timezone the host's device is in.
   initialFrom: string;
   initialTo: string;
 }
 
-export function AccessCodeValidityEditor({ accessCodeId, initialFrom, initialTo }: Props) {
+export function AccessCodeActions({ accessCodeId, code, lockName, initialFrom, initialTo }: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [from, setFrom] = useState(initialFrom);
   const [to, setTo] = useState(initialTo);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
   const [warning, setWarning] = useState("");
   const [saved, setSaved] = useState(false);
+
+  const busy = saving || deleting;
 
   function cancel() {
     setFrom(initialFrom);
@@ -59,17 +64,68 @@ export function AccessCodeValidityEditor({ accessCodeId, initialFrom, initialTo 
     }
   }
 
+  async function remove() {
+    if (
+      !confirm(
+        `Delete PIN ${code} on ${lockName}?\n\nIt will be removed from the lock and stop working immediately. This cannot be undone.`
+      )
+    ) {
+      return;
+    }
+    setDeleting(true);
+    setError("");
+    setWarning("");
+    try {
+      const res = await fetch(`/api/reservations/access-code?accessCodeId=${accessCodeId}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        // 409: still on the door, so the record was deliberately kept.
+        setError(
+          data.lockError
+            ? `Not deleted — the lock refused: ${data.lockError}`
+            : data.error || "Could not delete the code."
+        );
+        return;
+      }
+      router.refresh();
+    } catch {
+      setError("Network error — the code was not deleted.");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   if (!open) {
     return (
       <div className="mt-2">
-        <button
-          onClick={() => setOpen(true)}
-          className="inline-flex items-center gap-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-700"
-        >
-          <Clock className="w-3.5 h-3.5" />
-          Change validity
-        </button>
-        {saved && <span className="ml-2 text-xs font-medium text-emerald-600">Updated ✓</span>}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setOpen(true)}
+            disabled={busy}
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-700 disabled:opacity-50"
+          >
+            <Clock className="w-3.5 h-3.5" />
+            Change validity
+          </button>
+          <button
+            onClick={remove}
+            disabled={busy}
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-rose-600 hover:text-rose-700 disabled:opacity-50"
+          >
+            {deleting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+            {deleting ? "Deleting…" : "Delete"}
+          </button>
+          {saved && <span className="text-xs font-medium text-emerald-600">Updated ✓</span>}
+        </div>
+        {error && (
+          <div className="mt-2 flex items-start gap-1.5 rounded-lg bg-red-50 border border-red-200 p-2">
+            <AlertTriangle className="w-3.5 h-3.5 text-red-600 flex-shrink-0 mt-0.5" />
+            <p className="text-[11px] text-red-700">{error}</p>
+          </div>
+        )}
       </div>
     );
   }
@@ -119,7 +175,7 @@ export function AccessCodeValidityEditor({ accessCodeId, initialFrom, initialTo 
       <div className="mt-3 flex items-center gap-2">
         <button
           onClick={save}
-          disabled={saving}
+          disabled={busy}
           className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition"
         >
           {saving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
@@ -127,7 +183,7 @@ export function AccessCodeValidityEditor({ accessCodeId, initialFrom, initialTo 
         </button>
         <button
           onClick={cancel}
-          disabled={saving}
+          disabled={busy}
           className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1.5"
         >
           Cancel
