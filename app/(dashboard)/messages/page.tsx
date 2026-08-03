@@ -32,6 +32,15 @@ export default async function MessagesPage() {
     orderBy: { updatedAt: "desc" },
   });
 
+  // Sort by the latest MESSAGE, not the reservation row's updatedAt — that
+  // field also changes on every Smoobu sync (price, dates, status), which
+  // could bump a conversation to the top with no new message at all.
+  conversations.sort((a, b) => {
+    const at = a.messages[0]?.createdAt ? new Date(a.messages[0].createdAt).getTime() : 0;
+    const bt = b.messages[0]?.createdAt ? new Date(b.messages[0].createdAt).getTime() : 0;
+    return bt - at;
+  });
+
   // Conversations where the AI couldn't answer a guest question
   const flagged = await prisma.message.findMany({
     where: {
