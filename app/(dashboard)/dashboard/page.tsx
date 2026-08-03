@@ -81,7 +81,7 @@ async function getDashboardData(userId: string) {
     aiRepliedRaw.map((m) =>
       prisma.message.findFirst({
         where: { reservationId: m.reservationId, direction: "INBOUND", channel: { not: "INTERNAL" }, createdAt: { lt: m.createdAt } },
-        orderBy: { createdAt: "desc" }, select: { body: true },
+        orderBy: { createdAt: "desc" }, select: { body: true, createdAt: true },
       })
     )
   );
@@ -120,15 +120,29 @@ async function getDashboardData(userId: string) {
     attention: attentionRaw.map((m) => ({
       reservationId: m.reservation.id, property: m.reservation.property.name,
       guest: m.reservation.guest.name, question: m.body.replace(/\s+/g, " ").trim().slice(0, 120),
+      receivedAt: m.createdAt, // this row IS the guest's inbound message
     })),
     aiReplied: aiRepliedRaw.map((m, i) => ({
       reservationId: m.reservation.id, property: m.reservation.property.name,
       question: aiQuestions[i]?.body ? aiQuestions[i]!.body.replace(/\s+/g, " ").trim().slice(0, 110) : null,
       reply: m.body.replace(/\s+/g, " ").trim().slice(0, 160),
+      // When the guest actually wrote in, not when the AI answered — that is
+      // the moment worth prioritising review around.
+      receivedAt: aiQuestions[i]?.createdAt ?? m.createdAt,
     })),
     tasks: tasks.map(({ at: _at, ...t }) => t) as Task[],
     occupancy,
     recentReservations,
+  };
+}
+
+// Compact "Aug 2 · 20:31" stamp for the narrow attention-list rows — date and
+// time both need to stay fully readable at a tiny font, so time is never the
+// part that gets truncated.
+function dashTime(d: Date): { date: string; time: string } {
+  return {
+    date: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+    time: d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false }),
   };
 }
 
@@ -168,13 +182,20 @@ export default async function DashboardPage() {
           {d.attention.length === 0 ? (
             <p className="px-4 py-8 text-center text-sm text-slate-400">No guest questions waiting. 🎉</p>
           ) : (
-            d.attention.map((a) => (
-              <Link key={a.reservationId} href={`/reservations/${a.reservationId}`} className="flex items-start gap-2 px-3 py-2 border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-colors">
-                <span className="text-[9px] text-indigo-600 font-bold leading-tight w-11 shrink-0 truncate mt-0.5" title={a.property}>{a.property}</span>
-                <span className="text-[10px] text-slate-800 flex-1 min-w-0 truncate mt-0.5">{a.question}</span>
-                <ArrowRight className="w-3.5 h-3.5 text-slate-300 shrink-0 mt-0.5" />
-              </Link>
-            ))
+            d.attention.map((a) => {
+              const t = dashTime(a.receivedAt);
+              return (
+                <Link key={a.reservationId} href={`/reservations/${a.reservationId}`} className="flex items-start gap-2 px-3 py-2 border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-colors">
+                  <div className="w-11 shrink-0 mt-0.5">
+                    <span className="block text-[9px] text-indigo-600 font-bold leading-tight truncate" title={a.property}>{a.property}</span>
+                    <span className="block text-[8px] text-slate-400 leading-tight mt-0.5">{t.date}</span>
+                    <span className="block text-[8px] text-slate-400 leading-tight">{t.time}</span>
+                  </div>
+                  <span className="text-[10px] text-slate-800 flex-1 min-w-0 truncate mt-0.5">{a.question}</span>
+                  <ArrowRight className="w-3.5 h-3.5 text-slate-300 shrink-0 mt-0.5" />
+                </Link>
+              );
+            })
           )}
         </div>
 
@@ -188,22 +209,29 @@ export default async function DashboardPage() {
           {d.aiReplied.length === 0 ? (
             <p className="px-4 py-8 text-center text-sm text-slate-400">No AI replies yet.</p>
           ) : (
-            d.aiReplied.map((a, i) => (
-              <Link key={i} href={`/reservations/${a.reservationId}`} className="flex items-start gap-2 px-3 py-2 border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-colors">
-                <span className="text-[9px] text-indigo-600 font-bold leading-tight w-11 shrink-0 truncate mt-0.5" title={a.property}>{a.property}</span>
-                <div className="flex-1 min-w-0">
-                  {a.question && (
-                    <p className="text-[10px] text-slate-500 truncate leading-snug">
-                      <span className="font-bold text-slate-400">Q</span> {a.question}
+            d.aiReplied.map((a, i) => {
+              const t = dashTime(a.receivedAt);
+              return (
+                <Link key={i} href={`/reservations/${a.reservationId}`} className="flex items-start gap-2 px-3 py-2 border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-colors">
+                  <div className="w-11 shrink-0 mt-0.5">
+                    <span className="block text-[9px] text-indigo-600 font-bold leading-tight truncate" title={a.property}>{a.property}</span>
+                    <span className="block text-[8px] text-slate-400 leading-tight mt-0.5">{t.date}</span>
+                    <span className="block text-[8px] text-slate-400 leading-tight">{t.time}</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    {a.question && (
+                      <p className="text-[10px] text-slate-500 truncate leading-snug">
+                        <span className="font-bold text-slate-400">Q</span> {a.question}
+                      </p>
+                    )}
+                    <p className="text-[10.5px] text-slate-800 line-clamp-2 leading-snug">
+                      <span className="font-bold text-indigo-400">A</span> {a.reply}
                     </p>
-                  )}
-                  <p className="text-[10.5px] text-slate-800 line-clamp-2 leading-snug">
-                    <span className="font-bold text-indigo-400">A</span> {a.reply}
-                  </p>
-                </div>
-                <ArrowRight className="w-3.5 h-3.5 text-slate-300 shrink-0 mt-0.5" />
-              </Link>
-            ))
+                  </div>
+                  <ArrowRight className="w-3.5 h-3.5 text-slate-300 shrink-0 mt-0.5" />
+                </Link>
+              );
+            })
           )}
         </div>
       </div>
