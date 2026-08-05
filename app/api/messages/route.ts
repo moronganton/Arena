@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { processIncomingMessage } from "@/lib/ai";
 import { sendMessageToGuest } from "@/lib/notifications";
 import { sendSmoobuGuestMessage, syncSmoobuMessagesForReservation } from "@/lib/channels/smoobu-core";
+import { detectLanguage, translateToEnglish } from "@/lib/translate";
 
 export async function GET(req: NextRequest) {
   const session = await auth();
@@ -97,10 +98,40 @@ export async function POST(req: NextRequest) {
       where: { id: replyToId, reservationId, direction: "INBOUND" },
     });
     if (question) {
-      // Prefer the cached English translation over the original-language body,
-      // so a knowledge base entry from a French/Slovak/etc. question is still
-      // readable — and matchable by the AI — as English like everything else.
-      const questionText = question.translatedBody || question.body;
+      // The knowledge base must always end up in English, whether or not the
+      // host happened to tap the Translate pill first. Prefer an already-
+      // cached translation; otherwise find out for certain what language this
+      // is (rather than assuming "not English yet" means "non-English") and
+      // translate only if it actually needs it.
+      let questionText = question.translatedBody;
+      if (!questionText) {
+        let language = question.detectedLanguage;
+        if (!language) {
+          try {
+            language = await detectLanguage(question.body);
+          } catch (err) {
+            console.error("Failed to detect question language for knowledge base save:", err);
+          }
+        }
+        if (language && language !== "English") {
+          try {
+            questionText = await translateToEnglish(question.body);
+            // Cache both on the message, so the thread's Translate pill
+            // reflects the same text and this question is never re-processed.
+            await prisma.message.update({
+              where: { id: question.id },
+              data: { translatedBody: questionText, detectedLanguage: language },
+            });
+          } catch (err) {
+            console.error("Failed to translate question for knowledge base save:", err);
+          }
+        } else if (language === "English" && !question.detectedLanguage) {
+          // Genuinely English — nothing to translate, just cache the check.
+          await prisma.message.update({ where: { id: question.id }, data: { detectedLanguage: "English" } }).catch(() => {});
+        }
+      }
+      questionText = questionText || question.body; // detection/translation failed — save something rather than nothing
+
       await prisma.propertyKnowledge.create({
         data: {
           propertyId: reservation.propertyId,
