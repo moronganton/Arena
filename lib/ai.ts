@@ -13,7 +13,7 @@ import { notifyUser } from "@/lib/notify";
 // Pro usage limits have no effect here. maxRetries makes transient API rate
 // limits (429) self-heal with exponential backoff, honoring Retry-After.
 let _client: Anthropic | null = null;
-function getClient(): Anthropic {
+export function getClient(): Anthropic {
   if (!process.env.ANTHROPIC_API_KEY) {
     throw new Error("ANTHROPIC_API_KEY is not configured");
   }

@@ -16,6 +16,24 @@ interface Message {
   channelError?: string | null;
   createdAt: Date | string;
   senderId: string | null;
+  detectedLanguage?: string | null;
+  translatedBody?: string | null;
+}
+
+function isNonEnglish(language?: string | null): boolean {
+  return !!language && language.trim().toLowerCase() !== "english";
+}
+
+// Matches the globe glyph from the approved mockup, not lucide's built-in
+// "Languages" icon (a different, unrelated glyph) — kept as its own small
+// component so both render sites (pill + "show translation" link) stay in sync.
+function GlobeIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18M12 3c2.4 2.6 3.6 5.7 3.6 9s-1.2 6.4-3.6 9c-2.4-2.6-3.6-5.7-3.6-9s1.2-6.4 3.6-9z" />
+    </svg>
+  );
 }
 
 export function MessageThread({
@@ -33,6 +51,10 @@ export function MessageThread({
   const [saveToKb, setSaveToKb] = useState(false);
   const [kbSaved, setKbSaved] = useState(false);
   const [retrying, setRetrying] = useState<string | null>(null);
+  const [translatingId, setTranslatingId] = useState<string | null>(null);
+  // A translation already fetched is shown by default; this only tracks the
+  // ones the host explicitly collapsed back to the original.
+  const [hiddenTranslations, setHiddenTranslations] = useState<Set<string>>(new Set());
   const bottomRef = useRef<HTMLDivElement>(null);
 
   function startReply(msg: Message) {
@@ -53,6 +75,57 @@ export function MessageThread({
       body: JSON.stringify({ reservationId }),
     });
   }, [reservationId]);
+
+  // Lazily detect language for any guest message that hasn't been checked yet
+  // — lights up the translate pill on foreign-language messages, including
+  // ones imported long before this feature existed. Runs once per message
+  // ever, then it's cached server-side.
+  useEffect(() => {
+    fetch("/api/messages/detect-language", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reservationId }),
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!data?.detected?.length) return;
+        const byId = new Map<string, string>(data.detected.map((d: { id: string; detectedLanguage: string }) => [d.id, d.detectedLanguage]));
+        setMessages((prev) => prev.map((m) => (byId.has(m.id) ? { ...m, detectedLanguage: byId.get(m.id) } : m)));
+      })
+      .catch(() => {}); // best-effort — the pill just won't appear this load
+  }, [reservationId]);
+
+  async function translateMessage(id: string) {
+    setTranslatingId(id);
+    try {
+      const res = await fetch("/api/messages/translate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageId: id }),
+      });
+      if (res.ok) {
+        const { translatedBody } = await res.json();
+        setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, translatedBody } : m)));
+        setHiddenTranslations((prev) => {
+          if (!prev.has(id)) return prev;
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      }
+    } finally {
+      setTranslatingId(null);
+    }
+  }
+
+  function toggleTranslation(id: string) {
+    setHiddenTranslations((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   async function sendMessage() {
     if (!newMessage.trim() || sending) return;
@@ -160,6 +233,9 @@ export function MessageThread({
         {messages.map((msg) => {
           const isOutbound = msg.direction === "OUTBOUND";
           const isInternal = msg.channel === "INTERNAL";
+          const showingTranslation = !isOutbound && !!msg.translatedBody && !hiddenTranslations.has(msg.id);
+          const canTranslate = !isOutbound && isNonEnglish(msg.detectedLanguage) && !msg.translatedBody;
+          const canReshowTranslation = !isOutbound && !!msg.translatedBody && hiddenTranslations.has(msg.id);
           return (
             <div key={msg.id} className={`flex ${isOutbound ? "justify-end" : "justify-start"}`}>
               <div className={`max-w-[75%] ${isOutbound ? "order-2" : "order-1"}`}>
@@ -224,8 +300,48 @@ export function MessageThread({
                       : "bg-slate-100 text-slate-800 rounded-tl-sm"
                   }`}
                 >
-                  <p className="whitespace-pre-wrap">{msg.body}</p>
+                  {showingTranslation ? (
+                    <>
+                      <p className="whitespace-pre-wrap">{msg.body}</p>
+                      <div className="flex items-center gap-2 my-2">
+                        <span className="text-[10px] font-semibold tracking-wide text-slate-400 uppercase whitespace-nowrap">
+                          Translated from {msg.detectedLanguage}
+                        </span>
+                        <span className="flex-1 h-px bg-slate-200" />
+                      </div>
+                      <p className="whitespace-pre-wrap">{msg.translatedBody}</p>
+                    </>
+                  ) : (
+                    <p className="whitespace-pre-wrap">{msg.body}</p>
+                  )}
                 </div>
+                {canTranslate && (
+                  <button
+                    onClick={() => translateMessage(msg.id)}
+                    disabled={translatingId === msg.id}
+                    className="mt-1.5 ml-1 inline-flex items-center gap-1.5 text-[11px] font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-60 px-2.5 py-1 rounded-full transition"
+                  >
+                    <GlobeIcon className={`w-3 h-3 ${translatingId === msg.id ? "animate-spin" : ""}`} />
+                    {translatingId === msg.id ? "Translating…" : "Translate to English"}
+                  </button>
+                )}
+                {showingTranslation && (
+                  <button
+                    onClick={() => toggleTranslation(msg.id)}
+                    className="mt-1 ml-1 text-[11px] text-slate-400 hover:text-slate-600 underline decoration-slate-300 underline-offset-2 transition"
+                  >
+                    Hide translation
+                  </button>
+                )}
+                {canReshowTranslation && (
+                  <button
+                    onClick={() => toggleTranslation(msg.id)}
+                    className="mt-1.5 ml-1 inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-500 hover:text-indigo-700 transition"
+                  >
+                    <GlobeIcon className="w-3 h-3" />
+                    Show translation
+                  </button>
+                )}
                 {msg.isDraft && (
                   <div className="flex gap-2 mt-2 justify-end">
                     <button
