@@ -97,11 +97,15 @@ export async function POST(req: NextRequest) {
       where: { id: replyToId, reservationId, direction: "INBOUND" },
     });
     if (question) {
+      // Prefer the cached English translation over the original-language body,
+      // so a knowledge base entry from a French/Slovak/etc. question is still
+      // readable — and matchable by the AI — as English like everything else.
+      const questionText = question.translatedBody || question.body;
       await prisma.propertyKnowledge.create({
         data: {
           propertyId: reservation.propertyId,
           category: "FAQ",
-          title: question.body.replace(/\s+/g, " ").trim().slice(0, 100),
+          title: questionText.replace(/\s+/g, " ").trim().slice(0, 100),
           content: messageBody,
         },
       });
