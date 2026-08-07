@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { Key, Plus, RefreshCw, Copy, Check } from "lucide-react";
+import { Key, Plus, RefreshCw, Copy, Check, AlertTriangle } from "lucide-react";
 
 interface Lock {
   id: string;
@@ -21,6 +21,7 @@ interface GeneratedCode {
   lockName: string;
   validFrom: string;
   validTo: string;
+  lockError?: string | null;
 }
 
 export function AccessCodeGenerator({
@@ -65,6 +66,7 @@ export function AccessCodeGenerator({
         lockName: lock?.name || "Unknown Lock",
         validFrom: data.validFrom,
         validTo: data.validTo,
+        lockError: data.lockError,
       });
     } catch (err) {
       console.error(err);
@@ -206,6 +208,18 @@ export function AccessCodeGenerator({
                     Valid: {generated.validFrom} → {generated.validTo}
                   </p>
                 </div>
+
+                {generated.lockError && (
+                  <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 text-rose-600 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium text-rose-800">Not pushed to the lock</p>
+                      <p className="text-xs text-rose-700 mt-0.5">
+                        This code is saved in StayHQ but the door will not open on it yet: {generated.lockError}
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 <div className="bg-slate-50 rounded-xl p-4 space-y-3">
                   <p className="text-sm font-medium text-slate-700">Send PIN to Guest?</p>

@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
     const validFrom = applyTimeToDateCET(reservation.checkIn, lock.checkInTime);
     const validTo = applyTimeToDateCET(reservation.checkOut, lock.checkOutTime);
 
-    const code = await generateAccessCode({
+    const { code, lockError } = await generateAccessCode({
       lockId,
       reservationId,
       validFrom,
@@ -76,6 +76,9 @@ export async function POST(req: NextRequest) {
       code,
       validFrom: accessCode?.validFrom.toISOString(),
       validTo: accessCode?.validTo.toISOString(),
+      // Saved in StayHQ either way — this tells the host the door itself
+      // will not open on it yet.
+      lockError,
     });
   } catch (err) {
     console.error("Failed to generate access code:", err);

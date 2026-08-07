@@ -108,12 +108,13 @@ export async function syncChannelIcal(
         for (const lock of channel.property.locks) {
           if (lock.isActive) {
             try {
-              await generateAccessCode({
+              const { lockError } = await generateAccessCode({
                 lockId: lock.id,
                 reservationId: newReservation.id,
                 validFrom: event.start,
                 validTo: event.end,
               });
+              if (lockError) errors.push(`Lock ${lock.name}: ${lockError}`);
             } catch (err) {
               errors.push(`Failed to generate code for lock ${lock.name}: ${err}`);
             }

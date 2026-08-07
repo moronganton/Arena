@@ -272,14 +272,44 @@ function generateRandomCode(): string {
   return Math.floor(1000 + Math.random() * 9000).toString();
 }
 
-// Main function: generate code + save to DB + email guest
+// Picks a 4-digit code that isn't already active on this lock over an
+// overlapping window. Two different guests holding the identical digits at
+// the same door, at overlapping times, is genuinely ambiguous — whoever's
+// code the lock actually honors, the other one's stops working. The digit
+// space is only 9000 wide, so on a lock accumulating codes over a season
+// this is a real, not theoretical, collision risk.
+async function pickUnusedCode(lockId: string, validFrom: Date, validTo: Date): Promise<string> {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const candidate = generateRandomCode();
+    const clash = await prisma.accessCode.findFirst({
+      where: {
+        lockId,
+        code: candidate,
+        isActive: true,
+        validFrom: { lt: validTo },
+        validTo: { gt: validFrom },
+      },
+      select: { id: true },
+    });
+    if (!clash) return candidate;
+  }
+  // Astronomically unlikely at 10 attempts against a 9000-value space, but
+  // never silently hand out a code we know collides.
+  throw new Error("Could not find a free access code for this lock — try again.");
+}
+
+// Main function: generate code + save to DB + email guest.
+// lockError is set (and the code still saved) when the code could not be
+// pushed to the physical lock — the caller must surface this to the host
+// rather than treat the call as a plain success, since a code that only
+// exists in StayHQ's database will not open the door.
 export async function generateAccessCode(params: {
   lockId: string;
   reservationId: string;
   validFrom: Date;
   validTo: Date;
   accessToken?: string;
-}): Promise<string> {
+}): Promise<{ code: string; lockError: string | null }> {
   const lock = await prisma.smartLock.findUnique({
     where: { id: params.lockId },
     include: { property: { select: { ownerId: true } } },
@@ -292,8 +322,9 @@ export async function generateAccessCode(params: {
   });
   if (!reservation) throw new Error("Reservation not found");
 
-  const code = generateRandomCode();
+  const code = await pickUnusedCode(params.lockId, params.validFrom, params.validTo);
   let ttlockKeyId: string | undefined;
+  let lockError: string | null = null;
 
   // Get an access token: either passed in, or from the owner's linked TTLock account
   const accessToken =
@@ -312,8 +343,13 @@ export async function generateAccessCode(params: {
       );
       ttlockKeyId = result.keyboardPwdId.toString();
     } catch (err) {
+      lockError = err instanceof Error ? err.message : String(err);
       console.error("TTLock API error (code saved locally only):", err);
     }
+  } else if (!accessToken) {
+    lockError = "TTLock account not connected — code was NOT pushed to the lock";
+  } else if (!lock.ttlockId) {
+    lockError = "This lock is not linked to a TTLock device";
   }
 
   const accessCode = await prisma.accessCode.create({
@@ -327,9 +363,9 @@ export async function generateAccessCode(params: {
     },
   });
 
-  console.log(`[codes] access code generated for reservation ${params.reservationId}: ${code} (valid ${params.validFrom.toISOString()} to ${params.validTo.toISOString()})`);
+  console.log(`[codes] access code generated for reservation ${params.reservationId}: ${code} (valid ${params.validFrom.toISOString()} to ${params.validTo.toISOString()})${lockError ? ` — LOCK PUSH FAILED: ${lockError}` : ""}`);
 
-  return code;
+  return { code, lockError };
 }
 
 // Parse time string (HH:mm) and apply to a date in CET timezone
@@ -389,13 +425,14 @@ export async function autoGenerateCodesForReservation(
     try {
       const validFrom = applyTimeToDateCET(reservation.checkIn, lock.checkInTime);
       const validTo = applyTimeToDateCET(reservation.checkOut, lock.checkOutTime);
-      const code = await generateAccessCode({
+      const { code, lockError } = await generateAccessCode({
         lockId: lock.id,
         reservationId,
         validFrom,
         validTo,
       });
       codes.push(code);
+      if (lockError) errors.push(`Lock ${lock.name}: ${lockError}`);
     } catch (err) {
       errors.push(`Lock ${lock.name}: ${err instanceof Error ? err.message : String(err)}`);
       console.error(`Auto code generation failed for lock ${lock.id}:`, err);

@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
   });
   if (!reservation) return NextResponse.json({ error: "Reservation not found" }, { status: 404 });
 
-  const code = await generateAccessCode({
+  const { code, lockError } = await generateAccessCode({
     lockId,
     reservationId,
     validFrom: reservation.checkIn,
@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
     accessToken,
   });
 
-  return NextResponse.json({ code }, { status: 201 });
+  return NextResponse.json({ code, lockError }, { status: 201 });
 }
 
 export async function DELETE(req: NextRequest) {

@@ -162,8 +162,12 @@ export default function LocksPage() {
       body: JSON.stringify({ lockId: selectedLock, reservationId: selectedReservation }),
     });
     if (res.ok) {
-      const { code } = await res.json();
-      alert(`Access code generated: ${code}\nPushed to the lock (if TTLock is connected) and emailed to the guest.`);
+      const { code, lockError } = await res.json();
+      alert(
+        lockError
+          ? `Access code generated: ${code}\n\nSaved in StayHQ, but it was NOT pushed to the lock: ${lockError}\nThe door will not open on this code yet.`
+          : `Access code generated: ${code}\nPushed to the lock and emailed to the guest.`
+      );
     }
     setGenerating(null);
   }
