@@ -257,7 +257,7 @@ export function MessageThread({
     <div className="bg-white rounded-2xl border border-slate-100 flex flex-col h-[560px] sm:h-[700px]">
       <div className="flex items-center justify-between p-4 border-b border-slate-100">
         <div className="flex items-center gap-2">
-          <h3 className="font-semibold text-slate-900">Messages</h3>
+          <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500">Messages</h3>
           <span className="text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
             {messages.length}
           </span>

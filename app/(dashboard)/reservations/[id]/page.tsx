@@ -56,6 +56,25 @@ export default async function ReservationDetailPage({
                 <span className="text-xs text-slate-500">#{reservation.confirmationCode}</span>
               )}
             </div>
+            {(reservation.guest.email || reservation.guest.phone) && (
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-xs text-slate-500">
+                {reservation.guest.email && (
+                  <a href={`mailto:${reservation.guest.email}`} className="flex items-center gap-1 hover:text-indigo-600">
+                    <Mail className="w-3.5 h-3.5" /> {reservation.guest.email}
+                  </a>
+                )}
+                {reservation.guest.phone && (
+                  <a href={`tel:${reservation.guest.phone}`} className="flex items-center gap-1 hover:text-indigo-600">
+                    <Phone className="w-3.5 h-3.5" /> {reservation.guest.phone}
+                  </a>
+                )}
+              </div>
+            )}
+            {reservation.specialRequests && (
+              <p className="mt-2 text-xs text-amber-800 bg-amber-50 rounded-lg px-2.5 py-1.5 inline-block">
+                <span className="font-medium">Special request:</span> {reservation.specialRequests}
+              </p>
+            )}
           </div>
           <ReservationActions
             id={reservation.id}
@@ -74,9 +93,9 @@ export default async function ReservationDetailPage({
         {/* Left column */}
         <div className="space-y-4">
           {/* Reservation Info */}
-          <div className="bg-white rounded-2xl border border-slate-100 p-5">
-            <h3 className="font-semibold text-slate-900 mb-4">Reservation Details</h3>
-            <dl className="space-y-3 text-sm">
+          <div className="bg-white rounded-2xl border border-slate-100 p-3">
+            <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500 mb-2">Reservation Details</h3>
+            <dl className="space-y-1.5 text-sm">
               <div className="flex justify-between">
                 <dt className="text-slate-500">Property</dt>
                 <dd className="font-medium text-slate-900">{reservation.property.name}</dd>
@@ -108,49 +127,11 @@ export default async function ReservationDetailPage({
             </dl>
           </div>
 
-          {/* Guest Info */}
-          <div className="bg-white rounded-2xl border border-slate-100 p-5">
-            <h3 className="font-semibold text-slate-900 mb-4">Guest</h3>
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-12 h-12 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold text-lg">
-                {reservation.guest.name[0].toUpperCase()}
-              </div>
-              <div>
-                <p className="font-semibold text-slate-900">{reservation.guest.name}</p>
-                <p className="text-xs text-slate-500">Guest</p>
-              </div>
-            </div>
-            <div className="space-y-2 text-sm">
-              {reservation.guest.email && (
-                <div className="flex items-center gap-2 text-slate-600">
-                  <Mail className="w-4 h-4 text-slate-400" />
-                  <a href={`mailto:${reservation.guest.email}`} className="hover:text-indigo-600">
-                    {reservation.guest.email}
-                  </a>
-                </div>
-              )}
-              {reservation.guest.phone && (
-                <div className="flex items-center gap-2 text-slate-600">
-                  <Phone className="w-4 h-4 text-slate-400" />
-                  <a href={`tel:${reservation.guest.phone}`} className="hover:text-indigo-600">
-                    {reservation.guest.phone}
-                  </a>
-                </div>
-              )}
-            </div>
-            {reservation.specialRequests && (
-              <div className="mt-4 p-3 bg-amber-50 rounded-lg text-sm text-amber-800">
-                <p className="font-medium mb-1">Special Requests</p>
-                <p>{reservation.specialRequests}</p>
-              </div>
-            )}
-          </div>
-
           {/* Access Codes */}
           <div className="bg-white rounded-2xl border border-slate-100 p-5">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="font-semibold text-slate-900 flex items-center gap-2">
-                <Key className="w-4 h-4 text-slate-500" />
+              <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500 flex items-center gap-1.5">
+                <Key className="w-3.5 h-3.5 text-slate-400" />
                 Access Codes
               </h3>
               <AccessCodeGenerator
