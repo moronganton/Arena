@@ -154,6 +154,13 @@ export async function createPasscode(
     keyboardPwd: passcode,
     startDate: validFrom.getTime().toString(),
     endDate: validTo.getTime().toString(),
+    // 2 = push to the lock through the gateway NOW. Without this the API
+    // creates a cloud-only record that the app happily lists but the physical
+    // keypad rejects — the lock only learns the code when a phone later syncs
+    // it over Bluetooth. change/delete already route via gateway (changeType/
+    // deleteType 2); creation must too or freshly generated PINs don't open
+    // the door.
+    addType: "2",
     date: Date.now().toString(),
   });
   // Passcode name shown in the TTLock app (e.g. the guest's name).
