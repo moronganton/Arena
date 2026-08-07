@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowRight, MessageSquareWarning, Bot, ListChecks, CalendarRange } from "lucide-react";
 import { DashboardKpis } from "@/components/dashboard/DashboardKpis";
 import { OpenTasks, type Task } from "@/components/dashboard/OpenTasks";
+import { NeedsReplyList } from "@/components/dashboard/NeedsReplyList";
 
 const HORIZON = 10; // nights shown in gap occupancy
 
@@ -118,7 +119,7 @@ async function getDashboardData(userId: string) {
     checkInsToday, aiRepliesToday, cleaningTotalToday, cleaningDoneToday,
     needsReplyCount,
     attention: attentionRaw.map((m) => ({
-      reservationId: m.reservation.id, property: m.reservation.property.name,
+      messageId: m.id, reservationId: m.reservation.id, property: m.reservation.property.name,
       guest: m.reservation.guest.name, question: m.body.replace(/\s+/g, " ").trim().slice(0, 120),
       receivedAt: m.createdAt, // this row IS the guest's inbound message
     })),
@@ -179,24 +180,7 @@ export default async function DashboardPage() {
             <span className="text-sm font-semibold text-slate-900">Needs your reply</span>
             {d.needsReplyCount > 0 && <span className="ml-auto text-[11px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded-full">{d.needsReplyCount}</span>}
           </div>
-          {d.attention.length === 0 ? (
-            <p className="px-4 py-8 text-center text-sm text-slate-400">No guest questions waiting. 🎉</p>
-          ) : (
-            d.attention.map((a) => {
-              const t = dashTime(a.receivedAt);
-              return (
-                <Link key={a.reservationId} href={`/reservations/${a.reservationId}`} className="flex items-start gap-2 px-3 py-2 border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-colors">
-                  <div className="w-11 shrink-0 mt-0.5">
-                    <span className="block text-[9px] text-indigo-600 font-bold leading-tight truncate" title={a.property}>{a.property}</span>
-                    <span className="block text-[8px] text-slate-400 leading-tight mt-0.5">{t.date}</span>
-                    <span className="block text-[8px] text-slate-400 leading-tight">{t.time}</span>
-                  </div>
-                  <span className="text-[10px] text-slate-800 flex-1 min-w-0 truncate mt-0.5">{a.question}</span>
-                  <ArrowRight className="w-3.5 h-3.5 text-slate-300 shrink-0 mt-0.5" />
-                </Link>
-              );
-            })
-          )}
+          <NeedsReplyList initial={d.attention} />
         </div>
 
         {/* AI replied — review how the assistant is answering (esp. at launch) */}

@@ -52,6 +52,10 @@ export function MessageThread({
   const [kbSaved, setKbSaved] = useState(false);
   const [retrying, setRetrying] = useState<string | null>(null);
   const [translatingId, setTranslatingId] = useState<string | null>(null);
+  const [dismissBusyId, setDismissBusyId] = useState<string | null>(null);
+  // Messages just dismissed, still showing the "No reply needed · Undo" line
+  // — cleared automatically a few seconds later, or immediately on Undo.
+  const [justDismissed, setJustDismissed] = useState<Set<string>>(new Set());
   // A translation already fetched is shown by default; this only tracks the
   // ones the host explicitly collapsed back to the original.
   const [hiddenTranslations, setHiddenTranslations] = useState<Set<string>>(new Set());
@@ -116,6 +120,49 @@ export function MessageThread({
     } finally {
       setTranslatingId(null);
     }
+  }
+
+  // Clears the "needs your reply" flag without sending anything — for guest
+  // messages like "thank you" that don't actually need an answer. Reuses the
+  // same flag the dashboard's "Needs your reply" list and this bubble's rose
+  // highlight already read, so nothing else has to change to reflect it.
+  async function dismissNeedsReply(id: string) {
+    setDismissBusyId(id);
+    try {
+      const res = await fetch("/api/messages/needs-reply", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageId: id, needsHostReply: false }),
+      });
+      if (res.ok) {
+        setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, needsHostReply: false } : m)));
+        setJustDismissed((prev) => new Set(prev).add(id));
+        setTimeout(() => {
+          setJustDismissed((prev) => {
+            if (!prev.has(id)) return prev;
+            const next = new Set(prev);
+            next.delete(id);
+            return next;
+          });
+        }, 6000);
+      }
+    } finally {
+      setDismissBusyId(null);
+    }
+  }
+
+  async function undoDismiss(id: string) {
+    setJustDismissed((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+    setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, needsHostReply: true } : m)));
+    await fetch("/api/messages/needs-reply", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messageId: id, needsHostReply: true }),
+    });
   }
 
   function toggleTranslation(id: string) {
@@ -240,7 +287,7 @@ export function MessageThread({
             <div key={msg.id} className={`flex ${isOutbound ? "justify-end" : "justify-start"}`}>
               <div className={`max-w-[75%] ${isOutbound ? "order-2" : "order-1"}`}>
                 {!isOutbound && (
-                  <div className="flex items-center gap-1.5 mb-1 ml-1">
+                  <div className="flex items-center gap-1.5 mb-1 ml-1 flex-wrap">
                     <User className="w-3 h-3 text-slate-400" />
                     <span className="text-xs text-slate-500">Guest</span>
                     {msg.needsHostReply && (
@@ -257,6 +304,17 @@ export function MessageThread({
                       <Reply className="w-3 h-3" />
                       Reply
                     </button>
+                    {msg.needsHostReply && (
+                      <button
+                        onClick={() => dismissNeedsReply(msg.id)}
+                        disabled={dismissBusyId === msg.id}
+                        className="flex items-center gap-0.5 text-xs text-emerald-600 hover:text-emerald-700 disabled:opacity-50 transition"
+                        title="This message doesn't need a reply"
+                      >
+                        <Check className="w-3 h-3" />
+                        No reply needed
+                      </button>
+                    )}
                   </div>
                 )}
                 {isOutbound && isInternal && (
@@ -377,6 +435,20 @@ export function MessageThread({
                     {msg.channelError && (
                       <span className="text-[10px] text-rose-400 max-w-[75%] text-right">{msg.channelError}</span>
                     )}
+                  </div>
+                )}
+                {!isOutbound && justDismissed.has(msg.id) && (
+                  <div className="flex items-center gap-1.5 mt-1 ml-1">
+                    <span className="flex items-center gap-1 text-xs font-medium text-emerald-600">
+                      <Check className="w-3 h-3" />
+                      No reply needed
+                    </span>
+                    <button
+                      onClick={() => undoDismiss(msg.id)}
+                      className="text-xs text-slate-400 hover:text-slate-600 underline decoration-slate-300 underline-offset-2 transition"
+                    >
+                      Undo
+                    </button>
                   </div>
                 )}
                 <p className={`text-xs text-slate-400 mt-1 ${isOutbound ? "text-right mr-1" : "ml-1"}`}>
