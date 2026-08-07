@@ -271,7 +271,7 @@ export function MessageThread({
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-5 space-y-4">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden p-5 space-y-4">
         {messages.length === 0 && (
           <div className="text-center text-slate-400 py-8">
             <p className="text-sm">No messages yet</p>
@@ -360,17 +360,17 @@ export function MessageThread({
                 >
                   {showingTranslation ? (
                     <>
-                      <p className="whitespace-pre-wrap">{msg.body}</p>
+                      <p className="whitespace-pre-wrap break-words">{msg.body}</p>
                       <div className="flex items-center gap-2 my-2">
                         <span className="text-[10px] font-semibold tracking-wide text-slate-400 uppercase whitespace-nowrap">
                           Translated from {msg.detectedLanguage}
                         </span>
                         <span className="flex-1 h-px bg-slate-200" />
                       </div>
-                      <p className="whitespace-pre-wrap">{msg.translatedBody}</p>
+                      <p className="whitespace-pre-wrap break-words">{msg.translatedBody}</p>
                     </>
                   ) : (
-                    <p className="whitespace-pre-wrap">{msg.body}</p>
+                    <p className="whitespace-pre-wrap break-words">{msg.body}</p>
                   )}
                 </div>
                 {canTranslate && (
