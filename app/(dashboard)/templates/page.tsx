@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect, useRef, useCallback } from "react";
-import { MessageSquarePlus, Save, Trash2, RefreshCw, ChevronLeft, Plus, Clock, Building2, Smile, Braces, Info, Send } from "lucide-react";
+import { MessageSquarePlus, Save, Trash2, RefreshCw, ChevronLeft, Plus, Clock, Building2, Smile, Braces, Info, Send, Languages } from "lucide-react";
 
 interface Field { token: string; key: string; label: string; description: string; example: string; }
 interface Trigger { value: string; label: string; description: string; usesOffset: boolean; offsetDir: "before" | "after" | null; anchor: string | null; }
@@ -42,6 +42,7 @@ export default function TemplatesPage() {
   const [copyMsg, setCopyMsg] = useState("");
   const [sendingGuest, setSendingGuest] = useState(false);
   const [guestMsg, setGuestMsg] = useState("");
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -154,6 +155,30 @@ export default function TemplatesPage() {
     });
   }
 
+  // Creates an inactive English copy of this template — merge-field tokens
+  // ([Full Name], [Access Code], ...) are preserved verbatim, and the copy
+  // never auto-sends until the host reviews and switches it on.
+  async function duplicateInEnglish(t: Template) {
+    setDuplicatingId(t.id);
+    try {
+      const res = await fetch("/api/templates/duplicate-translate", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: t.id, targetLanguage: "English" }),
+      });
+      const data = await res.json();
+      if (!res.ok) { alert(data.error || "Failed to duplicate template"); return; }
+      await load();
+      if (data.droppedTokens?.length) {
+        alert(
+          `English copy created, but double-check these fields before enabling it — ` +
+          `they may not have survived translation: ${data.droppedTokens.join(", ")}`
+        );
+      }
+    } finally {
+      setDuplicatingId(null);
+    }
+  }
+
   // Live preview: replace every token with its example value
   const preview = (() => {
     let out = form.body || "";
@@ -250,13 +275,27 @@ export default function TemplatesPage() {
                   </div>
                   <p className="text-sm text-slate-600 mt-2 line-clamp-2">{t.body}</p>
                 </button>
-                <button
-                  onClick={() => toggleActive(t)}
-                  className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${t.active ? "bg-indigo-600" : "bg-slate-300"}`}
-                  title={t.active ? "Active" : "Paused"}
-                >
-                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${t.active ? "translate-x-6" : "translate-x-1"}`} />
-                </button>
+                <div className="flex flex-col items-center gap-2 flex-shrink-0">
+                  <button
+                    onClick={() => toggleActive(t)}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${t.active ? "bg-indigo-600" : "bg-slate-300"}`}
+                    title={t.active ? "Active" : "Paused"}
+                  >
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${t.active ? "translate-x-6" : "translate-x-1"}`} />
+                  </button>
+                  <button
+                    onClick={() => duplicateInEnglish(t)}
+                    disabled={duplicatingId === t.id}
+                    title="Duplicate in English (creates a paused copy to review)"
+                    className="text-slate-400 hover:text-indigo-600 disabled:opacity-50 transition"
+                  >
+                    {duplicatingId === t.id ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Languages className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                </div>
               </div>
             ))}
           </div>

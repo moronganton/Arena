@@ -41,3 +41,27 @@ export async function translateToEnglish(text: string): Promise<string> {
   });
   return textOf(res) || text;
 }
+
+// Translates a HOST-authored template into another language, for the
+// "Duplicate & translate" action on the Templates page. Different job from
+// translateToEnglish: this text contains StayHQ's own merge-field tokens
+// (e.g. "[Full Name]", "[Access Code]") which must survive completely
+// unchanged — mistranslating or dropping one would silently break every
+// message sent from the duplicate.
+export async function translateTemplateText(text: string, targetLanguage: string): Promise<string> {
+  const res = await getClient().messages.create({
+    model: MODEL,
+    max_tokens: 1500,
+    messages: [{ role: "user", content: text }],
+    system:
+      `Translate this message template into ${targetLanguage}. Reply with ONLY ` +
+      "the translation — no preamble, no quotes, no explanation.\n\n" +
+      "The text contains merge-field tokens in square brackets, e.g. [Full Name], " +
+      "[Property Name], [Check-in Date], [Access Code]. Copy every bracketed " +
+      "token EXACTLY as it appears, character for character, in the same " +
+      "position — never translate, reorder, or alter the text inside brackets. " +
+      "Translate only the surrounding sentence.\n\n" +
+      "Keep the tone, line breaks, and any emoji.",
+  });
+  return textOf(res) || text;
+}
