@@ -46,8 +46,14 @@ const settingsItems = [
 export function Sidebar() {
   const pathname = usePathname();
 
+  // h-screen + sticky, not min-h-screen: as a flex child the sidebar otherwise
+  // stretched to the full document height, which pushed the Sign Out button at
+  // its foot to the bottom of the whole page. On a short page (Calendar) that
+  // still landed on screen; on a long one (Dashboard) it sat far below the fold
+  // and looked like it was missing. Pinned to the viewport it is reachable from
+  // every tab.
   return (
-    <aside className="hidden lg:flex w-64 min-h-screen bg-sidebar flex-col">
+    <aside className="hidden lg:flex w-64 h-screen sticky top-0 shrink-0 bg-sidebar flex-col">
       <div className="p-6 border-b border-sidebar-border flex items-center justify-between">
         <Link href="/dashboard" className="flex items-center gap-3">
           <div className="w-8 h-8 bg-sidebar-primary rounded-lg flex items-center justify-center">
@@ -58,7 +64,9 @@ export function Sidebar() {
         <NotificationBell />
       </div>
 
-      <nav className="flex-1 p-4 space-y-1">
+      {/* Scrolls independently so the pinned Sign Out footer stays visible even
+          if the nav list grows past the viewport. */}
+      <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
         {navItems.map(({ href, label, icon: Icon }) => (
           <Link
             key={href}
