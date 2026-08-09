@@ -59,6 +59,64 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true });
   }
 
+  // action:"bulk" — import many entries at once from pasted JSON.
+  //
+  // Exists so real property content (WiFi passwords, bank details, door
+  // instructions) can be loaded without ever being written into the repo. The
+  // host pastes it in the browser and it goes straight to the database.
+  if (body.action === "bulk") {
+    if (!Array.isArray(body.entries) || body.entries.length === 0) {
+      return NextResponse.json({ error: "entries must be a non-empty array" }, { status: 400 });
+    }
+    if (body.entries.length > 100) {
+      return NextResponse.json({ error: "Too many entries in one import (max 100)." }, { status: 400 });
+    }
+
+    const clean: Array<{ category: string; title: string; content: string }> = [];
+    for (const [i, e] of body.entries.entries()) {
+      const category = typeof e?.category === "string" ? e.category.trim() : "";
+      const title = typeof e?.title === "string" ? e.title.trim() : "";
+      const content = typeof e?.content === "string" ? e.content.trim() : "";
+      if (!category || !title || !content) {
+        return NextResponse.json(
+          { error: `Entry ${i + 1} is missing category, title or content.` },
+          { status: 400 }
+        );
+      }
+      clean.push({ category, title, content });
+    }
+
+    // Re-importing should refresh an entry rather than create a duplicate, so a
+    // corrected paste can simply be run again.
+    const existing = await prisma.propertyKnowledge.findMany({
+      where: { propertyId },
+      select: { id: true, category: true, title: true },
+    });
+    const keyOf = (c: string, t: string) => `${c.toLowerCase()}|||${t.toLowerCase()}`;
+    const byKey = new Map(existing.map((e) => [keyOf(e.category, e.title), e.id]));
+
+    let created = 0;
+    let updated = 0;
+    const startOrder = existing.length;
+    for (const [i, e] of clean.entries()) {
+      const match = byKey.get(keyOf(e.category, e.title));
+      if (match) {
+        await prisma.propertyKnowledge.update({
+          where: { id: match },
+          data: { content: e.content, active: true },
+        });
+        updated++;
+      } else {
+        await prisma.propertyKnowledge.create({
+          data: { ...e, propertyId, sortOrder: startOrder + i },
+        });
+        created++;
+      }
+    }
+
+    return NextResponse.json({ success: true, created, updated });
+  }
+
   if (!body.category || !body.title || !body.content) {
     return NextResponse.json({ error: "category, title and content required" }, { status: 400 });
   }

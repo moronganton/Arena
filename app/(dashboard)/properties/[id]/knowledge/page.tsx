@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Plus, Pencil, Trash2, Check, BookOpen, Sparkles } from "lucide-react";
+import { ArrowLeft, Plus, Pencil, Trash2, Check, BookOpen, Sparkles, ClipboardPaste, AlertTriangle } from "lucide-react";
 
 interface Entry {
   id: string;
@@ -27,6 +27,11 @@ export default function PropertyKnowledgePage() {
 
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({ category: "WiFi", title: "", content: "" });
+
+  const [showImport, setShowImport] = useState(false);
+  const [importText, setImportText] = useState("");
+  const [importError, setImportError] = useState("");
+  const [importResult, setImportResult] = useState<string | null>(null);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({ title: "", content: "" });
@@ -54,6 +59,44 @@ export default function PropertyKnowledgePage() {
     });
     await load();
     setBusy(false);
+  }
+
+  // Bulk import from pasted JSON. Kept as a paste rather than anything stored in
+  // the codebase so real content — WiFi passwords, bank details — never ends up
+  // in the repository.
+  async function importEntries() {
+    setImportError("");
+    setImportResult(null);
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(importText);
+    } catch {
+      setImportError("That is not valid JSON. Paste the array exactly as given, including the [ ] brackets.");
+      return;
+    }
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      setImportError("Expected a non-empty array of entries.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const res = await fetch("/api/knowledge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ propertyId, action: "bulk", entries: parsed }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setImportError(data.error || "Import failed."); return; }
+      setImportResult(`${data.created} added, ${data.updated} updated.`);
+      setImportText("");
+      await load();
+    } catch {
+      setImportError("Network error — nothing was imported.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function addEntry() {
@@ -99,14 +142,70 @@ export default function PropertyKnowledgePage() {
           <h1 className="text-xl md:text-2xl font-bold text-slate-900">Knowledge Base</h1>
           <p className="text-slate-500 text-sm mt-0.5">{propertyName}</p>
         </div>
-        <button
-          onClick={() => setShowAdd(true)}
-          className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-3 md:px-4 py-2.5 rounded-xl text-sm font-medium transition"
-        >
-          <Plus className="w-4 h-4" />
-          <span className="hidden sm:inline">Add Entry</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => { setShowImport((v) => !v); setImportError(""); setImportResult(null); }}
+            className="flex items-center gap-2 border border-slate-200 hover:bg-slate-50 text-slate-600 px-3 py-2.5 rounded-xl text-sm font-medium transition"
+            title="Import several entries from pasted JSON"
+          >
+            <ClipboardPaste className="w-4 h-4" />
+            <span className="hidden sm:inline">Import</span>
+          </button>
+          <button
+            onClick={() => setShowAdd(true)}
+            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-3 md:px-4 py-2.5 rounded-xl text-sm font-medium transition"
+          >
+            <Plus className="w-4 h-4" />
+            <span className="hidden sm:inline">Add Entry</span>
+          </button>
+        </div>
       </div>
+
+      {showImport && (
+        <div className="bg-white rounded-2xl border border-slate-200 p-5 mb-5">
+          <h3 className="text-sm font-semibold text-slate-900 mb-1">Import entries</h3>
+          <p className="text-xs text-slate-500 mb-3">
+            Paste a JSON array of{" "}
+            <span className="font-mono text-slate-600">{"{ category, title, content }"}</span> objects.
+            An entry whose category and title already exist is updated rather than duplicated, so you
+            can safely paste a corrected version again.
+          </p>
+          <textarea
+            value={importText}
+            onChange={(e) => setImportText(e.target.value)}
+            rows={8}
+            spellCheck={false}
+            placeholder={'[\n  { "category": "WiFi", "title": "Network & password", "content": "Network: ...\\nPassword: ..." }\n]'}
+            className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-y"
+          />
+          {importError && (
+            <div className="mt-3 flex items-start gap-2 rounded-lg bg-red-50 border border-red-200 p-3">
+              <AlertTriangle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+              <p className="text-sm text-red-700">{importError}</p>
+            </div>
+          )}
+          {importResult && (
+            <div className="mt-3 flex items-center gap-2 text-sm font-medium text-emerald-700">
+              <Check className="w-4 h-4" /> {importResult}
+            </div>
+          )}
+          <div className="flex gap-2 mt-3">
+            <button
+              onClick={importEntries}
+              disabled={busy || !importText.trim()}
+              className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2 rounded-xl text-sm font-medium transition"
+            >
+              {busy ? "Importing…" : "Import"}
+            </button>
+            <button
+              onClick={() => { setShowImport(false); setImportText(""); setImportError(""); setImportResult(null); }}
+              className="px-4 py-2 rounded-xl text-sm text-slate-600 border border-slate-200 hover:bg-slate-50 transition"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="bg-indigo-50 border border-indigo-100 rounded-xl px-4 py-3 mb-6 text-sm text-indigo-800 flex items-start gap-2">
         <Sparkles className="w-4 h-4 mt-0.5 flex-shrink-0" />
