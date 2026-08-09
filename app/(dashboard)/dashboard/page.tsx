@@ -150,12 +150,21 @@ function dashTime(d: Date): { date: string; time: string } {
 export default async function DashboardPage() {
   const session = await auth();
   const d = await getDashboardData(session!.user.id);
-  const firstName = (session!.user.name || "").split(" ")[0];
+  // Read the identity from the database, not from session.user: the JWT holds
+  // whatever was true at sign-in (updateAge is 24h), so a name changed in
+  // Settings would otherwise keep showing the old one for up to a day. Falls
+  // back to the email so the greeting always names the account that is actually
+  // signed in, never a stale or seeded placeholder.
+  const account = await prisma.user.findUnique({
+    where: { id: session!.user.id },
+    select: { name: true, email: true },
+  });
+  const greetingName = account?.name?.trim() || account?.email || "";
 
   return (
     <div className="p-4 md:p-8 max-w-7xl mx-auto">
       <div className="mb-4">
-        <h1 className="text-2xl font-bold text-slate-900">{firstName ? `Good day, ${firstName}` : "Dashboard"} 👋</h1>
+        <h1 className="text-2xl font-bold text-slate-900 break-words">{greetingName ? `Good day, ${greetingName}` : "Dashboard"} 👋</h1>
         <p className="text-slate-500 text-sm mt-0.5">
           {new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })} · here&apos;s your day
         </p>

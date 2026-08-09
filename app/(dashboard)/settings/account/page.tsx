@@ -11,6 +11,13 @@ export default function AccountSecurityPage() {
   const [pwError, setPwError] = useState("");
   const [pwDone, setPwDone] = useState(false);
 
+  // --- display name ---
+  const [name, setName] = useState("");
+  const [nameLoaded, setNameLoaded] = useState(false);
+  const [savingName, setSavingName] = useState(false);
+  const [nameError, setNameError] = useState("");
+  const [nameDone, setNameDone] = useState(false);
+
   // --- email ---
   const [currentEmail, setCurrentEmail] = useState<string | null>(null);
   const [newEmail, setNewEmail] = useState("");
@@ -30,7 +37,38 @@ export default function AccountSecurityPage() {
         if (d.pending?.newEmail) setPendingEmail(d.pending.newEmail);
       })
       .catch(() => {});
+
+    fetch("/api/account/profile")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d) setName(d.name ?? "");
+        setNameLoaded(true);
+      })
+      .catch(() => setNameLoaded(true));
   }, []);
+
+  async function saveName(e: React.FormEvent) {
+    e.preventDefault();
+    setNameError("");
+    setNameDone(false);
+    setSavingName(true);
+    try {
+      const res = await fetch("/api/account/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setNameError(data.error || "Could not save the name."); return; }
+      setName(data.name);
+      setNameDone(true);
+      setTimeout(() => setNameDone(false), 5000);
+    } catch {
+      setNameError("Network error — the name was not saved.");
+    } finally {
+      setSavingName(false);
+    }
+  }
 
   async function changePassword(e: React.FormEvent) {
     e.preventDefault();
@@ -114,6 +152,43 @@ export default function AccountSecurityPage() {
         <p className="text-slate-500 text-sm mt-0.5">
           Change how you sign in{currentEmail ? ` — currently ${currentEmail}` : ""}.
         </p>
+      </div>
+
+      {/* Display name */}
+      <div className="bg-white rounded-2xl border border-slate-100 p-5 mb-4">
+        <h2 className="text-sm font-semibold text-slate-900 mb-1">Your name</h2>
+        <p className="text-xs text-slate-500 mb-3">
+          Shown in StayHQ, and used for the <span className="font-mono text-slate-600">[Host Name]</span>{" "}
+          field in message templates — so it is signed at the bottom of real guest messages.
+        </p>
+        <form onSubmit={saveName} className="space-y-3">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={nameLoaded ? "e.g. Anton" : "Loading…"}
+            disabled={!nameLoaded}
+            className={inputCls}
+          />
+          {nameError && (
+            <div className="flex items-start gap-2 rounded-lg bg-red-50 border border-red-200 p-3">
+              <AlertTriangle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+              <p className="text-sm text-red-700">{nameError}</p>
+            </div>
+          )}
+          {nameDone && (
+            <div className="flex items-center gap-2 text-sm font-medium text-emerald-700">
+              <Check className="w-4 h-4" /> Name saved
+            </div>
+          )}
+          <button
+            type="submit"
+            disabled={savingName || !nameLoaded || name.trim().length < 2}
+            className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition"
+          >
+            {savingName ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+            {savingName ? "Saving…" : "Save name"}
+          </button>
+        </form>
       </div>
 
       {/* Password */}
