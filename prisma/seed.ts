@@ -1,18 +1,39 @@
 import { PrismaClient } from "@prisma/client";
+import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
 
+// The seed account's credentials come from the environment, never from source.
+// This file previously hardcoded demo123 — and because it upserts on a fixed
+// email, running it after the real account was renamed would have created a
+// SECOND plaintext admin account rather than updating anything. Both problems
+// are closed by refusing to run without an explicit password.
+const SEED_EMAIL = process.env.SEED_EMAIL;
+const SEED_PASSWORD = process.env.SEED_PASSWORD;
+
 async function main() {
+  if (!SEED_EMAIL || !SEED_PASSWORD) {
+    console.error(
+      "Refusing to seed: set SEED_EMAIL and SEED_PASSWORD first.\n" +
+      "  SEED_EMAIL=you@example.com SEED_PASSWORD='a long passphrase' npm run db:seed"
+    );
+    process.exit(1);
+  }
+  if (SEED_PASSWORD.length < 10) {
+    console.error("Refusing to seed: SEED_PASSWORD must be at least 10 characters.");
+    process.exit(1);
+  }
+
   console.log("Seeding demo data...");
 
-  // Create demo user
+  // Seed user — password is hashed, matching how the app stores it.
   const user = await prisma.user.upsert({
-    where: { email: "demo@stayhq.com" },
+    where: { email: SEED_EMAIL },
     update: {},
     create: {
-      email: "demo@stayhq.com",
+      email: SEED_EMAIL,
       name: "Demo Host",
-      password: "demo123",
+      password: await bcrypt.hash(SEED_PASSWORD, 12),
     },
   });
 

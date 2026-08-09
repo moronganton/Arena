@@ -22,11 +22,11 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# local env files
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+# local env files — plain .env was NOT covered before, so a local file holding
+# real secrets could be committed by accident. .env.example stays tracked.
+.env
+.env.*
+!.env.example
 
 # vercel
 .vercel
