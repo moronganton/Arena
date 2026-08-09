@@ -26,6 +26,30 @@ export async function sendTemplateCopyEmail(params: { to: string; subject: strin
   await getResend().emails.send({ from: FROM, to, subject: labeled ? `[TEST] ${subject}` : (subject || "Message from your host"), html });
 }
 
+// Emails a confirmation code to a NEW address the host wants to sign in with.
+// Sent to the new address specifically: receiving it is the proof that the
+// address is real and reachable, which is what stops a typo from locking
+// someone out of their own account.
+export async function sendEmailChangeCode(params: { to: string; code: string }): Promise<void> {
+  const { to, code } = params;
+  const html = `
+    <!DOCTYPE html><html><body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+      <h2 style="color:#1a1a2e;">Confirm your new StayHQ sign-in email</h2>
+      <p>Enter this code in StayHQ to finish changing your account email to this address:</p>
+      <div style="background:#f0f4ff; border-radius:12px; padding:20px; text-align:center; margin:22px 0;">
+        <h1 style="margin:0; color:#1a1a2e; font-size:38px; letter-spacing:9px; font-family:monospace;">${escapeHtml(code)}</h1>
+      </div>
+      <p style="color:#666; font-size:14px;">The code expires in 15 minutes. Until you enter it, your sign-in email is unchanged.</p>
+      <p style="color:#666; font-size:14px;">If you did not request this, you can ignore this email.</p>
+    </body></html>`;
+  await getResend().emails.send({
+    from: FROM,
+    to,
+    subject: "Your StayHQ email confirmation code",
+    html,
+  });
+}
+
 interface AccessCodeEmailParams {
   guestName: string;
   guestEmail: string;
