@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Building2, Loader2 } from "lucide-react";
 
 export default function LoginPage() {
@@ -114,6 +115,12 @@ export default function LoginPage() {
               Sign In
             </button>
           </form>
+
+          <div className="mt-5 text-center">
+            <Link href="/forgot-password" className="text-sm text-slate-500 hover:text-indigo-600">
+              Forgot your password?
+            </Link>
+          </div>
         </div>
       </div>
     </div>

@@ -50,6 +50,29 @@ export async function sendEmailChangeCode(params: { to: string; code: string }):
   });
 }
 
+// Emails a password reset code. Sent only when the address actually has an
+// account, but the API responds identically either way so the endpoint cannot be
+// used to discover which emails are registered.
+export async function sendPasswordResetCode(params: { to: string; code: string }): Promise<void> {
+  const { to, code } = params;
+  const html = `
+    <!DOCTYPE html><html><body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+      <h2 style="color:#1a1a2e;">Reset your StayHQ password</h2>
+      <p>Use this code to set a new password:</p>
+      <div style="background:#f0f4ff; border-radius:12px; padding:20px; text-align:center; margin:22px 0;">
+        <h1 style="margin:0; color:#1a1a2e; font-size:38px; letter-spacing:9px; font-family:monospace;">${escapeHtml(code)}</h1>
+      </div>
+      <p style="color:#666; font-size:14px;">The code expires in 15 minutes and can be used once.</p>
+      <p style="color:#666; font-size:14px;">If you did not ask to reset your password, ignore this email — nothing has changed.</p>
+    </body></html>`;
+  await getResend().emails.send({
+    from: FROM,
+    to,
+    subject: "Your StayHQ password reset code",
+    html,
+  });
+}
+
 interface AccessCodeEmailParams {
   guestName: string;
   guestEmail: string;
