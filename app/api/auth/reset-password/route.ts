@@ -37,7 +37,10 @@ export async function POST(req: NextRequest) {
     message: "If that address has an account, a code is on its way.",
   });
 
-  if (sendLimitReached(addr)) return genericOk;
+  if (sendLimitReached(addr)) {
+    console.log(`[reset] no code sent for ${addr}: send limit reached`);
+    return genericOk;
+  }
 
   const user = await prisma.user.findUnique({
     where: { email: addr },
@@ -46,15 +49,29 @@ export async function POST(req: NextRequest) {
 
   // No account, or a Google-only account with no password to reset. Both fall
   // through silently — telling the caller either fact would leak it.
-  if (!user || !user.password) return genericOk;
+  //
+  // The reason IS logged server-side though: the generic response is what makes
+  // "I requested a reset and no email arrived" impossible to diagnose from the
+  // outside, so the answer has to be findable somewhere only we can see.
+  if (!user) {
+    console.log(`[reset] no code sent for ${addr}: no account with that email`);
+    return genericOk;
+  }
+  if (!user.password) {
+    console.log(`[reset] no code sent for ${addr}: account has no password (Google sign-in only)`);
+    return genericOk;
+  }
 
   const code = createResetCode(addr);
   recordSend(addr);
   try {
     await sendPasswordResetCode({ to: addr, code });
+    console.log(`[reset] code sent to ${addr}`);
   } catch (err) {
-    // Logged for us, still generic to the caller.
-    console.error("[reset] failed to send reset code:", err);
+    // Logged for us, still generic to the caller. A common cause is the shared
+    // onboarding@resend.dev sender, which only delivers to the address the
+    // Resend account itself is registered under.
+    console.error(`[reset] send FAILED for ${addr}:`, err);
   }
 
   return genericOk;
