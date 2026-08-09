@@ -4,6 +4,8 @@ import Google from "next-auth/providers/google";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
+import { verifyPassword, hashPassword } from "@/lib/password";
+import { loginLockedFor, recordLoginFailure, clearLoginFailures } from "@/lib/login-throttle";
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -17,7 +19,10 @@ const googleConfigured = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_C
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   adapter: PrismaAdapter(prisma),
-  session: { strategy: "jwt" },
+  // 7-day absolute lifetime with a rolling 24h refresh, rather than NextAuth's
+  // 30-day default. A logged-in session can read guest data and open doors, so a
+  // forgotten or stolen device should not stay authorised for a month.
+  session: { strategy: "jwt", maxAge: 7 * 24 * 60 * 60, updateAge: 24 * 60 * 60 },
   trustHost: true,
   pages: {
     signIn: "/login",
@@ -28,16 +33,49 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         const parsed = loginSchema.safeParse(credentials);
         if (!parsed.success) return null;
 
-        const user = await prisma.user.findUnique({
-          where: { email: parsed.data.email },
-        });
+        const email = parsed.data.email.toLowerCase().trim();
 
-        if (!user || !user.password) return null;
+        // Throttle before touching the database, so a locked key costs an
+        // attacker a request and nothing else.
+        const lockedSeconds = loginLockedFor(email);
+        if (lockedSeconds !== null) {
+          throw new Error(
+            `Too many failed attempts. Try again in ${Math.ceil(lockedSeconds / 60)} minute(s).`
+          );
+        }
 
-        // Simple password check — in production use bcrypt
-        const valid = user.password === parsed.data.password;
-        if (!valid) return null;
+        const user = await prisma.user.findUnique({ where: { email } });
 
+        if (!user || !user.password) {
+          // Counted too: without this, a missing account is a free oracle for
+          // enumerating which email addresses exist.
+          recordLoginFailure(email);
+          return null;
+        }
+
+        const { valid, needsRehash } = await verifyPassword(parsed.data.password, user.password);
+        if (!valid) {
+          recordLoginFailure(email);
+          return null;
+        }
+
+        // Silently upgrade a legacy plaintext row now that we know the password
+        // is correct — accounts migrate to bcrypt on their next login with no
+        // reset required.
+        if (needsRehash) {
+          try {
+            await prisma.user.update({
+              where: { id: user.id },
+              data: { password: await hashPassword(parsed.data.password) },
+            });
+            console.log(`[auth] migrated password to bcrypt for user ${user.id}`);
+          } catch (err) {
+            // Never fail a valid login because the upgrade write failed.
+            console.error("[auth] password rehash failed:", err);
+          }
+        }
+
+        clearLoginFailures(email);
         return { id: user.id, email: user.email, name: user.name };
       },
     }),

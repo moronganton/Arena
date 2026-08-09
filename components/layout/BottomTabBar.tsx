@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, MessageSquare, MessageSquareText, BookOpen, CalendarDays, MoreHorizontal,
-  Home, Sparkles, Wallet, RefreshCw, Key, Bot, LogOut, X, Lightbulb,
+  Home, Sparkles, Wallet, RefreshCw, Key, Bot, LogOut, X, Lightbulb, ShieldCheck,
 } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { cn } from "@/lib/utils";
@@ -23,6 +23,7 @@ const MORE_LINKS = [
   { href: "/settings/smoobu", label: "Smoobu", icon: RefreshCw },
   { href: "/settings/locks", label: "Smart Locks", icon: Key },
   { href: "/settings/ai", label: "AI Assistant", icon: Bot },
+  { href: "/settings/account", label: "Account security", icon: ShieldCheck },
   { href: "/ideas", label: "Submit Ideas", icon: Lightbulb },
 ];
 

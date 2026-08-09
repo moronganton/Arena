@@ -18,6 +18,7 @@ import {
   Wallet,
   ChevronRight,
   Lightbulb,
+  ShieldCheck,
 } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { cn } from "@/lib/utils";
@@ -38,6 +39,7 @@ const settingsItems = [
   { href: "/settings/smoobu", label: "Smoobu", icon: RefreshCw },
   { href: "/settings/locks", label: "Smart Locks", icon: Key },
   { href: "/settings/ai", label: "AI Assistant", icon: Bot },
+  { href: "/settings/account", label: "Account security", icon: ShieldCheck },
   { href: "/ideas", label: "Submit Ideas", icon: Lightbulb },
 ];
 
