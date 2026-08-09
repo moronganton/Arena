@@ -13,7 +13,13 @@ import { isHashed } from "@/lib/password";
 // roles in Phase 2; this is a scalpel for right now.
 //
 //   GET /api/admin/users?secret=...                        → list every account
-//   GET /api/admin/users?secret=...&disable=a@b.com,c@d.com → block their login
+//   GET /api/admin/users?secret=...&disable=a@b.com,c@d.com → block password login
+//   GET /api/admin/users?secret=...&delete=a@b.com          → remove the account
+//
+// delete exists because disable is not enough for an OAuth account: clearing the
+// password does nothing to a user who signs in with Google, since they never had
+// one. Only accounts owning no properties can be deleted, so this can never take
+// real data with it.
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const secret = searchParams.get("secret");
@@ -22,6 +28,38 @@ export async function GET(req: NextRequest) {
   }
 
   const disableParam = searchParams.get("disable");
+  const deleteParam = searchParams.get("delete");
+
+  if (deleteParam) {
+    const emails = deleteParam.split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+    const results: Array<Record<string, unknown>> = [];
+
+    for (const email of emails) {
+      const user = await prisma.user.findUnique({
+        where: { email },
+        select: { id: true, email: true, _count: { select: { properties: true } } },
+      });
+      if (!user) {
+        results.push({ email, status: "not found — nothing to do" });
+        continue;
+      }
+      // Refuse rather than cascade into someone's real data. Property.owner has
+      // no onDelete rule, so this would fail on a foreign key anyway — better to
+      // say why than to surface a Prisma error.
+      if (user._count.properties > 0) {
+        results.push({
+          email: user.email,
+          status: `REFUSED — owns ${user._count.properties} propert${user._count.properties === 1 ? "y" : "ies"}`,
+        });
+        continue;
+      }
+      // Account (OAuth links) and Session both cascade from User.
+      await prisma.user.delete({ where: { id: user.id } });
+      results.push({ email: user.email, status: "deleted" });
+    }
+
+    return NextResponse.json({ action: "delete", results });
+  }
 
   if (disableParam) {
     const emails = disableParam
@@ -74,6 +112,7 @@ export async function GET(req: NextRequest) {
       password: true,
       createdAt: true,
       _count: { select: { properties: true, sessions: true } },
+      accounts: { select: { provider: true } },
     },
   });
 
@@ -88,9 +127,14 @@ export async function GET(req: NextRequest) {
       // stored password still plaintext?
       canPasswordLogin: !!u.password,
       passwordStorage: !u.password ? "none (login blocked)" : isHashed(u.password) ? "hashed" : "PLAINTEXT",
+      // A linked provider is a login route of its own — clearing the password
+      // does nothing to it, so it has to be visible here.
+      oauthLogins: u.accounts.map((a) => a.provider),
       ownsProperties: u._count.properties,
       activeSessionRows: u._count.sessions,
     })),
-    hint: "Add &disable=email1,email2 to block password login for the accounts you don't recognise.",
+    hint:
+      "&disable=a@b.com blocks password login. &delete=a@b.com removes the account " +
+      "entirely (needed for Google-only accounts, which have no password to clear).",
   });
 }

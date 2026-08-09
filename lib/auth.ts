@@ -93,6 +93,29 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       : []),
   ],
   callbacks: {
+    // Google sign-in must be a way INTO AN EXISTING ACCOUNT, never a way to
+    // create one. With the Prisma adapter, an OAuth provider otherwise
+    // self-provisions a User on first sign-in, so simply configuring Google
+    // turned StayHQ into an open sign-up: any Google account could log in, then
+    // spend the owner's Anthropic credits and Resend quota. (Owner-scoped
+    // queries meant they saw no existing data, but resource abuse was wide
+    // open.) Account creation belongs to the invite flow in Phase 2.
+    async signIn({ user, account }) {
+      if (account?.provider !== "google") return true;
+
+      const email = user.email?.toLowerCase().trim();
+      if (!email) return false;
+
+      const existing = await prisma.user.findUnique({
+        where: { email },
+        select: { id: true },
+      });
+      if (!existing) {
+        console.warn(`[auth] blocked Google sign-in for ${email}: no StayHQ account exists`);
+        return false;
+      }
+      return true;
+    },
     async jwt({ token, user }) {
       // Credentials sign-in provides the id directly; OAuth provides it via the
       // adapter-created user. Fall back to an email lookup so the id is always set.
