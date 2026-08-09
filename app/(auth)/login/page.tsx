@@ -114,10 +114,6 @@ export default function LoginPage() {
               Sign In
             </button>
           </form>
-
-          <div className="mt-6 pt-6 border-t border-slate-100 text-center text-sm text-slate-500">
-            Demo credentials: <strong>demo@stayhq.com</strong> / <strong>demo123</strong>
-          </div>
         </div>
       </div>
     </div>
