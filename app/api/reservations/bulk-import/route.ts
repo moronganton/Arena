@@ -350,6 +350,15 @@ export async function POST(req: NextRequest) {
   for (const row of rows) {
     if (!row.propertyId || !row.checkIn || !row.checkOut) continue;
 
+    // Tier 1: confirmation code match - conclusive WHEN it hits, but a miss
+    // proves nothing on its own. A live-synced reservation stores Smoobu's
+    // own internal booking id as its confirmationCode (e.g. "149927776"),
+    // not the OTA's Book Number/reference-id this CSV carries (e.g.
+    // "5544519195" for that exact same reservation, confirmed against a real
+    // account) - the two numbering schemes never intersect, so a row can
+    // fail this check and still be an exact duplicate of something already
+    // live-synced. This tier stays useful for catching the SAME csv (or a
+    // previous bulk import using the same numbering) re-run twice.
     if (row.confirmationCode) {
       const ck = codeKey(row.propertyId, row.confirmationCode);
       const dbHit = existingByCode.get(ck);
@@ -363,9 +372,7 @@ export async function POST(req: NextRequest) {
         continue;
       }
       seenCodeInBatch.set(ck, row.index);
-      // Do not also run the date-based check - a matched confirmation code is
-      // conclusive on its own either way.
-      continue;
+      // Falls through to the date check below on purpose - see comment above.
     }
 
     if (!isActive(row.status)) continue; // a cancelled/no-show row never collides on dates alone
