@@ -332,7 +332,7 @@ export default function CalendarPage() {
                         style={{ gridRow: r + 2, gridColumn: i + 1 }}
                       >
                         {price != null && (
-                          <span className="text-[14px] font-medium text-slate-400 tabular-nums leading-none whitespace-nowrap">
+                          <span className="text-[14px] font-medium text-black tabular-nums leading-none whitespace-nowrap">
                             {formatCurrency(price, currency[p.id] || "EUR")}
                           </span>
                         )}
