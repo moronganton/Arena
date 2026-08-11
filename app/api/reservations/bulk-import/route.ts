@@ -286,37 +286,81 @@ export async function POST(req: NextRequest) {
     rows.push(parsed);
   }
 
-  // Duplicate detection: within this batch, and against reservations already
-  // in the database for the properties involved. Same property + identical
-  // checkIn + checkOut is treated as a duplicate signal - this app has no
-  // multi-unit-per-property concept, so two genuinely different bookings at
-  // one property sharing the exact same pair of dates would itself be a
+  // Duplicate detection, two tiers.
+  //
+  // Tier 1 - confirmation code (the OTA's real booking number). Authoritative
+  // regardless of status: the same Book Number appearing twice always means
+  // "this is the same reservation", cancelled or not.
+  //
+  // Tier 2 - property + identical checkIn + checkOut, used only when no
+  // confirmation code is available to compare. This one is status-sensitive
+  // on purpose: a CANCELLED reservation frees the unit back up, so a
+  // cancellation and a later, unrelated booking legitimately share the same
+  // dates - confirmed against this exact export, which has four such pairs
+  // (a cancellation immediately followed by a different guest booking the
+  // freed dates). Only two ACTIVE (non-cancelled, non-no-show) reservations
+  // on the same dates at the same property are a real collision - this app
+  // has no multi-unit-per-property concept, so that would be an actual
   // double-booking, not a coincidence.
   const involvedPropertyIds = [...new Set(rows.map((r) => r.propertyId).filter(Boolean))] as string[];
   const existing = involvedPropertyIds.length
     ? await prisma.reservation.findMany({
         where: { propertyId: { in: involvedPropertyIds } },
-        select: { id: true, propertyId: true, checkIn: true, checkOut: true },
+        select: { id: true, propertyId: true, checkIn: true, checkOut: true, status: true, confirmationCode: true },
       })
     : [];
-  const existingKey = (propertyId: string, checkIn: Date, checkOut: Date) =>
-    `${propertyId}|${checkIn.toISOString()}|${checkOut.toISOString()}`;
-  const existingMap = new Map(existing.map((e) => [existingKey(e.propertyId, e.checkIn, e.checkOut), e.id]));
+  const isActive = (status: string | undefined) => status !== "CANCELLED" && status !== "NO_SHOW";
 
-  const seenInBatch = new Map<string, number>(); // key -> first row index
+  const codeKey = (propertyId: string, code: string) => `${propertyId}|${code.trim().toLowerCase()}`;
+  const existingByCode = new Map(
+    existing.filter((e) => e.confirmationCode).map((e) => [codeKey(e.propertyId, e.confirmationCode!), e.id])
+  );
+
+  const dateKey = (propertyId: string, checkIn: Date, checkOut: Date) =>
+    `${propertyId}|${checkIn.toISOString()}|${checkOut.toISOString()}`;
+  const existingByDateActive = new Map(
+    existing
+      .filter((e) => isActive(e.status))
+      .map((e) => [dateKey(e.propertyId, e.checkIn, e.checkOut), e.id])
+  );
+
+  const seenCodeInBatch = new Map<string, number>();
+  const seenDateInBatch = new Map<string, number>(); // only tracks ACTIVE rows
+
   for (const row of rows) {
     if (!row.propertyId || !row.checkIn || !row.checkOut) continue;
-    const key = existingKey(row.propertyId, row.checkIn, row.checkOut);
-    const dbHit = existingMap.get(key);
+
+    if (row.confirmationCode) {
+      const ck = codeKey(row.propertyId, row.confirmationCode);
+      const dbHit = existingByCode.get(ck);
+      if (dbHit) {
+        row.duplicate = { reason: `A reservation with confirmation code ${row.confirmationCode} already exists in StayHQ.`, existingReservationId: dbHit };
+        continue;
+      }
+      const firstRow = seenCodeInBatch.get(ck);
+      if (firstRow !== undefined) {
+        row.duplicate = { reason: `Same confirmation code as row ${firstRow} in this file.` };
+        continue;
+      }
+      seenCodeInBatch.set(ck, row.index);
+      // Do not also run the date-based check - a matched confirmation code is
+      // conclusive on its own either way.
+      continue;
+    }
+
+    if (!isActive(row.status)) continue; // a cancelled/no-show row never collides on dates alone
+
+    const dk = dateKey(row.propertyId, row.checkIn, row.checkOut);
+    const dbHit = existingByDateActive.get(dk);
     if (dbHit) {
       row.duplicate = { reason: "A reservation already exists in StayHQ for these exact dates.", existingReservationId: dbHit };
       continue;
     }
-    const firstRow = seenInBatch.get(key);
+    const firstRow = seenDateInBatch.get(dk);
     if (firstRow !== undefined) {
       row.duplicate = { reason: `Same property and dates as row ${firstRow} in this file.` };
     } else {
-      seenInBatch.set(key, row.index);
+      seenDateInBatch.set(dk, row.index);
     }
   }
 
