@@ -137,24 +137,9 @@ export async function getSmoobuRates(
   return out;
 }
 
-// Read rates for MANY apartments in one call (for the calendar overlay).
-// Returns { [apartmentId]: { [date]: DayRate } }.
-export async function getSmoobuRatesMulti(
-  userId: string,
-  apartmentIds: string[],
-  startDate: string,
-  endDate: string
-): Promise<Record<string, Record<string, DayRate>>> {
-  const account = await prisma.smoobuAccount.findUnique({ where: { userId } });
-  if (!account) throw new Error("Smoobu not connected");
-  if (apartmentIds.length === 0) return {};
-
-  const aptParams = apartmentIds.map((id) => `apartments%5B%5D=${id}`).join("&");
-  const path = `/rates?${aptParams}&start_date=${startDate}&end_date=${endDate}`;
-  const data = await smoobuFetch(account.apiKey, path);
-  const root: Record<string, Record<string, { price?: number; min_length_of_stay?: number; available?: number }>> =
-    data?.data ?? {};
-
+function parseRatesRoot(
+  root: Record<string, Record<string, { price?: number; min_length_of_stay?: number; available?: number }>>
+): Record<string, Record<string, DayRate>> {
   const out: Record<string, Record<string, DayRate>> = {};
   for (const [aptId, byDate] of Object.entries(root)) {
     const days: Record<string, DayRate> = {};
@@ -168,6 +153,52 @@ export async function getSmoobuRatesMulti(
     out[aptId] = days;
   }
   return out;
+}
+
+// Read rates for MANY apartments in one call (for the calendar overlay).
+// Returns { [apartmentId]: { [date]: DayRate } }.
+//
+// Smoobu validates every apartment id in the batch and rejects the WHOLE
+// request (422 "Apartment not found for this user") the instant ONE of them
+// is invalid - e.g. a stale or mistyped mapping for a single property.
+// Confirmed against a real account: the batched call and the single-apartment
+// call for the one bad id return the identical error, while the same
+// single-apartment call succeeds for every valid id. Without a fallback, one
+// broken mapping would silently blank out live prices for every OTHER
+// property too, which is worse than the bad mapping on its own.
+export async function getSmoobuRatesMulti(
+  userId: string,
+  apartmentIds: string[],
+  startDate: string,
+  endDate: string
+): Promise<Record<string, Record<string, DayRate>>> {
+  const account = await prisma.smoobuAccount.findUnique({ where: { userId } });
+  if (!account) throw new Error("Smoobu not connected");
+  if (apartmentIds.length === 0) return {};
+
+  const aptParams = apartmentIds.map((id) => `apartments%5B%5D=${id}`).join("&");
+  const path = `/rates?${aptParams}&start_date=${startDate}&end_date=${endDate}`;
+
+  try {
+    const data = await smoobuFetch(account.apiKey, path);
+    return parseRatesRoot(data?.data ?? {});
+  } catch (err) {
+    console.error(
+      `[smoobu] batched /rates failed for ${apartmentIds.length} apartment(s), falling back to one call per apartment:`,
+      err
+    );
+    const settled = await Promise.allSettled(
+      apartmentIds.map((id) => getSmoobuRates(userId, id, startDate, endDate))
+    );
+    const out: Record<string, Record<string, DayRate>> = {};
+    settled.forEach((r, i) => {
+      // A rejected apartment is simply left out of the result - the calendar
+      // already renders "no price" for any id missing from this map, which is
+      // the correct outcome for the one mapping that is actually broken.
+      if (r.status === "fulfilled") out[apartmentIds[i]] = r.value;
+    });
+    return out;
+  }
 }
 
 // Pull the message thread for a Smoobu reservation and import any messages
