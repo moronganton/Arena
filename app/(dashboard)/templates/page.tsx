@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect, useRef, useCallback } from "react";
-import { MessageSquarePlus, Save, Trash2, RefreshCw, ChevronLeft, Plus, Clock, Building2, Smile, Braces, Info, Send, Languages } from "lucide-react";
+import { MessageSquarePlus, Save, Trash2, RefreshCw, ChevronLeft, Plus, Clock, Building2, Smile, Braces, Info, Send, Languages, Copy, X } from "lucide-react";
 
 interface Field { token: string; key: string; label: string; description: string; example: string; }
 interface Trigger { value: string; label: string; description: string; usesOffset: boolean; offsetDir: "before" | "after" | null; anchor: string | null; }
@@ -43,6 +43,12 @@ export default function TemplatesPage() {
   const [sendingGuest, setSendingGuest] = useState(false);
   const [guestMsg, setGuestMsg] = useState("");
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
+
+  // Copy-to-property: which template is being copied, and which scopes are ticked.
+  // A target is a propertyId, or "GLOBAL" for the all-properties scope.
+  const [copyForId, setCopyForId] = useState<string | null>(null);
+  const [copyTargets, setCopyTargets] = useState<string[]>([]);
+  const [copying, setCopying] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -179,6 +185,45 @@ export default function TemplatesPage() {
     }
   }
 
+  function openCopy(t: Template) {
+    setCopyForId(t.id);
+    // Pre-tick nothing: the host has to say where it goes, so a stray click
+    // cannot silently create templates on every property.
+    setCopyTargets([]);
+  }
+
+  function toggleCopyTarget(key: string) {
+    setCopyTargets((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+  }
+
+  // Copies arrive PAUSED. The body usually holds property specifics no merge
+  // field covers - WiFi password, parking, door instructions - which would be
+  // confidently wrong for another apartment, so the host reviews before it can
+  // reach a guest.
+  async function runCopy() {
+    if (!copyForId || copyTargets.length === 0) return;
+    setCopying(true);
+    try {
+      const res = await fetch("/api/templates/copy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: copyForId, targets: copyTargets }),
+      });
+      const data = await res.json();
+      if (!res.ok) { alert(data.error || "Failed to copy template"); return; }
+      setCopyForId(null);
+      setCopyTargets([]);
+      await load();
+      const where = (data.created || []).map((c: { scope: string }) => c.scope).join(", ");
+      alert(
+        `Copied to ${where}.\n\nThe new template(s) are PAUSED. Check anything specific to the ` +
+        `old property - WiFi password, address, parking, door instructions - then switch them on.`
+      );
+    } finally {
+      setCopying(false);
+    }
+  }
+
   // Live preview: replace every token with its example value
   const preview = (() => {
     let out = form.body || "";
@@ -284,6 +329,13 @@ export default function TemplatesPage() {
                     <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${t.active ? "translate-x-6" : "translate-x-1"}`} />
                   </button>
                   <button
+                    onClick={() => openCopy(t)}
+                    title="Copy this template to another property"
+                    className="text-slate-400 hover:text-indigo-600 transition"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                  </button>
+                  <button
                     onClick={() => duplicateInEnglish(t)}
                     disabled={duplicatingId === t.id}
                     title="Duplicate in English (creates a paused copy to review)"
@@ -300,6 +352,78 @@ export default function TemplatesPage() {
             ))}
           </div>
         )}
+
+        {/* Copy-to-property picker */}
+        {copyForId && (() => {
+          const src = templates.find((x) => x.id === copyForId);
+          if (!src) return null;
+          const rows: { key: string; label: string }[] = [
+            { key: "GLOBAL", label: "All properties" },
+            ...properties.map((p) => ({ key: p.id, label: p.name })),
+          ];
+          const currentKey = src.propertyId === null ? "GLOBAL" : src.propertyId;
+          return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40">
+              <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5">
+                <div className="flex items-start justify-between gap-3 mb-1">
+                  <h3 className="font-semibold text-slate-900">Copy template</h3>
+                  <button onClick={() => setCopyForId(null)} className="text-slate-400 hover:text-slate-700">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <p className="text-sm text-slate-500 mb-4">
+                  Copy <span className="font-medium text-slate-700">{src.name}</span> to:
+                </p>
+
+                <div className="space-y-1.5 mb-4">
+                  {rows.map((r) => (
+                    <label
+                      key={r.key}
+                      className="flex items-center gap-2.5 px-3 py-2 rounded-xl border border-slate-200 hover:border-indigo-300 cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={copyTargets.includes(r.key)}
+                        onChange={() => toggleCopyTarget(r.key)}
+                        className="w-4 h-4 rounded accent-indigo-600"
+                      />
+                      <span className="text-sm text-slate-800">{r.label}</span>
+                      {r.key === currentKey && (
+                        <span className="text-[11px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">
+                          current
+                        </span>
+                      )}
+                    </label>
+                  ))}
+                </div>
+
+                <p className="text-xs text-slate-500 bg-slate-50 border border-slate-100 rounded-xl p-3 mb-4">
+                  Copies are created <span className="font-medium text-slate-700">paused</span>. Merge fields like
+                  {" "}<span className="font-mono">[Property Name]</span> and <span className="font-mono">[Access Code]</span>{" "}
+                  adapt on their own, but anything typed in by hand - WiFi password, parking, door instructions - still
+                  refers to the old property. Review, then switch on.
+                </p>
+
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    onClick={() => setCopyForId(null)}
+                    className="px-4 py-2 rounded-xl text-sm text-slate-600 hover:bg-slate-100"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={runCopy}
+                    disabled={copying || copyTargets.length === 0}
+                    className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2 rounded-xl text-sm font-medium"
+                  >
+                    {copying ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Copy className="w-4 h-4" />}
+                    Copy{copyTargets.length > 1 ? ` to ${copyTargets.length}` : ""}
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Scheduler setup note */}
         <div className="mt-6 bg-indigo-50 border border-indigo-100 rounded-2xl p-4 flex items-start gap-3">
