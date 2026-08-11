@@ -2,7 +2,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import { formatShortDate, formatCurrency, SOURCE_COLORS, SOURCE_LABELS, STATUS_COLORS } from "@/lib/utils";
-import { Plus, Search, Filter, ArrowRight } from "lucide-react";
+import { Plus, Search, Filter, ArrowRight, Upload } from "lucide-react";
 
 export default async function ReservationsPage({
   searchParams,
@@ -52,14 +52,24 @@ export default async function ReservationsPage({
           <h1 className="text-xl md:text-2xl font-bold text-slate-900">Reservations</h1>
           <p className="text-slate-500 text-sm mt-0.5">{reservations.length} total</p>
         </div>
-        <Link
-          href="/reservations/new"
-          className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-3 md:px-4 py-2.5 rounded-xl text-sm font-medium transition"
-        >
-          <Plus className="w-4 h-4" />
-          <span className="hidden sm:inline">New Reservation</span>
-          <span className="sm:hidden">New</span>
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/reservations/import"
+            title="Bulk import historical reservations from CSV"
+            className="flex items-center gap-2 border border-slate-200 hover:bg-slate-50 text-slate-600 px-3 py-2.5 rounded-xl text-sm font-medium transition"
+          >
+            <Upload className="w-4 h-4" />
+            <span className="hidden sm:inline">Bulk Import</span>
+          </Link>
+          <Link
+            href="/reservations/new"
+            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-3 md:px-4 py-2.5 rounded-xl text-sm font-medium transition"
+          >
+            <Plus className="w-4 h-4" />
+            <span className="hidden sm:inline">New Reservation</span>
+            <span className="sm:hidden">New</span>
+          </Link>
+        </div>
       </div>
 
       {/* Filters */}
