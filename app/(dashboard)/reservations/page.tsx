@@ -7,7 +7,7 @@ import { Plus, Search, Filter, ArrowRight, Upload } from "lucide-react";
 export default async function ReservationsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; source?: string; q?: string; sort?: string }>;
+  searchParams: Promise<{ status?: string; source?: string; propertyId?: string; q?: string; sort?: string }>;
 }) {
   const session = await auth();
   const params = await searchParams;
@@ -17,6 +17,7 @@ export default async function ReservationsPage({
   };
   if (params.status) where.status = params.status;
   if (params.source) where.source = params.source;
+  if (params.propertyId) where.propertyId = params.propertyId;
   if (params.q) {
     where.OR = [
       { guest: { name: { contains: params.q } } },
@@ -31,16 +32,23 @@ export default async function ReservationsPage({
   };
   const sort = SORT_OPTIONS[params.sort || "newest"] || SORT_OPTIONS.newest;
 
-  const reservations = await prisma.reservation.findMany({
-    where,
-    include: {
-      guest: true,
-      property: { select: { id: true, name: true, city: true, country: true } },
-      messages: { where: { isRead: false, direction: "INBOUND" }, select: { id: true } },
-      accessCodes: { where: { isActive: true }, select: { code: true }, take: 1 },
-    },
-    orderBy: { [sort.field]: sort.dir },
-  });
+  const [reservations, properties] = await Promise.all([
+    prisma.reservation.findMany({
+      where,
+      include: {
+        guest: true,
+        property: { select: { id: true, name: true, city: true, country: true } },
+        messages: { where: { isRead: false, direction: "INBOUND" }, select: { id: true } },
+        accessCodes: { where: { isActive: true }, select: { code: true }, take: 1 },
+      },
+      orderBy: { [sort.field]: sort.dir },
+    }),
+    prisma.property.findMany({
+      where: { ownerId: session!.user.id },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    }),
+  ]);
 
   const statuses = ["PENDING", "CONFIRMED", "CHECKED_IN", "CHECKED_OUT", "CANCELLED"];
   const sources = ["BOOKING", "AIRBNB", "VRBO", "EXPEDIA", "DIRECT"];
@@ -85,6 +93,16 @@ export default async function ReservationsPage({
             />
           </div>
           <div className="grid grid-cols-2 gap-2 sm:flex">
+            <select
+              name="propertyId"
+              defaultValue={params.propertyId || ""}
+              className="text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 sm:flex-1"
+            >
+              <option value="">All Properties</option>
+              {properties.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
             <select
               name="status"
               defaultValue={params.status || ""}
