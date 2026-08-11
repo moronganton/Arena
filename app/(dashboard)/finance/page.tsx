@@ -104,6 +104,7 @@ const FEE_CHANNELS = ["BOOKING", "AIRBNB", "VRBO", "EXPEDIA"];
 
 export default function FinancePage() {
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [propertyFilter, setPropertyFilter] = useState("");
   const [report, setReport] = useState<Report | null>(null);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
@@ -118,9 +119,10 @@ export default function FinancePage() {
   const [viewingInvoice, setViewingInvoice] = useState<Expense | null>(null);
 
   const loadData = useCallback(async () => {
+    const propertyQuery = propertyFilter ? `&propertyId=${propertyFilter}` : "";
     const [rep, exp, props, fees] = await Promise.all([
-      fetch(`/api/finance/report?month=${month}`).then((r) => r.json()),
-      fetch(`/api/expenses?month=${month}`).then((r) => r.json()),
+      fetch(`/api/finance/report?month=${month}${propertyQuery}`).then((r) => r.json()),
+      fetch(`/api/expenses?month=${month}${propertyQuery}`).then((r) => r.json()),
       fetch("/api/properties").then((r) => r.json()),
       fetch("/api/platform-fees").then((r) => r.json()),
     ]);
@@ -132,7 +134,7 @@ export default function FinancePage() {
       for (const f of fees) map[f.channel] = String(f.percent);
       setFeeSettings(map);
     }
-  }, [month]);
+  }, [month, propertyFilter]);
 
   useEffect(() => {
     loadData();
@@ -272,7 +274,17 @@ export default function FinancePage() {
           <h1 className="text-xl md:text-2xl font-bold text-slate-900">Finance</h1>
           <p className="text-slate-500 text-sm mt-0.5">Revenue, costs and net income per property</p>
         </div>
-        <div className="flex gap-2 items-center">
+        <div className="flex gap-2 items-center flex-wrap">
+          <select
+            value={propertyFilter}
+            onChange={(e) => setPropertyFilter(e.target.value)}
+            className="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          >
+            <option value="">All Properties</option>
+            {properties.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
           <input
             type="month"
             value={month}
@@ -289,7 +301,7 @@ export default function FinancePage() {
             />
           </label>
           <button
-            onClick={() => { setForm(emptyForm); setExtractNote(""); setShowForm(true); }}
+            onClick={() => { setForm({ ...emptyForm, propertyId: propertyFilter }); setExtractNote(""); setShowForm(true); }}
             className="flex items-center gap-2 border border-slate-200 hover:bg-slate-50 text-slate-700 px-3 py-2.5 rounded-xl text-sm font-medium transition"
           >
             <Plus className="w-4 h-4" />
