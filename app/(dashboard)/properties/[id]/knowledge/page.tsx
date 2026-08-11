@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Plus, Pencil, Trash2, Check, BookOpen, Sparkles, ClipboardPaste, AlertTriangle } from "lucide-react";
+import { ArrowLeft, Plus, Pencil, Trash2, Check, BookOpen, Sparkles, ClipboardPaste, AlertTriangle, Copy } from "lucide-react";
 
 interface Entry {
   id: string;
@@ -33,6 +33,14 @@ export default function PropertyKnowledgePage() {
   const [importError, setImportError] = useState("");
   const [importResult, setImportResult] = useState<string | null>(null);
 
+  // Copy-from-another-property
+  const [showCopy, setShowCopy] = useState(false);
+  const [otherProps, setOtherProps] = useState<{ id: string; name: string }[]>([]);
+  const [copySourceId, setCopySourceId] = useState("");
+  const [copyOverwrite, setCopyOverwrite] = useState(false);
+  const [copyError, setCopyError] = useState("");
+  const [copyResult, setCopyResult] = useState<string | null>(null);
+
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({ title: "", content: "" });
 
@@ -49,6 +57,50 @@ export default function PropertyKnowledgePage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Only fetched when the panel opens - the page does not otherwise need the
+  // property list.
+  async function openCopy() {
+    setShowCopy((v) => !v);
+    setCopyError("");
+    setCopyResult(null);
+    if (otherProps.length === 0) {
+      const all = await fetch("/api/properties").then((r) => r.json()).catch(() => []);
+      const list = (Array.isArray(all) ? all : [])
+        .filter((p: { id: string }) => p.id !== propertyId)
+        .map((p: { id: string; name: string }) => ({ id: p.id, name: p.name }));
+      setOtherProps(list);
+      setCopySourceId((prev) => prev || list[0]?.id || "");
+    }
+  }
+
+  async function copyFrom() {
+    if (!copySourceId) return;
+    setBusy(true);
+    setCopyError("");
+    setCopyResult(null);
+    try {
+      const res = await fetch("/api/knowledge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          propertyId,
+          action: "copyFrom",
+          sourcePropertyId: copySourceId,
+          overwrite: copyOverwrite,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setCopyError(data.error || "Copy failed"); return; }
+      const bits = [`${data.created} added`];
+      if (data.updated) bits.push(`${data.updated} updated`);
+      if (data.skipped) bits.push(`${data.skipped} left alone`);
+      setCopyResult(`From ${data.from}: ${bits.join(", ")}. Check every value before trusting it.`);
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function addStarter() {
     setBusy(true);
@@ -144,6 +196,14 @@ export default function PropertyKnowledgePage() {
         </div>
         <div className="flex items-center gap-2">
           <button
+            onClick={openCopy}
+            className="flex items-center gap-2 border border-slate-200 hover:bg-slate-50 text-slate-600 px-3 py-2.5 rounded-xl text-sm font-medium transition"
+            title="Copy the knowledge base from another property"
+          >
+            <Copy className="w-4 h-4" />
+            <span className="hidden sm:inline">Copy from</span>
+          </button>
+          <button
             onClick={() => { setShowImport((v) => !v); setImportError(""); setImportResult(null); }}
             className="flex items-center gap-2 border border-slate-200 hover:bg-slate-50 text-slate-600 px-3 py-2.5 rounded-xl text-sm font-medium transition"
             title="Import several entries from pasted JSON"
@@ -160,6 +220,84 @@ export default function PropertyKnowledgePage() {
           </button>
         </div>
       </div>
+
+      {showCopy && (
+        <div className="bg-white rounded-2xl border border-slate-200 p-5 mb-5">
+          <h3 className="text-sm font-semibold text-slate-900 mb-1">Copy from another property</h3>
+          <p className="text-xs text-slate-500 mb-3">
+            Brings that property&apos;s entries into <span className="font-medium text-slate-700">{propertyName}</span>.
+            Entries that already exist here are left untouched unless you tick overwrite below.
+          </p>
+
+          {otherProps.length === 0 ? (
+            <p className="text-sm text-slate-500">No other property to copy from yet.</p>
+          ) : (
+            <>
+              <select
+                value={copySourceId}
+                onChange={(e) => setCopySourceId(e.target.value)}
+                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                {otherProps.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+
+              <label className="flex items-start gap-2.5 mt-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={copyOverwrite}
+                  onChange={(e) => setCopyOverwrite(e.target.checked)}
+                  className="w-4 h-4 mt-0.5 rounded accent-indigo-600"
+                />
+                <span className="text-xs text-slate-600">
+                  Overwrite entries that already exist here.
+                  <span className="block text-slate-500">
+                    Off by default on purpose: this would replace this property&apos;s own WiFi password,
+                    address and door instructions with the other property&apos;s.
+                  </span>
+                </span>
+              </label>
+
+              <div className="mt-3 flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 p-3">
+                <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-amber-800">
+                  Copied entries go live immediately and the AI answers guests from them. Every value
+                  still describes the other property until you edit it.
+                </p>
+              </div>
+
+              {copyError && (
+                <div className="mt-3 flex items-start gap-2 rounded-lg bg-red-50 border border-red-200 p-3">
+                  <AlertTriangle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+                  <p className="text-sm text-red-700">{copyError}</p>
+                </div>
+              )}
+              {copyResult && (
+                <div className="mt-3 flex items-start gap-2 text-sm font-medium text-emerald-700">
+                  <Check className="w-4 h-4 flex-shrink-0 mt-0.5" /> {copyResult}
+                </div>
+              )}
+
+              <div className="flex gap-2 mt-3">
+                <button
+                  onClick={copyFrom}
+                  disabled={busy || !copySourceId}
+                  className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2 rounded-xl text-sm font-medium transition"
+                >
+                  {busy ? "Copying…" : "Copy entries"}
+                </button>
+                <button
+                  onClick={() => { setShowCopy(false); setCopyError(""); setCopyResult(null); }}
+                  className="px-4 py-2 rounded-xl text-sm text-slate-600 border border-slate-200 hover:bg-slate-50 transition"
+                >
+                  Close
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {showImport && (
         <div className="bg-white rounded-2xl border border-slate-200 p-5 mb-5">

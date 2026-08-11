@@ -117,6 +117,77 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, created, updated });
   }
 
+  // action:"copyFrom" - pull another property's knowledge base into this one.
+  //
+  // The target is the property being viewed, so there is exactly one
+  // destination and no way to fan out onto properties by accident.
+  //
+  // Entries are copied ACTIVE, unlike copied message templates which arrive
+  // paused. That is forced rather than chosen: GET above only returns active
+  // entries and there is no UI to switch one on, so an inactive copy would be
+  // invisible and unreviewable. The risk that creates is handled the other way
+  // round - by never overwriting an existing entry unless explicitly asked. The
+  // dangerous case is the target already having a correct "WiFi password" and
+  // the copy replacing it with the source property's, which the AI would then
+  // tell a real guest (lib/ai.ts feeds every active entry to it).
+  if (body.action === "copyFrom") {
+    const sourcePropertyId = typeof body.sourcePropertyId === "string" ? body.sourcePropertyId : "";
+    if (!sourcePropertyId) {
+      return NextResponse.json({ error: "sourcePropertyId required" }, { status: 400 });
+    }
+    if (sourcePropertyId === propertyId) {
+      return NextResponse.json({ error: "Pick a different property to copy from." }, { status: 400 });
+    }
+    const source = await ownedProperty(session.user.id, sourcePropertyId);
+    if (!source) return NextResponse.json({ error: "Source property not found" }, { status: 404 });
+
+    const sourceEntries = await prisma.propertyKnowledge.findMany({
+      where: { propertyId: sourcePropertyId, active: true },
+      orderBy: [{ category: "asc" }, { sortOrder: "asc" }, { createdAt: "asc" }],
+    });
+    if (sourceEntries.length === 0) {
+      return NextResponse.json({ error: `${source.name} has no knowledge entries to copy.` }, { status: 400 });
+    }
+
+    const existing = await prisma.propertyKnowledge.findMany({
+      where: { propertyId },
+      select: { id: true, category: true, title: true },
+    });
+    const keyOf = (c: string, t: string) => `${c.toLowerCase()}|||${t.toLowerCase()}`;
+    const byKey = new Map(existing.map((e) => [keyOf(e.category, e.title), e.id]));
+
+    const overwrite = body.overwrite === true;
+    let created = 0;
+    let updated = 0;
+    let skipped = 0;
+    let order = existing.length;
+
+    for (const e of sourceEntries) {
+      const match = byKey.get(keyOf(e.category, e.title));
+      if (match) {
+        if (!overwrite) { skipped++; continue; }
+        await prisma.propertyKnowledge.update({
+          where: { id: match },
+          data: { content: e.content, active: true },
+        });
+        updated++;
+        continue;
+      }
+      await prisma.propertyKnowledge.create({
+        data: {
+          propertyId,
+          category: e.category,
+          title: e.title,
+          content: e.content,
+          sortOrder: order++,
+        },
+      });
+      created++;
+    }
+
+    return NextResponse.json({ success: true, created, updated, skipped, from: source.name });
+  }
+
   if (!body.category || !body.title || !body.content) {
     return NextResponse.json({ error: "category, title and content required" }, { status: 400 });
   }
