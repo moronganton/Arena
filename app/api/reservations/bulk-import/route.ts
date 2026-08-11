@@ -81,6 +81,12 @@ const HEADER_ALIASES: Record<string, string> = {
   remarks: "specialRequests", specialrequests: "specialRequests",
   notes: "notes", internalnotes: "notes", note: "notes",
   bookedon: "bookedOn",
+  // Observability field only, same as the live-sync capture in
+  // lib/channels/smoobu.ts - /api/finance/report never reads this, it keeps
+  // using PlatformFeeSetting. Historical Booking.com exports have this
+  // populated on confirmed rows (blank on cancelled ones, correctly - no
+  // commission is charged on a booking that never completed).
+  commissionamount: "platformCommission", commission: "platformCommission",
 };
 
 function normKey(s: string): string {
@@ -155,6 +161,7 @@ interface ParsedRow {
   specialRequests?: string;
   notes?: string;
   bookedOn?: Date;
+  platformCommission?: number;
   duplicate?: { reason: string; existingReservationId?: string };
   liveWindowWarning?: string;
 }
@@ -287,6 +294,13 @@ export async function POST(req: NextRequest) {
     if (raw.bookedOn) {
       const d = new Date(raw.bookedOn);
       if (!Number.isNaN(d.getTime())) parsed.bookedOn = d;
+    }
+
+    // Observational only - a malformed value here just leaves it unset
+    // rather than failing the whole row, unlike totalAmount.
+    if (raw.platformCommission) {
+      const { amount } = parseAmount(raw.platformCommission);
+      if (amount != null) parsed.platformCommission = amount;
     }
 
     rows.push(parsed);
@@ -446,6 +460,10 @@ export async function POST(req: NextRequest) {
         // "just now" - Prisma allows overriding a @default(now()) field with
         // an explicit value.
         ...(row.bookedOn ? { createdAt: row.bookedOn } : {}),
+        // No platformCommissionSeenAt here on purpose - "delay until Smoobu
+        // reveals it" doesn't apply to historical data we already know at
+        // import time, only to reservations still flowing through live sync.
+        ...(row.platformCommission != null ? { platformCommission: row.platformCommission } : {}),
       },
     });
     createdIds.push(reservation.id);

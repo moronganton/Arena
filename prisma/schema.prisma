@@ -428,6 +428,16 @@ model Reservation {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
+  // Observability only - never read by /api/finance/report, which keeps
+  // using PlatformFeeSetting's percent-of-revenue calculation regardless of
+  // whether these are populated. Smoobu's own commission-included field is
+  // only present on a fraction of live-synced reservations (confirmed: 6 of
+  // 22 on a real account, correlated with the same bookings that also have
+  // full guest contact details) - these exist to measure whether that gap
+  // closes over time, not to be depended on for real numbers yet.
+  platformCommission      Float?    // the actual amount Smoobu/Booking.com reports, when present
+  platformCommissionSeenAt DateTime? // set once, the first time it went from null to populated
+
   propertyId String
   property   Property @relation(fields: [propertyId], references: [id])
 

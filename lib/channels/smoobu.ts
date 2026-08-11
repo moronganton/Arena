@@ -23,6 +23,11 @@ interface SmoobuBooking {
   price?: number;
   currency?: string;
   notice?: string;
+  // Only present on a fraction of bookings in practice (confirmed: 6 of 22 on
+  // a real account) - Smoobu appears to backfill it sometime after the
+  // booking first appears, not at creation. Captured for observability only;
+  // see platformCommissionSeenAt on Reservation.
+  "commission-included"?: number | null;
 }
 
 import {
@@ -210,6 +215,12 @@ export async function syncSmoobuBookings(userId: string): Promise<{
               source: mapSource(b),
               status,
               specialRequests: b.notice || undefined,
+              // First observation, if Smoobu already has it at creation time -
+              // the more common case per the sample is it appears later, via
+              // the update branch below.
+              ...(b["commission-included"] != null
+                ? { platformCommission: b["commission-included"], platformCommissionSeenAt: new Date() }
+                : {}),
             },
           });
           result.imported++;
@@ -239,6 +250,16 @@ export async function syncSmoobuBookings(userId: string): Promise<{
               children: b.children ?? existing.children,
               totalAmount: b.price ?? existing.totalAmount,
               currency: bookingCurrency,
+              // Stamp platformCommissionSeenAt only the FIRST time this goes
+              // from null to populated - that timestamp is what makes the
+              // delay measurable later. A value Smoobu already had is just
+              // refreshed in case it revises the figure, without resetting
+              // when it was first observed.
+              ...(b["commission-included"] != null
+                ? existing.platformCommission == null
+                  ? { platformCommission: b["commission-included"], platformCommissionSeenAt: new Date() }
+                  : { platformCommission: b["commission-included"] }
+                : {}),
             },
           });
 

@@ -20,16 +20,74 @@ import { SMOOBU_BASE_URL, parseCredential, buildHeaders } from "@/lib/channels/s
 //   GET /api/debug/test-reservation-fields?reservationId=<smoobu id>
 //     -> full raw JSON (list + detail view) for that ONE reservation, same
 //        as the original single-booking dump, for drilling into a specific one.
+//
+//   GET /api/debug/test-reservation-fields?stored=1
+//     -> reads StayHQ's OWN database instead of calling Smoobu again. Shows
+//        every reservation's platformCommission / platformCommissionSeenAt as
+//        actually persisted across however many sync runs have happened since
+//        this shipped, plus the delay (in hours) from createdAt to first
+//        seeing a commission value - the thing the live-fetch modes above
+//        cannot show, since they only ever see a single snapshot in time.
 export async function GET(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Log in first" }, { status: 401 });
 
-  const account = await prisma.smoobuAccount.findUnique({ where: { userId: session.user.id } });
-  if (!account) return NextResponse.json({ error: "Smoobu not connected" }, { status: 400 });
-
   const { searchParams } = new URL(req.url);
   const wantProperty = searchParams.get("propertyId");
   const wantReservationId = searchParams.get("reservationId");
+  const wantStored = searchParams.get("stored");
+
+  if (wantStored) {
+    const property = await prisma.property.findFirst({
+      where: { ownerId: session.user.id, ...(wantProperty ? { id: wantProperty } : {}) },
+      select: { id: true, name: true },
+    });
+    if (!property) return NextResponse.json({ error: "No property found" }, { status: 404 });
+
+    const reservations = await prisma.reservation.findMany({
+      where: { propertyId: property.id, source: "BOOKING" },
+      select: {
+        id: true, confirmationCode: true, checkIn: true, createdAt: true,
+        platformCommission: true, platformCommissionSeenAt: true, totalAmount: true,
+      },
+      orderBy: { createdAt: "desc" },
+      take: 200,
+    });
+
+    const rows = reservations.map((r) => {
+      const delayHours = r.platformCommissionSeenAt
+        ? Math.round((r.platformCommissionSeenAt.getTime() - r.createdAt.getTime()) / 3600000)
+        : null;
+      return {
+        id: r.id,
+        confirmationCode: r.confirmationCode,
+        checkIn: r.checkIn.toISOString().slice(0, 10),
+        createdAt: r.createdAt.toISOString(),
+        platformCommission: r.platformCommission,
+        platformCommissionSeenAt: r.platformCommissionSeenAt?.toISOString() ?? null,
+        totalAmount: r.totalAmount,
+        impliedPercent: r.platformCommission != null && r.totalAmount ? Math.round((r.platformCommission / r.totalAmount) * 1000) / 10 : null,
+        delayHoursFromCreatedToCommissionSeen: delayHours,
+      };
+    });
+
+    const withDelay = rows.filter((r) => r.delayHoursFromCreatedToCommissionSeen != null).map((r) => r.delayHoursFromCreatedToCommissionSeen!);
+    withDelay.sort((a, b) => a - b);
+    const median = withDelay.length ? withDelay[Math.floor(withDelay.length / 2)] : null;
+
+    return NextResponse.json({
+      property: property.name,
+      totalBookingComReservations: rows.length,
+      commissionPopulated: withDelay.length + rows.filter((r) => r.platformCommission != null && r.delayHoursFromCreatedToCommissionSeen == null).length,
+      stillPending: rows.filter((r) => r.platformCommission == null).length,
+      delayStatsHours: withDelay.length ? { min: withDelay[0], median, max: withDelay[withDelay.length - 1], sampleSize: withDelay.length } : null,
+      rows,
+      note: "Only meaningful once syncSmoobuBookings has run multiple times since this shipped - a reservation only gets platformCommissionSeenAt stamped the sync run AFTER it first appears with a non-null commission-included from Smoobu.",
+    });
+  }
+
+  const account = await prisma.smoobuAccount.findUnique({ where: { userId: session.user.id } });
+  if (!account) return NextResponse.json({ error: "Smoobu not connected" }, { status: 400 });
 
   const mapping = await prisma.channelConfig.findFirst({
     where: {
