@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Key, Plus, RefreshCw, Copy, Check, AlertTriangle } from "lucide-react";
 
 interface Lock {
@@ -31,6 +32,7 @@ export function AccessCodeGenerator({
   locks,
   externalId,
 }: AccessCodeGeneratorProps) {
+  const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [selectedLockId, setSelectedLockId] = useState(locks[0]?.id || "");
   const [loading, setLoading] = useState(false);
@@ -68,6 +70,11 @@ export function AccessCodeGenerator({
         validTo: data.validTo,
         lockError: data.lockError,
       });
+      // The access-code list is rendered by the server component behind this
+      // modal, so a new code stayed invisible until the whole app was reloaded.
+      // refresh() re-runs that server render while leaving client state alone,
+      // so the modal keeps showing the code it just generated.
+      router.refresh();
     } catch (err) {
       console.error(err);
       alert("Error generating code");
@@ -102,6 +109,7 @@ export function AccessCodeGenerator({
       alert("Code and message sent successfully!");
       setIsOpen(false);
       setGenerated(null);
+      router.refresh(); // sending also posts to the message thread
     } catch (err) {
       console.error(err);
       alert("Error sending message");
