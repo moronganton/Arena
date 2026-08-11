@@ -326,13 +326,13 @@ export default function CalendarPage() {
                     return (
                       <div
                         key={`c-${p.id}-${i}`}
-                        className={`border-b border-r border-slate-50 flex items-end justify-center pb-1 ${
+                        className={`border-b border-r border-slate-50 flex items-center justify-center ${
                           isToday ? "bg-indigo-50/40" : isWeekend ? "bg-slate-50/50" : ""
                         }`}
                         style={{ gridRow: r + 2, gridColumn: i + 1 }}
                       >
                         {price != null && (
-                          <span className="text-[9px] font-medium text-slate-400 tabular-nums leading-none">
+                          <span className="text-[14px] font-medium text-slate-400 tabular-nums leading-none whitespace-nowrap">
                             {formatCurrency(price, currency[p.id] || "EUR")}
                           </span>
                         )}
