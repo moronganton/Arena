@@ -70,8 +70,14 @@ const HEADER_ALIASES: Record<string, string> = {
   status: "status",
   confirmationcode: "confirmationCode", confirmation: "confirmationCode",
   bookingid: "confirmationCode", booknumber: "confirmationCode", reservationid: "confirmationCode", code: "confirmationCode",
-  adults: "adults", persons: "adults",
+  adults: "adults",
   children: "children",
+  // "Persons" is deliberately NOT aliased to adults. Booking.com's own export
+  // has both a Persons column (total party size) and a separate Adults
+  // column - mapping both to the same field meant whichever came later in
+  // the header row silently won, with no warning. Adults + Children already
+  // gives the precise breakdown when both are present; Persons alone (total
+  // only) is not a substitute worth guessing at.
   remarks: "specialRequests", specialrequests: "specialRequests",
   notes: "notes", internalnotes: "notes", note: "notes",
   bookedon: "bookedOn",
