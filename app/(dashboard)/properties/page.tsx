@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import { Plus, MapPin, Bed, Users, Wifi } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
+import CopyPropertyButton from "@/components/properties/CopyPropertyButton";
 
 export default async function PropertiesPage() {
   const session = await auth();
@@ -54,7 +55,9 @@ export default async function PropertiesPage() {
           </div>
         )}
         {properties.map((p) => (
-          <Link key={p.id} href={`/properties/${p.id}`}>
+          <div key={p.id} className="relative">
+            <CopyPropertyButton propertyId={p.id} propertyName={p.name} />
+            <Link href={`/properties/${p.id}`}>
             <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden hover:shadow-md transition-shadow">
               {p.imageUrl ? (
                 <img src={p.imageUrl} alt={p.name} className="w-full h-44 object-cover" />
@@ -105,7 +108,8 @@ export default async function PropertiesPage() {
                 )}
               </div>
             </div>
-          </Link>
+            </Link>
+          </div>
         ))}
       </div>
     </div>
