@@ -98,6 +98,11 @@ export default function CalendarPage() {
   const [loading, setLoading] = useState(true);
   const [prices, setPrices] = useState<Record<string, Record<string, number>>>({});
   const [currency, setCurrency] = useState<Record<string, string>>({});
+  // Distinguishes "still loading" from "loaded, this property just is not
+  // mapped to Smoobu" - both otherwise look like an empty currency map, and
+  // showing nothing either way is what made a fetch failure invisible.
+  const [pricesLoaded, setPricesLoaded] = useState(false);
+  const [pricesErr, setPricesErr] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const windowEnd = addDays(windowStart, WINDOW);
@@ -137,8 +142,14 @@ export default function CalendarPage() {
         if (cancelled) return;
         setPrices(data.prices || {});
         setCurrency(data.currency || {});
+        setPricesErr(data.error || "");
+        setPricesLoaded(true);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (cancelled) return;
+        setPricesErr("Could not reach the server for live prices.");
+        setPricesLoaded(true);
+      });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [windowStart]);
@@ -202,6 +213,12 @@ export default function CalendarPage() {
         </div>
       </div>
 
+      {pricesErr && (
+        <div className="mb-3 flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
+          <span>Live prices did not load: {pricesErr}</span>
+        </div>
+      )}
+
       <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
         {/* Toolbar */}
         <div className="flex items-center gap-2 p-3 border-b border-slate-100">
@@ -252,16 +269,29 @@ export default function CalendarPage() {
               >
                 Property
               </div>
-              {properties.map((p) => (
-                <div
-                  key={`lab-${p.id}`}
-                  className="border-b border-slate-100 px-3 flex flex-col justify-center"
-                  style={{ height: ROW_H }}
-                >
-                  <p className="text-xs font-bold text-slate-800 truncate">{p.name}</p>
-                  <p className="text-[10px] text-slate-400 truncate">{p.city}</p>
-                </div>
-              ))}
+              {properties.map((p) => {
+                const notLinked = pricesLoaded && !pricesErr && !currency[p.id];
+                return (
+                  <div
+                    key={`lab-${p.id}`}
+                    className="border-b border-slate-100 px-3 flex flex-col justify-center"
+                    style={{ height: ROW_H }}
+                  >
+                    <p className="text-xs font-bold text-slate-800 truncate">{p.name}</p>
+                    {notLinked ? (
+                      <Link
+                        href="/settings/smoobu"
+                        className="text-[9px] text-amber-600 hover:underline truncate"
+                        title="Live prices need this property mapped to a Smoobu listing"
+                      >
+                        No live prices — link Smoobu
+                      </Link>
+                    ) : (
+                      <p className="text-[10px] text-slate-400 truncate">{p.city}</p>
+                    )}
+                  </div>
+                );
+              })}
             </div>
 
             {/* Horizontally scrollable day grid */}
