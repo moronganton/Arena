@@ -27,14 +27,25 @@ const TEMPLATE_CSV =
   "property,checkIn,checkOut,guestName,totalAmount,currency,source,status,confirmationCode\n" +
   "29th floor Luxury Skyline 1BDRM Apart Downtown Bratislava,2026-03-10,2026-03-13,Jane Doe,285,EUR,Booking.com,CHECKED_OUT,HMKW8AND9N\n";
 
+const DEFAULT_SOURCE_OPTIONS = [
+  { value: "BOOKING", label: "Booking.com" },
+  { value: "AIRBNB", label: "Airbnb" },
+  { value: "VRBO", label: "VRBO" },
+  { value: "EXPEDIA", label: "Expedia" },
+  { value: "DIRECT", label: "Direct" },
+];
+
 export default function BulkImportReservationsPage() {
   const [csv, setCsv] = useState("");
+  const [defaultSource, setDefaultSource] = useState("BOOKING");
   const [previewing, setPreviewing] = useState(false);
   const [importing, setImporting] = useState(false);
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [excluded, setExcluded] = useState<Set<number>>(new Set());
   const [error, setError] = useState("");
   const [result, setResult] = useState<{ created: number; skipped: number } | null>(null);
+  const [fixing, setFixing] = useState(false);
+  const [fixResult, setFixResult] = useState<{ updated: number; to: string } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   function downloadTemplate() {
@@ -65,7 +76,7 @@ export default function BulkImportReservationsPage() {
       const res = await fetch("/api/reservations/bulk-import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ csv, mode: "preview" }),
+        body: JSON.stringify({ csv, mode: "preview", defaultSource }),
       });
       const data = await res.json();
       if (!res.ok) { setError(data.error || "Preview failed."); return; }
@@ -88,7 +99,7 @@ export default function BulkImportReservationsPage() {
       const res = await fetch("/api/reservations/bulk-import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ csv, mode: "commit", excludeRows: [...excluded] }),
+        body: JSON.stringify({ csv, mode: "commit", excludeRows: [...excluded], defaultSource }),
       });
       const data = await res.json();
       if (!res.ok) { setError(data.error || "Import failed."); return; }
@@ -98,6 +109,23 @@ export default function BulkImportReservationsPage() {
       setError("Could not reach the server.");
     } finally {
       setImporting(false);
+    }
+  }
+
+  async function runFixSource() {
+    if (!confirm('Relabel every previously bulk-imported reservation still marked "Direct" as Booking.com?')) return;
+    setFixing(true);
+    setFixResult(null);
+    try {
+      const res = await fetch("/api/reservations/bulk-import/fix-source", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: "BOOKING" }),
+      });
+      const data = await res.json();
+      if (res.ok) setFixResult(data);
+    } finally {
+      setFixing(false);
     }
   }
 
@@ -135,6 +163,33 @@ export default function BulkImportReservationsPage() {
       </div>
 
       {!preview && !result && (
+        <div className="flex items-center justify-between gap-3 flex-wrap bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-6">
+          <p className="text-sm text-amber-900">
+            Already imported reservations that ended up flagged as <span className="font-medium">Direct</span> instead
+            of the real platform? Relabel them in one go.
+          </p>
+          <button
+            onClick={runFixSource}
+            disabled={fixing}
+            className="flex items-center gap-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white px-3 py-2 rounded-lg text-xs font-medium transition whitespace-nowrap"
+          >
+            {fixing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
+            {fixing ? "Fixing…" : "Fix previously imported → Booking.com"}
+          </button>
+        </div>
+      )}
+      {fixResult && !preview && !result && (
+        <div className="flex items-start gap-2 rounded-lg bg-emerald-50 border border-emerald-200 p-3 mb-6">
+          <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" />
+          <p className="text-sm text-emerald-800">
+            {fixResult.updated === 0
+              ? "Nothing to fix — no bulk-imported reservations were on Direct."
+              : `${fixResult.updated} reservation${fixResult.updated === 1 ? "" : "s"} relabeled to Booking.com.`}
+          </p>
+        </div>
+      )}
+
+      {!preview && !result && (
         <div className="bg-white rounded-2xl border border-slate-100 p-5 space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <h2 className="font-semibold text-slate-900 text-sm">1. Paste or upload CSV</h2>
@@ -161,6 +216,20 @@ export default function BulkImportReservationsPage() {
             <span className="font-mono">property</span> must match one of your property names; <span className="font-mono">source</span> accepts
             Booking.com / Airbnb / VRBO / Expedia / Direct.
           </p>
+
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-medium text-slate-600">Default source</label>
+            <select
+              value={defaultSource}
+              onChange={(e) => setDefaultSource(e.target.value)}
+              className="border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              {DEFAULT_SOURCE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+            <span className="text-xs text-slate-400">used for rows with no explicit source column — e.g. a raw Booking.com Extranet export</span>
+          </div>
 
           <textarea
             value={csv}

@@ -39,7 +39,7 @@ const fmt = (n: number) => Math.round(n).toLocaleString();
 const W_PER_MONTH = 88;
 const MIN_W = 640;
 const H = 320;
-const PAD_L = 48, PAD_R = 16, PAD_T = 30, PAD_B = 28;
+const PAD_L = 48, PAD_R = 20, PAD_T = 36, PAD_B = 28;
 
 function niceMax(v: number): number {
   if (v <= 0) return 1000;
@@ -97,9 +97,14 @@ export default function SeasonalityChart({ propertyId }: { propertyId: string })
   const width = Math.max(MIN_W, n * W_PER_MONTH);
   const plotW = width - PAD_L - PAD_R;
   const plotH = H - PAD_T - PAD_B;
-  const yMax = niceMax(Math.max(1, ...months.map((m) => m.grossRevenue)) * 1.2);
+  const yMax = niceMax(Math.max(1, ...months.map((m) => m.grossRevenue)) * 1.25);
 
-  const xAt = (i: number) => (n <= 1 ? PAD_L + plotW / 2 : PAD_L + (plotW * i) / (n - 1));
+  // Each month gets its own slot of the plot width, centered within it — so
+  // the first and last bars sit inset from the axes with breathing room, the
+  // same way a real band scale would, instead of a point scale that pins the
+  // first/last point flush against the plot edges (and clips their labels).
+  const slotW = n > 0 ? plotW / n : plotW;
+  const xAt = (i: number) => PAD_L + slotW * (i + 0.5);
   const yAt = (v: number) => PAD_T + plotH - (plotH * Math.max(0, v)) / yMax;
 
   function handleMove(e: React.PointerEvent<SVGRectElement>) {
@@ -114,8 +119,9 @@ export default function SeasonalityChart({ propertyId }: { propertyId: string })
     setHover({ idx, x: xAt(idx), y: PAD_T });
   }
 
-  const groupW = n > 0 ? (plotW / n) * 0.62 : 90;
+  const groupW = Math.min(slotW * 0.62, 76);
   const barW = Math.min(24, groupW / 2 - 3);
+  const MOTION = { transition: "x 0.35s ease, y 0.35s ease, height 0.35s ease, width 0.35s ease, cx 0.35s ease, cy 0.35s ease, d 0.35s ease, opacity 0.2s ease" };
 
   return (
     <div className="bg-white rounded-2xl border border-slate-100 p-5 mb-6">
@@ -191,11 +197,13 @@ export default function SeasonalityChart({ propertyId }: { propertyId: string })
               const y = yAt(val);
               return (
                 <g key={t}>
-                  <line x1={PAD_L} x2={width - PAD_R} y1={y} y2={y} stroke="#e1e0d9" strokeWidth={1} />
-                  <text x={PAD_L - 8} y={y + 3} textAnchor="end" fontSize={10.5} fill="#94a3b8">{formatCompact(val)}</text>
+                  <line x1={PAD_L} x2={width - PAD_R} y1={y} y2={y} stroke="#e1e0d9" strokeWidth={1} style={MOTION} />
+                  <text x={PAD_L - 8} y={y + 3} textAnchor="end" fontSize={10.5} fill="#94a3b8" style={MOTION}>{formatCompact(val)}</text>
                 </g>
               );
             })}
+            {/* baseline */}
+            <line x1={PAD_L} x2={width - PAD_R} y1={yAt(0)} y2={yAt(0)} stroke="#c3c2b7" strokeWidth={1} style={MOTION} />
 
             {/* bars + net line */}
             {months.map((d, i) => {
@@ -204,24 +212,24 @@ export default function SeasonalityChart({ propertyId }: { propertyId: string })
               const rY = yAt(d.grossRevenue), cY = yAt(d.totalCosts);
               return (
                 <g key={d.month}>
-                  <rect x={cx - barW - 2} y={rY} width={barW} height={Math.max(0, y0 - rY)} rx={4} fill="#2a78d6" opacity={hover && hover.idx !== i ? 0.55 : 1} />
-                  <text x={cx - barW - 2 + barW / 2} y={rY - 6} textAnchor="middle" fontSize={10} fontWeight={600} fill="#475569">{formatCompact(d.grossRevenue)}</text>
-                  <rect x={cx + 2} y={cY} width={barW} height={Math.max(0, y0 - cY)} rx={4} fill="#eb6834" opacity={hover && hover.idx !== i ? 0.55 : 1} />
-                  <text x={cx + 2 + barW / 2} y={cY - 6} textAnchor="middle" fontSize={10} fontWeight={600} fill="#475569">{formatCompact(d.totalCosts)}</text>
+                  <rect x={cx - barW - 2} y={rY} width={barW} height={Math.max(0, y0 - rY)} rx={4} fill="#2a78d6" opacity={hover && hover.idx !== i ? 0.55 : 1} style={MOTION} />
+                  <text x={cx - barW - 2 + barW / 2} y={rY - 6} textAnchor="middle" fontSize={10} fontWeight={600} fill="#475569" style={MOTION}>{formatCompact(d.grossRevenue)}</text>
+                  <rect x={cx + 2} y={cY} width={barW} height={Math.max(0, y0 - cY)} rx={4} fill="#eb6834" opacity={hover && hover.idx !== i ? 0.55 : 1} style={MOTION} />
+                  <text x={cx + 2 + barW / 2} y={cY - 6} textAnchor="middle" fontSize={10} fontWeight={600} fill="#475569" style={MOTION}>{formatCompact(d.totalCosts)}</text>
                 </g>
               );
             })}
             <path
               d={months.map((d, i) => `${i === 0 ? "M" : "L"}${xAt(i)},${yAt(d.netIncome)}`).join(" ")}
-              fill="none" stroke="#1baf7a" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
+              fill="none" stroke="#1baf7a" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" style={MOTION}
             />
             {months.map((d, i) => (
-              <circle key={d.month} cx={xAt(i)} cy={yAt(d.netIncome)} r={4} fill="#1baf7a" stroke="#ffffff" strokeWidth={2} />
+              <circle key={d.month} cx={xAt(i)} cy={yAt(d.netIncome)} r={4} fill="#1baf7a" stroke="#ffffff" strokeWidth={2} style={MOTION} />
             ))}
 
             {/* x labels */}
             {months.map((d, i) => (
-              <text key={d.month} x={xAt(i)} y={H - 8} textAnchor="middle" fontSize={10.5} fill="#94a3b8">{monthLabel(d.month)}</text>
+              <text key={d.month} x={xAt(i)} y={H - 8} textAnchor="middle" fontSize={10.5} fill="#94a3b8" style={MOTION}>{monthLabel(d.month)}</text>
             ))}
 
             {/* crosshair */}

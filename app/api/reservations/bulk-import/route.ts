@@ -175,6 +175,13 @@ export async function POST(req: NextRequest) {
   const csv = typeof body.csv === "string" ? body.csv : "";
   const mode = body.mode === "commit" ? "commit" : "preview";
   const excludeRows = new Set<number>(Array.isArray(body.excludeRows) ? body.excludeRows : []);
+  // A whole export file comes from one platform's own extranet (Booking.com,
+  // Airbnb, ...) — it has no per-row "source" column because the file itself
+  // implies it. This is the fallback for rows without an explicit source;
+  // defaults to Booking.com since that's what a raw extranet export is.
+  const defaultSource = typeof body.defaultSource === "string" && SOURCE_ALIASES[normKey(body.defaultSource)]
+    ? SOURCE_ALIASES[normKey(body.defaultSource)]
+    : "BOOKING";
 
   if (!csv.trim()) return NextResponse.json({ error: "Paste or upload CSV data first." }, { status: 400 });
 
@@ -267,7 +274,7 @@ export async function POST(req: NextRequest) {
       if (!src) parsed.errors.push(`Unknown source "${raw.source}" - use Booking.com, Airbnb, VRBO, Expedia or Direct.`);
       else parsed.source = src;
     } else {
-      parsed.source = "DIRECT";
+      parsed.source = defaultSource;
     }
 
     if (raw.status) {
