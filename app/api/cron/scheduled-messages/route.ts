@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { deliverAiMessage } from "@/lib/ai";
 import { valuesFromReservation, renderTemplate, type TemplateReservation } from "@/lib/templates";
+import { cetHour, cetDayStartUtc, cetDayStartInstant } from "@/lib/cet";
 
 // Scheduler: call this on a schedule (hourly is ideal) to send any template
 // whose trigger is due for a reservation today. Protect it with the same
@@ -14,23 +15,37 @@ import { valuesFromReservation, renderTemplate, type TemplateReservation } from 
 
 const MAX_SENDS_PER_RUN = 300;
 
-function dayStartUTC(d: Date): Date {
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-}
 function addDays(d: Date, n: number): Date {
   return new Date(d.getTime() + n * 86400000);
 }
 
-// Which reservation date the trigger keys off, and the target day for "today".
-function resolveTarget(trigger: string, offsetDays: number, today: Date): { field: "checkIn" | "checkOut" | "createdAt"; target: Date } | null {
+// Which reservation date the trigger keys off, and the [from, to) window to
+// match against it.
+//
+// checkIn/checkOut hold calendar dates pinned to UTC midnight, so their windows
+// are built from `today` (the CET date in that same encoding). createdAt is a
+// real timestamp, so it gets a true CET-day instant window instead - mixing the
+// two encodings is what would make "booked today" mean the wrong 24 hours.
+function resolveTarget(
+  trigger: string,
+  offsetDays: number,
+  today: Date,
+  cetDayStart: Date
+): { field: "checkIn" | "checkOut" | "createdAt"; from: Date; to: Date } | null {
+  const dateWindow = (field: "checkIn" | "checkOut", target: Date) => ({
+    field,
+    from: target,
+    to: addDays(target, 1),
+  });
   switch (trigger) {
-    case "NEW_RESERVATION": return { field: "createdAt", target: today };
-    case "BEFORE_CHECKIN": return { field: "checkIn", target: addDays(today, offsetDays) };
-    case "CHECKIN_DAY": return { field: "checkIn", target: today };
-    case "DURING_STAY": return { field: "checkIn", target: addDays(today, -offsetDays) };
-    case "BEFORE_CHECKOUT": return { field: "checkOut", target: addDays(today, offsetDays) };
-    case "CHECKOUT_DAY": return { field: "checkOut", target: today };
-    case "AFTER_CHECKOUT": return { field: "checkOut", target: addDays(today, -offsetDays) };
+    case "NEW_RESERVATION":
+      return { field: "createdAt", from: cetDayStart, to: addDays(cetDayStart, 1) };
+    case "BEFORE_CHECKIN": return dateWindow("checkIn", addDays(today, offsetDays));
+    case "CHECKIN_DAY": return dateWindow("checkIn", today);
+    case "DURING_STAY": return dateWindow("checkIn", addDays(today, -offsetDays));
+    case "BEFORE_CHECKOUT": return dateWindow("checkOut", addDays(today, offsetDays));
+    case "CHECKOUT_DAY": return dateWindow("checkOut", today);
+    case "AFTER_CHECKOUT": return dateWindow("checkOut", addDays(today, -offsetDays));
     default: return null; // MANUAL or unknown → never auto-send
   }
 }
@@ -42,8 +57,11 @@ export async function GET(req: NextRequest) {
   }
 
   const now = new Date();
-  const today = dayStartUTC(now);
-  const hour = now.getUTCHours();
+  // Everything the host configures is CET/CEST wall-clock: a template set to
+  // 10:00 means 10:00 where the properties are, in both winter and summer.
+  const today = cetDayStartUtc(now);
+  const cetDayStart = cetDayStartInstant(now);
+  const hour = cetHour(now);
 
   const templates = await prisma.messageTemplate.findMany({
     where: { active: true, trigger: { not: "MANUAL" } },
@@ -58,15 +76,15 @@ export async function GET(req: NextRequest) {
     // Send around the configured hour; booking confirmations go out on the next run.
     if (t.trigger !== "NEW_RESERVATION" && hour < t.sendHour) continue;
 
-    const resolved = resolveTarget(t.trigger, t.offsetDays, today);
+    const resolved = resolveTarget(t.trigger, t.offsetDays, today, cetDayStart);
     if (!resolved) continue;
-    const { field, target } = resolved;
+    const { field, from, to } = resolved;
 
     const reservations = await prisma.reservation.findMany({
       where: {
         status: { not: "CANCELLED" },
         property: { ownerId: t.userId, ...(t.propertyId ? { id: t.propertyId } : {}) },
-        [field]: { gte: target, lt: addDays(target, 1) },
+        [field]: { gte: from, lt: to },
         // A mid-stay message only makes sense while the guest is still there
         ...(t.trigger === "DURING_STAY" ? { checkOut: { gt: now } } : {}),
       },
@@ -122,5 +140,12 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ ranAt: now.toISOString(), templatesChecked: templates.length, sent, results });
+  return NextResponse.json({
+    ranAt: now.toISOString(),
+    cetHour: hour,
+    cetDate: today.toISOString().slice(0, 10),
+    templatesChecked: templates.length,
+    sent,
+    results,
+  });
 }

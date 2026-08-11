@@ -72,3 +72,35 @@ export function formatCet(d: Date): string {
     hour12: false,
   }).format(d);
 }
+
+// The CET wall-clock hour (0-23) at this instant. The scheduler compares this
+// against a template's sendHour, so "send at 10:00" means 10:00 as the guest
+// and host experience it, not 10:00 UTC.
+export function cetHour(at: Date): number {
+  return zoneParts(at).hour;
+}
+
+// The CET calendar date at this instant, encoded as UTC midnight of that date.
+//
+// The odd-looking encoding is deliberate and load-bearing. Reservation checkIn
+// and checkOut are built with new Date("YYYY-MM-DD"), which parses as UTC
+// midnight, so those columns hold calendar DATES pinned to UTC midnight rather
+// than real instants. To match them, a target day has to be expressed the same
+// way. Returning a true CET-midnight instant here would shift every window one
+// or two hours off and match the wrong day's reservations.
+export function cetDayStartUtc(at: Date): Date {
+  const p = zoneParts(at);
+  return new Date(Date.UTC(p.year, p.month - 1, p.day));
+}
+
+// The actual instant at which the current CET day began. For columns that hold
+// real timestamps (Reservation.createdAt), which need a true instant window
+// rather than the date encoding above.
+export function cetDayStartInstant(at: Date): Date {
+  const p = zoneParts(at);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return (
+    cetInputValueToUtc(`${p.year}-${pad(p.month)}-${pad(p.day)}T00:00`) ??
+    new Date(Date.UTC(p.year, p.month - 1, p.day))
+  );
+}

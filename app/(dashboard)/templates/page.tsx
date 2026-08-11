@@ -235,9 +235,9 @@ export default function TemplatesPage() {
     const tr = triggers.find((x) => x.value === t.trigger);
     if (!tr) return t.trigger;
     if (t.trigger === "MANUAL") return "Manual only";
-    if (tr.usesOffset) return `${t.offsetDays} day${t.offsetDays === 1 ? "" : "s"} ${tr.offsetDir} ${tr.anchor === "checkIn" ? "check-in" : "check-out"} · ${String(t.sendHour).padStart(2, "0")}:00`;
+    if (tr.usesOffset) return `${t.offsetDays} day${t.offsetDays === 1 ? "" : "s"} ${tr.offsetDir} ${tr.anchor === "checkIn" ? "check-in" : "check-out"} · ${String(t.sendHour).padStart(2, "0")}:00 CET`;
     if (t.trigger === "NEW_RESERVATION") return "When booked";
-    return `${tr.label} · ${String(t.sendHour).padStart(2, "0")}:00`;
+    return `${tr.label} · ${String(t.sendHour).padStart(2, "0")}:00 CET`;
   }
 
   const visibleTemplates = templates.filter((t) =>
@@ -489,7 +489,7 @@ export default function TemplatesPage() {
                 )}
                 {showHour && (
                   <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">Send at (hour, UTC)</label>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">Send at (hour, CET)</label>
                     <select
                       value={form.sendHour}
                       onChange={(e) => setForm({ ...form, sendHour: parseInt(e.target.value) })}
