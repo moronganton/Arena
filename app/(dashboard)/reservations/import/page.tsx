@@ -16,9 +16,10 @@ interface PreviewRow {
   confirmationCode?: string;
   errors: string[];
   duplicate: string | null;
+  liveWindowWarning: string | null;
 }
 interface PreviewResult {
-  summary: { total: number; ok: number; duplicates: number; errors: number };
+  summary: { total: number; ok: number; duplicates: number; errors: number; liveWindowWarnings: number };
   rows: PreviewRow[];
 }
 
@@ -202,7 +203,24 @@ export default function BulkImportReservationsPage() {
               <span className="font-medium text-amber-700">{preview.summary.duplicates}</span> possible duplicates
               (excluded by default) ·{" "}
               <span className="font-medium text-red-700">{preview.summary.errors}</span> will be skipped (errors)
+              {preview.summary.liveWindowWarnings > 0 && (
+                <>
+                  {" · "}
+                  <span className="font-medium text-sky-700">{preview.summary.liveWindowWarnings}</span> are recent/upcoming
+                </>
+              )}
             </p>
+            {preview.summary.liveWindowWarnings > 0 && (
+              <div className="mt-3 flex items-start gap-2 rounded-lg bg-sky-50 border border-sky-200 p-3">
+                <Info className="w-4 h-4 text-sky-600 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-sky-800">
+                  Rows marked with a check-in in the last 90 days or later are inside Smoobu&apos;s live sync
+                  range. If a stay is genuinely still upcoming, it should come through the normal Smoobu sync
+                  instead — that path also generates the door PIN and sends the guest their messages, which
+                  this bulk import does not. Double-check these aren&apos;t already in StayHQ before including them.
+                </p>
+              </div>
+            )}
           </div>
 
           <div className="bg-white rounded-2xl border border-slate-100 overflow-x-auto">
@@ -216,6 +234,7 @@ export default function BulkImportReservationsPage() {
                   <th className="text-right px-3 py-2">Amount</th>
                   <th className="text-left px-3 py-2">Source</th>
                   <th className="text-left px-3 py-2">Status</th>
+                  <th className="text-left px-3 py-2 w-10"></th>
                   <th className="text-left px-3 py-2">Note</th>
                 </tr>
               </thead>
@@ -249,11 +268,18 @@ export default function BulkImportReservationsPage() {
                       </td>
                       <td className="px-3 py-2 text-slate-600">{r.source}</td>
                       <td className="px-3 py-2 text-slate-600">{r.status}</td>
+                      <td className="px-3 py-2">
+                        {r.liveWindowWarning && r.errors.length === 0 && (
+                          <Info className="w-3.5 h-3.5 text-sky-500" />
+                        )}
+                      </td>
                       <td className="px-3 py-2 max-w-[220px]">
                         {hasError ? (
                           <span className="text-red-600">{r.errors.join(" ")}</span>
                         ) : isDup ? (
                           <span className="text-amber-700">{r.duplicate}</span>
+                        ) : r.liveWindowWarning ? (
+                          <span className="text-sky-700">{r.liveWindowWarning}</span>
                         ) : (
                           <span className="text-slate-300">—</span>
                         )}

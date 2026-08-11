@@ -6,6 +6,11 @@ import { prisma } from "@/lib/prisma";
 // financial analytics on stays that predate the Smoobu connection or fell
 // outside its sync window (syncSmoobuBookings only ever looks 90 days back).
 //
+// Column aliases below were verified against a REAL Booking.com Extranet
+// export ("Checkin_*.xls" reservation list), not guessed - see "Status" and
+// "guestnames" in particular, which do not look anything like the generic
+// names a hand-built CSV would use.
+//
 // Two modes on the same endpoint, sharing one parser/validator so preview and
 // commit can never see the data differently:
 //   POST { csv, mode: "preview" }                        -> validate only, no writes
@@ -25,35 +30,55 @@ const SOURCE_ALIASES: Record<string, string> = {
   expedia: "EXPEDIA",
   direct: "DIRECT",
 };
+
+// "ok" and "cancelledbyguest" are Booking.com's OWN status vocabulary,
+// confirmed from a real export (69 rows: 59 "ok", 10 "cancelled_by_guest").
+// "cancelledbyhotel" and "noshow" are Booking.com's known equivalents for the
+// other two cases, added defensively - not seen in the sample file, but the
+// same export format is documented to use them.
+//
+// "ok" maps to CONFIRMED rather than trying to guess CHECKED_OUT from the
+// date: /api/finance/report recognises revenue by checkOut date for any
+// status that is not CANCELLED/NO_SHOW, so CONFIRMED vs CHECKED_OUT makes no
+// difference to the numbers, and guessing wrong would be pointless risk.
 const STATUS_ALIASES: Record<string, string> = {
   pending: "PENDING",
   confirmed: "CONFIRMED",
+  ok: "CONFIRMED",
   checkedin: "CHECKED_IN",
   checkedout: "CHECKED_OUT",
   cancelled: "CANCELLED", canceled: "CANCELLED",
+  cancelledbyguest: "CANCELLED", cancelledbyhotel: "CANCELLED",
   noshow: "NO_SHOW",
 };
-// Header aliases -> canonical field name. Keys are the header text with
-// spaces/underscores/dots stripped and lowercased, so "Total Amount",
-// "total_amount" and "totalAmount" all resolve the same way - hosts preparing
-// this in Excel or Sheets should not have to match an exact schema.
+
+// Header aliases -> canonical field name. Keys are the header text with every
+// non-alphanumeric character stripped and lowercased, so "Total Amount",
+// "total_amount", "Guest name(s)" and "Check-in" all resolve correctly -
+// hosts pasting a spreadsheet export should not have to match an exact
+// schema, and OTA exports are not written for that purpose anyway.
 const HEADER_ALIASES: Record<string, string> = {
   property: "property", propertyname: "property",
   checkin: "checkIn", arrival: "checkIn", arrivaldate: "checkIn",
   checkout: "checkOut", departure: "checkOut", departuredate: "checkOut",
-  guestname: "guestName", guest: "guestName", name: "guestName",
+  guestname: "guestName", guestnames: "guestName", guest: "guestName", name: "guestName",
   guestemail: "guestEmail", email: "guestEmail",
+  guestphone: "guestPhone", phone: "guestPhone", phonenumber: "guestPhone",
   totalamount: "totalAmount", amount: "totalAmount", total: "totalAmount", price: "totalAmount",
   currency: "currency",
   source: "source", channel: "source",
   status: "status",
   confirmationcode: "confirmationCode", confirmation: "confirmationCode",
-  bookingid: "confirmationCode", reservationid: "confirmationCode", code: "confirmationCode",
+  bookingid: "confirmationCode", booknumber: "confirmationCode", reservationid: "confirmationCode", code: "confirmationCode",
+  adults: "adults", persons: "adults",
+  children: "children",
+  remarks: "specialRequests", specialrequests: "specialRequests",
   notes: "notes", internalnotes: "notes", note: "notes",
+  bookedon: "bookedOn",
 };
 
 function normKey(s: string): string {
-  return s.trim().toLowerCase().replace(/[\s_.\-]/g, "");
+  return s.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
 // Minimal RFC4180-ish CSV parser: comma-separated, "..." quoting with ""
@@ -88,6 +113,21 @@ function parseCsv(text: string): string[][] {
   return rows.filter((r) => r.some((f) => f.trim() !== ""));
 }
 
+// Splits a combined "153 EUR" / "1,240.50 USD" cell into amount + currency.
+// Booking.com's own export has no separate currency column - it is folded
+// into Price - so this is required to read that format at all, not just a
+// convenience. Falls back to treating the whole string as a bare number when
+// there is no trailing currency code (a plain "153" from a hand-built CSV).
+function parseAmount(raw: string): { amount: number | null; currency: string | null } {
+  const trimmed = raw.trim();
+  const m = /^([\d.,\-]+)\s*([A-Za-z]{3})?$/.exec(trimmed);
+  if (!m) return { amount: null, currency: null };
+  const n = Number(m[1].replace(/,/g, ""));
+  return { amount: Number.isNaN(n) ? null : n, currency: m[2] ? m[2].toUpperCase() : null };
+}
+
+const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
+
 interface ParsedRow {
   index: number;
   raw: Record<string, string>;
@@ -98,13 +138,19 @@ interface ParsedRow {
   checkOut?: Date;
   guestName?: string;
   guestEmail?: string;
+  guestPhone?: string;
   totalAmount?: number;
   currency?: string;
   source?: string;
   status?: string;
   confirmationCode?: string;
+  adults?: number;
+  children?: number;
+  specialRequests?: string;
   notes?: string;
+  bookedOn?: Date;
   duplicate?: { reason: string; existingReservationId?: string };
+  liveWindowWarning?: string;
 }
 
 export async function POST(req: NextRequest) {
@@ -150,6 +196,8 @@ export async function POST(req: NextRequest) {
     return { error: `No property named "${name}".` };
   }
 
+  const liveWindowCutoff = new Date(Date.now() - NINETY_DAYS_MS);
+
   const rows: ParsedRow[] = [];
   for (let r = 1; r < table.length; r++) {
     const raw: Record<string, string> = {};
@@ -175,13 +223,29 @@ export async function POST(req: NextRequest) {
       parsed.errors.push("checkOut must be after checkIn.");
     }
 
+    // A check-in inside Smoobu's own rolling sync window is very likely
+    // already in StayHQ (or belongs there via the live pipeline, which also
+    // generates the door PIN and sends guest messages - this endpoint does
+    // neither). The duplicate check below already catches an exact match;
+    // this is a softer, non-blocking heads-up for rows that are recent/
+    // upcoming but did NOT match anything already on file.
+    if (parsed.checkIn && parsed.checkIn >= liveWindowCutoff) {
+      parsed.liveWindowWarning = "Check-in is within Smoobu's live sync range (last 90 days or later) - confirm this isn't already in StayHQ before importing.";
+    }
+
     parsed.guestName = raw.guestName || "Guest";
     parsed.guestEmail = raw.guestEmail || undefined;
+    parsed.guestPhone = raw.guestPhone || undefined;
 
     if (raw.totalAmount) {
-      const n = Number(raw.totalAmount.replace(/[^\d.-]/g, ""));
-      if (Number.isNaN(n) || n < 0) parsed.errors.push(`Invalid totalAmount "${raw.totalAmount}".`);
-      else parsed.totalAmount = n;
+      const { amount, currency } = parseAmount(raw.totalAmount);
+      if (amount == null || amount < 0) parsed.errors.push(`Invalid totalAmount "${raw.totalAmount}".`);
+      else {
+        parsed.totalAmount = amount;
+        // An explicit "currency" column always wins; a currency code folded
+        // into the amount cell (Booking.com's "153 EUR") is the fallback.
+        if (currency && !raw.currency) parsed.currency = currency;
+      }
     }
     if (raw.currency) parsed.currency = raw.currency.trim().toUpperCase();
 
@@ -201,8 +265,23 @@ export async function POST(req: NextRequest) {
       parsed.status = "CONFIRMED";
     }
 
+    if (raw.adults) {
+      const n = Math.trunc(Number(raw.adults));
+      if (!Number.isNaN(n) && n > 0) parsed.adults = n;
+    }
+    if (raw.children) {
+      const n = Math.trunc(Number(raw.children));
+      if (!Number.isNaN(n) && n >= 0) parsed.children = n;
+    }
+
     parsed.confirmationCode = raw.confirmationCode || undefined;
+    parsed.specialRequests = raw.specialRequests || undefined;
     parsed.notes = raw.notes || undefined;
+
+    if (raw.bookedOn) {
+      const d = new Date(raw.bookedOn);
+      if (!Number.isNaN(d.getTime())) parsed.bookedOn = d;
+    }
 
     rows.push(parsed);
   }
@@ -246,6 +325,7 @@ export async function POST(req: NextRequest) {
     ok: rows.filter((r) => r.errors.length === 0 && !r.duplicate).length,
     duplicates: rows.filter((r) => r.errors.length === 0 && r.duplicate).length,
     errors: rows.filter((r) => r.errors.length > 0).length,
+    liveWindowWarnings: rows.filter((r) => r.errors.length === 0 && !r.duplicate && r.liveWindowWarning).length,
   };
 
   if (mode === "preview") {
@@ -264,6 +344,7 @@ export async function POST(req: NextRequest) {
         confirmationCode: r.confirmationCode,
         errors: r.errors,
         duplicate: r.duplicate?.reason || null,
+        liveWindowWarning: r.liveWindowWarning || null,
       })),
     });
   }
@@ -287,7 +368,7 @@ export async function POST(req: NextRequest) {
       : null;
     if (!guest) {
       guest = await prisma.guest.create({
-        data: { name: row.guestName || "Guest", email: row.guestEmail },
+        data: { name: row.guestName || "Guest", email: row.guestEmail, phone: row.guestPhone },
       });
     }
 
@@ -297,6 +378,8 @@ export async function POST(req: NextRequest) {
         guestId: guest.id,
         checkIn: row.checkIn,
         checkOut: row.checkOut,
+        ...(row.adults != null ? { adults: row.adults } : {}),
+        ...(row.children != null ? { children: row.children } : {}),
         totalAmount: row.totalAmount,
         currency: row.currency || "EUR",
         source: row.source || "DIRECT",
@@ -306,7 +389,13 @@ export async function POST(req: NextRequest) {
         // overwritten by) an actual Smoobu-synced booking.
         externalId: row.confirmationCode ? `manual-${row.confirmationCode}` : undefined,
         confirmationCode: row.confirmationCode,
+        specialRequests: row.specialRequests,
         internalNotes: row.notes ? `Bulk-imported: ${row.notes}` : "Bulk-imported historical reservation",
+        // Preserves the OTA's real booking-creation timestamp when the source
+        // export has one, rather than stamping every backfilled row with
+        // "just now" - Prisma allows overriding a @default(now()) field with
+        // an explicit value.
+        ...(row.bookedOn ? { createdAt: row.bookedOn } : {}),
       },
     });
     createdIds.push(reservation.id);
