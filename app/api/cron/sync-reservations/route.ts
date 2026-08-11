@@ -17,6 +17,18 @@ import { syncSmoobuBookings } from "@/lib/channels/smoobu";
 // ones left unchecked for over a week showed 150-200+ "hours" that were
 // mostly just unattended time. Regular runs close that gap.
 //
+// Fires the sync in the BACKGROUND and responds immediately, rather than
+// awaiting the full run before replying. Free cron pingers commonly cap the
+// request timeout at 30 seconds with no way to raise it (confirmed against
+// cron-job.org's own UI), and syncing every reservation across every mapped
+// property routinely takes longer than that. This is safe specifically
+// because this app runs as a persistent `next start` Node process on Railway,
+// not a serverless function frozen the instant a response is sent - the
+// event loop keeps the sync's pending fetches alive after the HTTP response
+// goes out. Results aren't visible to the caller this way, so everything is
+// logged instead; check Railway's logs for "[cron/sync-reservations]" to see
+// how a given run actually went.
+//
 // Call on a schedule (hourly is enough - commission is not time-critical the
 // way messages are), protected by WEBHOOK_SECRET:
 //   GET /api/cron/sync-reservations?secret=YOUR_WEBHOOK_SECRET
@@ -26,6 +38,15 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // Deliberately not awaited - see comment above. Errors inside are caught
+  // per-account already; this outer catch is only for something failing
+  // before that loop even starts (e.g. the initial account lookup).
+  runSync().catch((err) => console.error("[cron/sync-reservations] background run failed to start:", err));
+
+  return NextResponse.json({ started: true, startedAt: new Date().toISOString() });
+}
+
+async function runSync() {
   const started = Date.now();
   const accounts = await prisma.smoobuAccount.findMany({ select: { userId: true } });
 
@@ -48,13 +69,9 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({
-    ranAt: new Date().toISOString(),
-    accounts: accounts.length,
-    imported,
-    updated,
-    cancelled,
-    errors,
-    tookMs: Date.now() - started,
-  });
+  console.log(
+    `[cron/sync-reservations] done in ${Date.now() - started}ms - accounts=${accounts.length} ` +
+    `imported=${imported} updated=${updated} cancelled=${cancelled} errors=${errors.length}` +
+    (errors.length ? ` (${errors.join("; ")})` : "")
+  );
 }
