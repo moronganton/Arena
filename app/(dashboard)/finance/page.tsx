@@ -4,6 +4,7 @@ import {
   Plus, Trash2, TrendingUp, TrendingDown, Wallet, Camera,
   RefreshCw, Sparkles, X, Receipt,
 } from "lucide-react";
+import SeasonalityChart from "./SeasonalityChart";
 
 const CATEGORIES = [
   "CLEANING", "LAUNDRY", "PLATFORM_FEES", "ESSENTIALS",
@@ -340,6 +341,8 @@ export default function FinancePage() {
               )}
             </div>
           </div>
+
+          <SeasonalityChart propertyId={propertyFilter} />
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
             {/* Revenue by source */}
