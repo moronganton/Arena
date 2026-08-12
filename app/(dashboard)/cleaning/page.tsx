@@ -94,6 +94,9 @@ function placeBar(from: Date, start: Date, end: Date) {
   if (e <= 0 || s >= WINDOW || e <= s) return null;
   return { start: s, span: e - s };
 }
+function relativeDayKey(d: Date | string) {
+  return new Date(d).toISOString().slice(0, 10);
+}
 
 // Compress a photo on the device before upload (max 1024px, JPEG 70%)
 async function compressPhoto(file: File): Promise<string> {
@@ -118,6 +121,8 @@ const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 export default function CleaningPage() {
   const today = startOfDay(new Date());
+  const todayKey = relativeDayKey(today);
+  const tomorrowKey = relativeDayKey(addDays(today, 1));
   const [windowStart, setWindowStart] = useState(() => addDays(startOfDay(new Date()), -2));
   const [properties, setProperties] = useState<Property[]>([]);
   const [calReservations, setCalReservations] = useState<CalReservation[]>([]);
@@ -422,20 +427,27 @@ export default function CleaningPage() {
         priorityDays.map((group) => (
           <div key={group.day} className="mb-1">
             <div className="flex items-center gap-2 mt-3 mb-2 px-0.5">
-              <span className={`text-[10px] font-bold uppercase tracking-wide ${group.day === today.toISOString().slice(0, 10) ? "text-indigo-600" : "text-slate-500"}`}>
+              <span className={`text-[10px] font-bold uppercase tracking-wide ${group.day === todayKey ? "text-indigo-600" : "text-slate-500"}`}>
                 {group.label}
               </span>
               <span className="text-[10px] text-slate-400">{group.jobs.length} job{group.jobs.length === 1 ? "" : "s"}</span>
               <span className="flex-1 h-px bg-slate-200" />
             </div>
             {group.jobs.map((job) => {
-              const isFuture = group.day !== today.toISOString().slice(0, 10);
               const done = job.checklist.filter((c) => c.done).length;
               const total = job.checklist.length;
               const expanded = expandedJob === job.id;
               const showingDamageForm = damageForm?.jobId === job.id;
+              const dayWord =
+                job.reservation && relativeDayKey(job.reservation.checkOut) === todayKey
+                  ? "today"
+                  : job.reservation && relativeDayKey(job.reservation.checkOut) === tomorrowKey
+                  ? "tomorrow"
+                  : job.reservation
+                  ? new Date(job.reservation.checkOut).toLocaleDateString(undefined, { weekday: "long" })
+                  : "";
               return (
-                <div key={job.id} className={`bg-white rounded-2xl border mb-2 overflow-hidden ${job.urgency === "URGENT" && !isFuture ? "border-red-300 ring-1 ring-red-200" : "border-slate-100"} ${isFuture ? "opacity-70" : ""}`}>
+                <div key={job.id} className={`bg-white rounded-2xl border mb-2 overflow-hidden ${job.urgency === "URGENT" ? "border-red-300 ring-1 ring-red-200" : "border-slate-100"}`}>
                   <div className="p-3">
                     <div className="flex items-start justify-between gap-2 mb-1.5 cursor-pointer" onClick={() => setExpandedJob(expanded ? null : job.id)}>
                       <div className="flex items-start gap-1.5 min-w-0 flex-1">
@@ -446,8 +458,8 @@ export default function CleaningPage() {
                             {job.status === "COMPLETED"
                               ? `Completed ${job.checkOutAt ? new Date(job.checkOutAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}`
                               : job.status === "IN_PROGRESS"
-                              ? "Check-out due · in progress"
-                              : "Check-out due today"}
+                              ? `Check-out due ${dayWord} · in progress`
+                              : `Check-out due ${dayWord}`}
                           </p>
                           {job.reservation && (
                             <div className="flex items-center gap-1 text-[9.5px] text-slate-500 mt-0.5 truncate">
@@ -467,17 +479,16 @@ export default function CleaningPage() {
 
                     <div className="grid grid-cols-3 gap-1.5">
                       <label className={`flex items-center justify-center gap-1 py-1.5 rounded-lg text-[9.5px] font-bold cursor-pointer transition ${
-                        job.checkInAt ? "bg-green-50 text-green-700" : isFuture ? "bg-slate-50 text-slate-300 cursor-not-allowed" : "bg-indigo-600 text-white hover:bg-indigo-700"
+                        job.checkInAt ? "bg-green-50 text-green-700" : "bg-indigo-600 text-white hover:bg-indigo-700"
                       }`}>
                         {busyJob === job.id ? <RefreshCw className="w-3 h-3 animate-spin" /> : job.checkInAt ? <Check className="w-3 h-3" /> : <Camera className="w-3 h-3" />}
                         {job.checkInAt ? "Checked in" : "Check-in"}
-                        <input type="file" accept="image/*" capture="environment" multiple className="hidden" disabled={!!job.checkInAt || isFuture} onChange={(e) => handlePhotos(job.id, e.target.files, "checkin")} />
+                        <input type="file" accept="image/*" capture="environment" multiple className="hidden" disabled={!!job.checkInAt} onChange={(e) => handlePhotos(job.id, e.target.files, "checkin")} />
                       </label>
 
                       <button
-                        onClick={() => !isFuture && setDamageForm(showingDamageForm ? null : { jobId: job.id, propertyId: job.property.id, desc: "", photos: [] })}
-                        disabled={isFuture}
-                        className={`flex items-center justify-center gap-1 py-1.5 rounded-lg text-[9.5px] font-bold border transition ${isFuture ? "border-slate-100 text-slate-300 cursor-not-allowed" : "border-red-200 text-red-600 hover:bg-red-50"}`}
+                        onClick={() => setDamageForm(showingDamageForm ? null : { jobId: job.id, propertyId: job.property.id, desc: "", photos: [] })}
+                        className="flex items-center justify-center gap-1 py-1.5 rounded-lg text-[9.5px] font-bold border border-red-200 text-red-600 hover:bg-red-50 transition"
                       >
                         <AlertTriangle className="w-3 h-3" />
                         Damage
@@ -488,7 +499,7 @@ export default function CleaningPage() {
                       }`}>
                         {busyJob === job.id ? <RefreshCw className="w-3 h-3 animate-spin" /> : job.checkOutAt ? <Check className="w-3 h-3" /> : <Camera className="w-3 h-3" />}
                         {job.checkOutAt ? "Checked out" : "Check-out"}
-                        <input type="file" accept="image/*" capture="environment" multiple className="hidden" disabled={!job.checkInAt || !!job.checkOutAt || isFuture} onChange={(e) => handlePhotos(job.id, e.target.files, "checkout")} />
+                        <input type="file" accept="image/*" capture="environment" multiple className="hidden" disabled={!job.checkInAt || !!job.checkOutAt} onChange={(e) => handlePhotos(job.id, e.target.files, "checkout")} />
                       </label>
                     </div>
                   </div>
