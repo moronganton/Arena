@@ -78,7 +78,7 @@ export default async function MessagesPage() {
               <div className={`flex items-start gap-3 p-4 md:p-5 border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-colors ${unreadCount > 0 ? "bg-indigo-50/50" : ""}`}>
                 <div className="relative flex-shrink-0">
                   <div
-                    className="w-11 h-11 bg-slate-100 rounded-full flex items-center justify-center text-slate-600 font-semibold text-[13px]"
+                    className="w-11 h-11 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-700 font-semibold text-[13px]"
                     title={`${nights} night${nights === 1 ? "" : "s"}`}
                   >
                     🌙{nights}
