@@ -2,7 +2,8 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import { formatShortDate, formatCurrency, SOURCE_COLORS, SOURCE_LABELS, STATUS_COLORS } from "@/lib/utils";
-import { Plus, Search, Filter, ArrowRight, Upload } from "lucide-react";
+import { Plus, ArrowRight, Upload } from "lucide-react";
+import { ReservationsFilters } from "@/components/reservations/ReservationsFilters";
 
 export default async function ReservationsPage({
   searchParams,
@@ -50,9 +51,6 @@ export default async function ReservationsPage({
     }),
   ]);
 
-  const statuses = ["PENDING", "CONFIRMED", "CHECKED_IN", "CHECKED_OUT", "CANCELLED"];
-  const sources = ["BOOKING", "AIRBNB", "VRBO", "EXPEDIA", "DIRECT"];
-
   return (
     <div className="p-4 md:p-8 max-w-7xl mx-auto">
       <div className="flex items-center justify-between mb-6">
@@ -80,68 +78,16 @@ export default async function ReservationsPage({
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="bg-white rounded-2xl border border-slate-100 p-4 mb-6">
-        <form className="flex flex-col sm:flex-row gap-3">
-          <div className="relative flex-1">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              name="q"
-              defaultValue={params.q}
-              placeholder="Search guest or code..."
-              className="w-full pl-9 pr-4 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-2 sm:flex">
-            <select
-              name="propertyId"
-              defaultValue={params.propertyId || ""}
-              className="text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 sm:flex-1"
-            >
-              <option value="">All Properties</option>
-              {properties.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-            <select
-              name="status"
-              defaultValue={params.status || ""}
-              className="text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 sm:flex-1"
-            >
-              <option value="">All Statuses</option>
-              {statuses.map((s) => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
-            <select
-              name="source"
-              defaultValue={params.source || ""}
-              className="text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 sm:flex-1"
-            >
-              <option value="">All Channels</option>
-              {sources.map((s) => (
-                <option key={s} value={s}>{SOURCE_LABELS[s]}</option>
-              ))}
-            </select>
-            <select
-              name="sort"
-              defaultValue={params.sort || "newest"}
-              className="col-span-2 text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 sm:flex-1"
-            >
-              <option value="newest">Newest bookings first</option>
-              <option value="oldest">Oldest bookings first</option>
-              <option value="checkin">By check-in date</option>
-            </select>
-            <button
-              type="submit"
-              className="col-span-2 flex items-center justify-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium transition sm:col-span-1"
-            >
-              <Filter className="w-4 h-4" />
-              Filter
-            </button>
-          </div>
-        </form>
-      </div>
+      <ReservationsFilters
+        properties={properties}
+        initial={{
+          q: params.q || "",
+          propertyId: params.propertyId || "",
+          status: params.status || "",
+          source: params.source || "",
+          sort: params.sort || "newest",
+        }}
+      />
 
       {/* Mobile cards */}
       <div className="md:hidden space-y-3">

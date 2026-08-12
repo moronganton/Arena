@@ -4,33 +4,53 @@ import Link from "next/link";
 import { MessageSquare, Bot, AlertTriangle } from "lucide-react";
 import { SOURCE_COLORS, SOURCE_LABELS } from "@/lib/utils";
 import { MessagesAutoSync } from "@/components/messages/MessagesAutoSync";
+import { MessagesFilters } from "@/components/messages/MessagesFilters";
 
-export default async function MessagesPage() {
+export default async function MessagesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ propertyId?: string; source?: string; unread?: string; needsReply?: string }>;
+}) {
   const session = await auth();
+  const params = await searchParams;
+  const unreadOnly = params.unread === "1";
+  const needsReplyOnly = params.needsReply === "1";
 
   // Get latest message per reservation (unified inbox)
-  const conversations = await prisma.reservation.findMany({
-    where: {
-      property: { ownerId: session!.user.id },
-      messages: { some: {} },
-    },
-    include: {
-      guest: true,
-      property: { select: { id: true, name: true } },
-      messages: {
-        orderBy: { createdAt: "desc" },
-        take: 1,
+  const [conversations, properties] = await Promise.all([
+    prisma.reservation.findMany({
+      where: {
+        property: { ownerId: session!.user.id },
+        ...(params.propertyId ? { propertyId: params.propertyId } : {}),
+        ...(params.source ? { source: params.source } : {}),
+        // "some: {}" (any message at all) is the default; unread-only tightens
+        // that to "some unread inbound message" instead of filtering the
+        // already-fetched list, so pagination/counts stay correct either way.
+        messages: unreadOnly ? { some: { isRead: false, direction: "INBOUND" } } : { some: {} },
       },
-      _count: {
-        select: {
-          messages: {
-            where: { isRead: false, direction: "INBOUND" },
+      include: {
+        guest: true,
+        property: { select: { id: true, name: true } },
+        messages: {
+          orderBy: { createdAt: "desc" },
+          take: 1,
+        },
+        _count: {
+          select: {
+            messages: {
+              where: { isRead: false, direction: "INBOUND" },
+            },
           },
         },
       },
-    },
-    orderBy: { updatedAt: "desc" },
-  });
+      orderBy: { updatedAt: "desc" },
+    }),
+    prisma.property.findMany({
+      where: { ownerId: session!.user.id },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    }),
+  ]);
 
   // Sort by the latest MESSAGE, not the reservation row's updatedAt — that
   // field also changes on every Smoobu sync (price, dates, status), which
@@ -51,6 +71,9 @@ export default async function MessagesPage() {
     select: { reservationId: true },
   });
   const needsReplySet = new Set(flagged.map((f) => f.reservationId));
+  const visibleConversations = needsReplyOnly
+    ? conversations.filter((c) => needsReplySet.has(c.id))
+    : conversations;
 
   return (
     <div className="p-4 md:p-8 max-w-4xl mx-auto">
@@ -59,17 +82,32 @@ export default async function MessagesPage() {
           <h1 className="text-2xl font-bold text-slate-900">Messages</h1>
           <p className="text-slate-500 text-sm mt-0.5">Unified inbox from all channels</p>
         </div>
-        <div className="mt-1.5"><MessagesAutoSync /></div>
+        <div className="flex items-center gap-2 mt-1.5">
+          <MessagesFilters
+            properties={properties}
+            initial={{
+              propertyId: params.propertyId || "",
+              source: params.source || "",
+              unread: unreadOnly,
+              needsReply: needsReplyOnly,
+            }}
+          />
+          <MessagesAutoSync />
+        </div>
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
-        {conversations.length === 0 && (
+        {visibleConversations.length === 0 && (
           <div className="text-center py-16">
             <MessageSquare className="w-10 h-10 text-slate-300 mx-auto mb-3" />
-            <p className="text-slate-400">No messages yet</p>
+            <p className="text-slate-400">
+              {params.propertyId || params.source || unreadOnly || needsReplyOnly
+                ? "No conversations match these filters"
+                : "No messages yet"}
+            </p>
           </div>
         )}
-        {conversations.map((conv) => {
+        {visibleConversations.map((conv) => {
           const lastMsg = conv.messages[0];
           const unreadCount = conv._count.messages;
           const nights = Math.round((conv.checkOut.getTime() - conv.checkIn.getTime()) / 86400000);
