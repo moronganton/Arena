@@ -4,6 +4,7 @@ import Link from "next/link";
 import { MessageSquare, Bot, AlertTriangle } from "lucide-react";
 import { SOURCE_COLORS, SOURCE_LABELS } from "@/lib/utils";
 import { MessagesAutoSync } from "@/components/messages/MessagesAutoSync";
+import { countryFromPhone } from "@/lib/phone-country";
 
 export default async function MessagesPage() {
   const session = await auth();
@@ -72,12 +73,16 @@ export default async function MessagesPage() {
         {conversations.map((conv) => {
           const lastMsg = conv.messages[0];
           const unreadCount = conv._count.messages;
+          const country = countryFromPhone(conv.guest.phone);
           return (
             <Link key={conv.id} href={`/reservations/${conv.id}`}>
               <div className={`flex items-start gap-3 p-4 md:p-5 border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-colors ${unreadCount > 0 ? "bg-indigo-50/50" : ""}`}>
                 <div className="relative flex-shrink-0">
-                  <div className="w-11 h-11 bg-slate-100 rounded-full flex items-center justify-center text-slate-600 font-semibold">
-                    {conv.guest.name[0].toUpperCase()}
+                  <div
+                    className={`w-11 h-11 bg-slate-100 rounded-full flex items-center justify-center text-slate-600 font-semibold ${country ? "text-xs tracking-wide" : ""}`}
+                    title={country ? `Phone country: ${country}` : undefined}
+                  >
+                    {country || conv.guest.name[0].toUpperCase()}
                   </div>
                   {unreadCount > 0 && (
                     <span className="absolute -top-1 -right-1 w-5 h-5 bg-rose-500 text-white text-xs rounded-full flex items-center justify-center font-bold">
