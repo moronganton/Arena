@@ -357,6 +357,13 @@ export default function FinancePage() {
             onChange={(e) => setMonth(e.target.value)}
             className="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
           />
+          <button
+            onClick={() => { setForm({ ...emptyForm, propertyId: propertyFilter.length === 1 ? propertyFilter[0] : "" }); setExtractNote(""); setShowForm(true); }}
+            className="flex items-center gap-2 border border-slate-200 hover:bg-slate-50 text-slate-700 px-3 py-2.5 rounded-xl text-sm font-medium transition"
+          >
+            <Plus className="w-4 h-4" />
+            <span className="hidden sm:inline">Add Cost</span>
+          </button>
           <label className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-3 md:px-4 py-2.5 rounded-xl text-sm font-medium transition cursor-pointer">
             {extracting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Camera className="w-4 h-4" />}
             <span className="hidden sm:inline">{extracting ? "Reading invoice..." : "Upload Invoice"}</span>
@@ -366,13 +373,6 @@ export default function FinancePage() {
               disabled={extracting}
             />
           </label>
-          <button
-            onClick={() => { setForm({ ...emptyForm, propertyId: propertyFilter.length === 1 ? propertyFilter[0] : "" }); setExtractNote(""); setShowForm(true); }}
-            className="flex items-center gap-2 border border-slate-200 hover:bg-slate-50 text-slate-700 px-3 py-2.5 rounded-xl text-sm font-medium transition"
-          >
-            <Plus className="w-4 h-4" />
-            <span className="hidden sm:inline">Add Cost</span>
-          </button>
         </div>
       </div>
 

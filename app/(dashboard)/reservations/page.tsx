@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import { formatShortDate, formatCurrency, SOURCE_COLORS, SOURCE_LABELS, STATUS_COLORS } from "@/lib/utils";
 import { Plus, ArrowRight, Upload } from "lucide-react";
-import { ReservationsFilters } from "@/components/reservations/ReservationsFilters";
+import { ReservationsSearchBar, ReservationsFilterMenu } from "@/components/reservations/ReservationsFilters";
 
 export default async function ReservationsPage({
   searchParams,
@@ -67,6 +67,16 @@ export default async function ReservationsPage({
             <Upload className="w-4 h-4" />
             <span className="hidden sm:inline">Bulk Import</span>
           </Link>
+          <ReservationsFilterMenu
+            properties={properties}
+            initial={{
+              q: params.q || "",
+              propertyId: params.propertyId || "",
+              status: params.status || "",
+              source: params.source || "",
+              sort: params.sort || "newest",
+            }}
+          />
           <Link
             href="/reservations/new"
             className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-3 md:px-4 py-2.5 rounded-xl text-sm font-medium transition"
@@ -78,16 +88,17 @@ export default async function ReservationsPage({
         </div>
       </div>
 
-      <ReservationsFilters
-        properties={properties}
-        initial={{
-          q: params.q || "",
-          propertyId: params.propertyId || "",
-          status: params.status || "",
-          source: params.source || "",
-          sort: params.sort || "newest",
-        }}
-      />
+      <div className="mb-6">
+        <ReservationsSearchBar
+          initial={{
+            q: params.q || "",
+            propertyId: params.propertyId || "",
+            status: params.status || "",
+            source: params.source || "",
+            sort: params.sort || "newest",
+          }}
+        />
+      </div>
 
       {/* Mobile cards */}
       <div className="md:hidden space-y-3">
