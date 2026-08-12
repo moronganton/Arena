@@ -9,7 +9,10 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const month = searchParams.get("month") || new Date().toISOString().slice(0, 7);
-  const propertyId = searchParams.get("propertyId") || undefined;
+  // Comma-separated list of property ids to scope to — one id works the same
+  // as before, several lets the report cover a chosen subset of the portfolio.
+  const propertyIdsParam = searchParams.get("propertyId");
+  const propertyIds = propertyIdsParam ? propertyIdsParam.split(",").filter(Boolean) : undefined;
   const start = new Date(`${month}-01T00:00:00Z`);
   const end = new Date(start);
   end.setMonth(end.getMonth() + 1);
@@ -20,7 +23,7 @@ export async function GET(req: NextRequest) {
       property: { ownerId: session.user.id },
       status: { notIn: ["CANCELLED", "NO_SHOW"] },
       checkOut: { gte: start, lt: end },
-      ...(propertyId ? { propertyId } : {}),
+      ...(propertyIds ? { propertyId: { in: propertyIds } } : {}),
     },
     select: {
       totalAmount: true,
@@ -31,14 +34,14 @@ export async function GET(req: NextRequest) {
     },
   });
 
-  // A property filter scopes everything below to that property alone — general
-  // (portfolio-wide) costs are excluded rather than folded in, so the totals
-  // read as that property's own P&L.
+  // A property filter scopes everything below to just the selected properties —
+  // general (portfolio-wide) costs are excluded rather than folded in, so the
+  // totals read as those properties' own P&L.
   const expenses = await prisma.expense.findMany({
     where: {
       ownerId: session.user.id,
       date: { gte: start, lt: end },
-      ...(propertyId ? { propertyId } : {}),
+      ...(propertyIds ? { propertyId: { in: propertyIds } } : {}),
     },
     select: {
       amount: true,
@@ -55,7 +58,7 @@ export async function GET(req: NextRequest) {
       ownerId: session.user.id,
       startDate: { lt: end },
       OR: [{ endDate: null }, { endDate: { gte: start } }],
-      ...(propertyId ? { propertyId } : {}),
+      ...(propertyIds ? { propertyId: { in: propertyIds } } : {}),
     },
     include: { property: { select: { id: true, name: true } } },
   });
@@ -66,7 +69,7 @@ export async function GET(req: NextRequest) {
       ownerId: session.user.id,
       startDate: { lt: end },
       OR: [{ endDate: null }, { endDate: { gte: start } }],
-      ...(propertyId ? { propertyId } : {}),
+      ...(propertyIds ? { propertyId: { in: propertyIds } } : {}),
     },
     include: { property: { select: { id: true, name: true } } },
   });
@@ -251,7 +254,7 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     month,
-    propertyId: propertyId || null,
+    propertyIds: propertyIds || null,
     summary: {
       grossRevenue: Math.round(totalRevenue * 100) / 100,
       totalCosts: Math.round(totalCosts * 100) / 100,

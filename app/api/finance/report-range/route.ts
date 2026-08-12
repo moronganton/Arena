@@ -11,7 +11,8 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const from = searchParams.get("from");
   const to = searchParams.get("to");
-  const propertyId = searchParams.get("propertyId") || undefined;
+  const propertyIdParam = searchParams.get("propertyId");
+  const propertyIds = propertyIdParam ? propertyIdParam.split(",").filter(Boolean) : undefined;
 
   if (!from || !to || !/^\d{4}-\d{2}$/.test(from) || !/^\d{4}-\d{2}$/.test(to)) {
     return NextResponse.json({ error: "from and to (YYYY-MM) are required" }, { status: 400 });
@@ -23,7 +24,7 @@ export async function GET(req: NextRequest) {
   }
 
   const results = await Promise.all(
-    months.map((m) => computeMonthSummary(session.user.id, m, propertyId))
+    months.map((m) => computeMonthSummary(session.user.id, m, propertyIds))
   );
 
   const totals = results.reduce(
@@ -38,7 +39,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     from,
     to,
-    propertyId: propertyId || null,
+    propertyIds: propertyIds || null,
     months: results,
     totals: {
       grossRevenue: Math.round(totals.grossRevenue * 100) / 100,

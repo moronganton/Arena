@@ -49,7 +49,7 @@ function niceMax(v: number): number {
   return step * mag;
 }
 
-export default function SeasonalityChart({ propertyId }: { propertyId: string }) {
+export default function SeasonalityChart({ propertyIds }: { propertyIds: string[] }) {
   const now = useMemo(() => new Date().toISOString().slice(0, 7), []);
   const yearStart = useMemo(() => `${now.slice(0, 4)}-01`, [now]);
 
@@ -69,7 +69,7 @@ export default function SeasonalityChart({ propertyId }: { propertyId: string })
   const load = useCallback(async () => {
     setLoading(true);
     const q = new URLSearchParams({ from: startMonth, to: endMonth });
-    if (propertyId) q.set("propertyId", propertyId);
+    if (propertyIds.length > 0) q.set("propertyId", propertyIds.join(","));
     try {
       const res = await fetch(`/api/finance/report-range?${q.toString()}`);
       const json = await res.json();
@@ -77,7 +77,7 @@ export default function SeasonalityChart({ propertyId }: { propertyId: string })
     } finally {
       setLoading(false);
     }
-  }, [startMonth, endMonth, propertyId]);
+  }, [startMonth, endMonth, propertyIds]);
 
   useEffect(() => { load(); }, [load]);
 

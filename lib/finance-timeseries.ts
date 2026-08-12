@@ -10,24 +10,25 @@ export interface MonthSummary {
 
 // Same aggregation rules as /api/finance/report (revenue recognized at checkout,
 // costs = expenses + recurring + per-reservation + auto platform fees), collapsed
-// to just the totals a time-series chart needs. A propertyId scopes everything to
-// that property alone — general (portfolio-wide) costs are excluded, matching how
-// the single-month report already treats a property filter.
+// to just the totals a time-series chart needs. propertyIds scopes everything to
+// just those properties — general (portfolio-wide) costs are excluded, matching
+// how the single-month report already treats a property filter.
 export async function computeMonthSummary(
   ownerId: string,
   month: string,
-  propertyId?: string
+  propertyIds?: string[]
 ): Promise<MonthSummary> {
   const start = new Date(`${month}-01T00:00:00Z`);
   const end = new Date(start);
   end.setMonth(end.getMonth() + 1);
+  const propertyFilter = propertyIds && propertyIds.length > 0 ? { propertyId: { in: propertyIds } } : {};
 
   const reservations = await prisma.reservation.findMany({
     where: {
       property: { ownerId },
       status: { notIn: ["CANCELLED", "NO_SHOW"] },
       checkOut: { gte: start, lt: end },
-      ...(propertyId ? { propertyId } : {}),
+      ...propertyFilter,
     },
     select: { totalAmount: true, source: true, propertyId: true },
   });
@@ -46,7 +47,7 @@ export async function computeMonthSummary(
     where: {
       ownerId,
       date: { gte: start, lt: end },
-      ...(propertyId ? { propertyId } : {}),
+      ...propertyFilter,
     },
     select: { amount: true },
   });
@@ -57,7 +58,7 @@ export async function computeMonthSummary(
       ownerId,
       startDate: { lt: end },
       OR: [{ endDate: null }, { endDate: { gte: start } }],
-      ...(propertyId ? { propertyId } : {}),
+      ...propertyFilter,
     },
     select: { amount: true },
   });
@@ -68,7 +69,7 @@ export async function computeMonthSummary(
       ownerId,
       startDate: { lt: end },
       OR: [{ endDate: null }, { endDate: { gte: start } }],
-      ...(propertyId ? { propertyId } : {}),
+      ...propertyFilter,
     },
     select: { amount: true, propertyId: true },
   });

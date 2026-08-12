@@ -9,10 +9,11 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const month = searchParams.get("month");
-  const propertyId = searchParams.get("propertyId");
+  const propertyIdParam = searchParams.get("propertyId");
+  const propertyIds = propertyIdParam ? propertyIdParam.split(",").filter(Boolean) : undefined;
 
   const where: Record<string, unknown> = { ownerId: session.user.id };
-  if (propertyId) where.propertyId = propertyId;
+  if (propertyIds) where.propertyId = propertyIds.length === 1 ? propertyIds[0] : { in: propertyIds };
   if (month) {
     const start = new Date(`${month}-01T00:00:00Z`);
     const end = new Date(start);

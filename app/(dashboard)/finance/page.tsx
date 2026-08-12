@@ -1,8 +1,8 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Plus, Trash2, TrendingUp, TrendingDown, Wallet, Camera,
-  RefreshCw, Sparkles, X, Receipt,
+  RefreshCw, Sparkles, X, Receipt, ChevronDown, Check,
 } from "lucide-react";
 import SeasonalityChart from "./SeasonalityChart";
 
@@ -105,7 +105,9 @@ const FEE_CHANNELS = ["BOOKING", "AIRBNB", "VRBO", "EXPEDIA"];
 
 export default function FinancePage() {
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
-  const [propertyFilter, setPropertyFilter] = useState("");
+  const [propertyFilter, setPropertyFilter] = useState<string[]>([]);
+  const [propertyMenuOpen, setPropertyMenuOpen] = useState(false);
+  const propertyMenuRef = useRef<HTMLDivElement>(null);
   const [report, setReport] = useState<Report | null>(null);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
@@ -120,7 +122,7 @@ export default function FinancePage() {
   const [viewingInvoice, setViewingInvoice] = useState<Expense | null>(null);
 
   const loadData = useCallback(async () => {
-    const propertyQuery = propertyFilter ? `&propertyId=${propertyFilter}` : "";
+    const propertyQuery = propertyFilter.length > 0 ? `&propertyId=${propertyFilter.join(",")}` : "";
     const [rep, exp, props, fees] = await Promise.all([
       fetch(`/api/finance/report?month=${month}${propertyQuery}`).then((r) => r.json()),
       fetch(`/api/expenses?month=${month}${propertyQuery}`).then((r) => r.json()),
@@ -140,6 +142,27 @@ export default function FinancePage() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (propertyMenuRef.current && !propertyMenuRef.current.contains(e.target as Node)) {
+        setPropertyMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, []);
+
+  function togglePropertyFilter(id: string) {
+    setPropertyFilter((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]));
+  }
+
+  const propertyFilterLabel =
+    propertyFilter.length === 0
+      ? "All Properties"
+      : propertyFilter.length === 1
+      ? properties.find((p) => p.id === propertyFilter[0])?.name || "1 property"
+      : `${propertyFilter.length} properties selected`;
 
   async function uploadInvoice(files: FileList | null) {
     if (!files || files.length === 0) return;
@@ -276,16 +299,58 @@ export default function FinancePage() {
           <p className="text-slate-500 text-sm mt-0.5">Revenue, costs and net income per property</p>
         </div>
         <div className="flex gap-2 items-center flex-wrap">
-          <select
-            value={propertyFilter}
-            onChange={(e) => setPropertyFilter(e.target.value)}
-            className="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          >
-            <option value="">All Properties</option>
-            {properties.map((p) => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </select>
+          <div className="relative" ref={propertyMenuRef}>
+            <button
+              type="button"
+              onClick={() => setPropertyMenuOpen((v) => !v)}
+              className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 max-w-[220px]"
+            >
+              <span className="truncate">{propertyFilterLabel}</span>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+            </button>
+            {propertyMenuOpen && (
+              <div className="absolute z-20 mt-1 w-64 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 max-h-80 overflow-y-auto">
+                <div className="flex items-center justify-between px-3 py-1.5 border-b border-slate-100 mb-1">
+                  <button
+                    onClick={() => setPropertyFilter([])}
+                    className="text-xs font-medium text-indigo-600 hover:text-indigo-700"
+                  >
+                    All Properties
+                  </button>
+                  <button
+                    onClick={() => setPropertyFilter(properties.map((p) => p.id))}
+                    className="text-xs font-medium text-slate-400 hover:text-slate-600"
+                  >
+                    Select all
+                  </button>
+                </div>
+                {properties.map((p) => {
+                  const checked = propertyFilter.includes(p.id);
+                  return (
+                    <label
+                      key={p.id}
+                      className="flex items-center gap-2.5 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 cursor-pointer"
+                    >
+                      <span
+                        className={`flex items-center justify-center w-4 h-4 rounded border flex-shrink-0 ${
+                          checked ? "bg-indigo-600 border-indigo-600" : "border-slate-300"
+                        }`}
+                      >
+                        {checked && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => togglePropertyFilter(p.id)}
+                        className="hidden"
+                      />
+                      <span className="truncate">{p.name}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </div>
           <input
             type="month"
             value={month}
@@ -302,7 +367,7 @@ export default function FinancePage() {
             />
           </label>
           <button
-            onClick={() => { setForm({ ...emptyForm, propertyId: propertyFilter }); setExtractNote(""); setShowForm(true); }}
+            onClick={() => { setForm({ ...emptyForm, propertyId: propertyFilter.length === 1 ? propertyFilter[0] : "" }); setExtractNote(""); setShowForm(true); }}
             className="flex items-center gap-2 border border-slate-200 hover:bg-slate-50 text-slate-700 px-3 py-2.5 rounded-xl text-sm font-medium transition"
           >
             <Plus className="w-4 h-4" />
@@ -342,7 +407,7 @@ export default function FinancePage() {
             </div>
           </div>
 
-          <SeasonalityChart propertyId={propertyFilter} />
+          <SeasonalityChart propertyIds={propertyFilter} />
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
             {/* Revenue by source */}
