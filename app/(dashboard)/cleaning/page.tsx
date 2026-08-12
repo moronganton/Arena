@@ -134,6 +134,10 @@ export default function CleaningPage() {
   const [expandedJob, setExpandedJob] = useState<string | null>(null);
   const [busyJob, setBusyJob] = useState<string | null>(null);
   const [damageForm, setDamageForm] = useState<{ jobId: string; propertyId: string; desc: string; photos: string[] } | null>(null);
+  // Real behavior is: a cleaning that isn't today's should be greyed out, so
+  // a cleaner can't accidentally start tomorrow's job. Off by default; flip
+  // it on to test Check-in/Damage/Check-out on a future-dated job.
+  const [testMode, setTestMode] = useState(false);
 
   const [damages, setDamages] = useState<DamageReport[]>([]);
   const [showForm, setShowForm] = useState(false);
@@ -412,9 +416,21 @@ export default function CleaningPage() {
       </div>
 
       {/* --- Priority job list --- */}
-      <div className="flex items-center justify-between mb-2 px-0.5">
+      <div className="flex items-center justify-between mb-2 px-0.5 gap-2 flex-wrap">
         <span className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Cleaning schedule</span>
-        <span className="text-xs text-slate-400">{totalJobs} job{totalJobs === 1 ? "" : "s"}</span>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setTestMode((v) => !v)}
+            className={`flex items-center gap-1.5 text-[10px] font-semibold px-2 py-1 rounded-full border transition ${
+              testMode ? "bg-amber-50 border-amber-200 text-amber-700" : "border-slate-200 text-slate-400 hover:text-slate-600"
+            }`}
+            title="For testing only — unlocks tomorrow's and later jobs so their buttons can be tried before their actual day"
+          >
+            <span className={`w-2 h-2 rounded-full ${testMode ? "bg-amber-500" : "bg-slate-300"}`} />
+            Test mode: {testMode ? "future jobs unlocked" : "off"}
+          </button>
+          <span className="text-xs text-slate-400">{totalJobs} job{totalJobs === 1 ? "" : "s"}</span>
+        </div>
       </div>
 
       {priorityLoading ? (
@@ -434,6 +450,8 @@ export default function CleaningPage() {
               <span className="flex-1 h-px bg-slate-200" />
             </div>
             {group.jobs.map((job) => {
+              const isFuture = group.day !== todayKey;
+              const locked = isFuture && !testMode;
               const done = job.checklist.filter((c) => c.done).length;
               const total = job.checklist.length;
               const expanded = expandedJob === job.id;
@@ -447,7 +465,7 @@ export default function CleaningPage() {
                   ? new Date(job.reservation.checkOut).toLocaleDateString(undefined, { weekday: "long" })
                   : "";
               return (
-                <div key={job.id} className={`bg-white rounded-2xl border mb-2 overflow-hidden ${job.urgency === "URGENT" ? "border-red-300 ring-1 ring-red-200" : "border-slate-100"}`}>
+                <div key={job.id} className={`bg-white rounded-2xl border mb-2 overflow-hidden ${job.urgency === "URGENT" && !locked ? "border-red-300 ring-1 ring-red-200" : "border-slate-100"} ${locked ? "opacity-60" : ""}`}>
                   <div className="p-3">
                     <div className="flex items-start justify-between gap-2 mb-1.5 cursor-pointer" onClick={() => setExpandedJob(expanded ? null : job.id)}>
                       <div className="flex items-start gap-1.5 min-w-0 flex-1">
@@ -478,28 +496,29 @@ export default function CleaningPage() {
                     </div>
 
                     <div className="grid grid-cols-3 gap-1.5">
-                      <label className={`flex items-center justify-center gap-1 py-1.5 rounded-lg text-[9.5px] font-bold cursor-pointer transition ${
-                        job.checkInAt ? "bg-green-50 text-green-700" : "bg-indigo-600 text-white hover:bg-indigo-700"
+                      <label className={`flex items-center justify-center gap-1 py-1.5 rounded-lg text-[9.5px] font-bold transition ${
+                        locked ? "bg-slate-50 text-slate-300 cursor-not-allowed" : job.checkInAt ? "bg-green-50 text-green-700 cursor-pointer" : "bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer"
                       }`}>
                         {busyJob === job.id ? <RefreshCw className="w-3 h-3 animate-spin" /> : job.checkInAt ? <Check className="w-3 h-3" /> : <Camera className="w-3 h-3" />}
                         {job.checkInAt ? "Checked in" : "Check-in"}
-                        <input type="file" accept="image/*" capture="environment" multiple className="hidden" disabled={!!job.checkInAt} onChange={(e) => handlePhotos(job.id, e.target.files, "checkin")} />
+                        <input type="file" accept="image/*" capture="environment" multiple className="hidden" disabled={!!job.checkInAt || locked} onChange={(e) => handlePhotos(job.id, e.target.files, "checkin")} />
                       </label>
 
                       <button
-                        onClick={() => setDamageForm(showingDamageForm ? null : { jobId: job.id, propertyId: job.property.id, desc: "", photos: [] })}
-                        className="flex items-center justify-center gap-1 py-1.5 rounded-lg text-[9.5px] font-bold border border-red-200 text-red-600 hover:bg-red-50 transition"
+                        onClick={() => !locked && setDamageForm(showingDamageForm ? null : { jobId: job.id, propertyId: job.property.id, desc: "", photos: [] })}
+                        disabled={locked}
+                        className={`flex items-center justify-center gap-1 py-1.5 rounded-lg text-[9.5px] font-bold border transition ${locked ? "border-slate-100 text-slate-300 cursor-not-allowed" : "border-red-200 text-red-600 hover:bg-red-50"}`}
                       >
                         <AlertTriangle className="w-3 h-3" />
                         Damage
                       </button>
 
-                      <label className={`flex items-center justify-center gap-1 py-1.5 rounded-lg text-[9.5px] font-bold cursor-pointer transition ${
-                        job.checkOutAt ? "bg-green-50 text-green-700" : job.checkInAt ? "bg-slate-900 text-white hover:bg-slate-800" : "bg-slate-50 text-slate-300 cursor-not-allowed"
+                      <label className={`flex items-center justify-center gap-1 py-1.5 rounded-lg text-[9.5px] font-bold transition ${
+                        locked ? "bg-slate-50 text-slate-300 cursor-not-allowed" : job.checkOutAt ? "bg-green-50 text-green-700 cursor-pointer" : job.checkInAt ? "bg-slate-900 text-white hover:bg-slate-800 cursor-pointer" : "bg-slate-50 text-slate-300 cursor-not-allowed"
                       }`}>
                         {busyJob === job.id ? <RefreshCw className="w-3 h-3 animate-spin" /> : job.checkOutAt ? <Check className="w-3 h-3" /> : <Camera className="w-3 h-3" />}
                         {job.checkOutAt ? "Checked out" : "Check-out"}
-                        <input type="file" accept="image/*" capture="environment" multiple className="hidden" disabled={!job.checkInAt || !!job.checkOutAt} onChange={(e) => handlePhotos(job.id, e.target.files, "checkout")} />
+                        <input type="file" accept="image/*" capture="environment" multiple className="hidden" disabled={!job.checkInAt || !!job.checkOutAt || locked} onChange={(e) => handlePhotos(job.id, e.target.files, "checkout")} />
                       </label>
                     </div>
                   </div>
