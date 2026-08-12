@@ -36,8 +36,10 @@ function formatCompact(n: number): string {
 
 const fmt = (n: number) => Math.round(n).toLocaleString();
 
-const W_PER_MONTH = 88;
-const MIN_W = 640;
+// Legibility floor — below this many px per month, bars/labels get too
+// cramped and it's better to let the chart scroll than shrink further.
+const MIN_PER_MONTH = 34;
+const FALLBACK_CONTAINER_W = 700;
 const H = 320;
 const PAD_L = 48, PAD_R = 20, PAD_T = 36, PAD_B = 28;
 
@@ -91,10 +93,27 @@ export default function SeasonalityChart({ propertyIds }: { propertyIds: string[
 
   const months = data?.months ?? [];
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const chartWrapRef = useRef<HTMLDivElement | null>(null);
+  const [containerWidth, setContainerWidth] = useState(FALLBACK_CONTAINER_W);
   const [hover, setHover] = useState<{ idx: number; x: number; y: number } | null>(null);
 
+  useEffect(() => {
+    const el = chartWrapRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width;
+      if (w) setContainerWidth(w);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
   const n = months.length;
-  const width = Math.max(MIN_W, n * W_PER_MONTH);
+  // Fill the available width exactly when it fits (no scrolling, native feel
+  // on any screen size); only fall back to a fixed per-month width — and let
+  // the wrapper scroll — once that would squeeze bars below legibility.
+  const perMonth = n > 0 ? Math.max(containerWidth / n, MIN_PER_MONTH) : containerWidth;
+  const width = Math.max(1, Math.round(perMonth * Math.max(n, 1)));
   const plotW = width - PAD_L - PAD_R;
   const plotH = H - PAD_T - PAD_B;
   const yMax = niceMax(Math.max(1, ...months.map((m) => m.grossRevenue)) * 1.25);
@@ -186,11 +205,11 @@ export default function SeasonalityChart({ propertyIds }: { propertyIds: string[
       </div>
 
       {/* Chart */}
-      <div className="relative overflow-x-auto" style={{ opacity: loading ? 0.5 : 1, transition: "opacity 0.15s ease" }}>
+      <div ref={chartWrapRef} className="relative overflow-x-auto" style={{ opacity: loading ? 0.5 : 1, transition: "opacity 0.15s ease" }}>
         {n === 0 ? (
           <div className="text-sm text-slate-400 py-16 text-center">No data in this range.</div>
         ) : (
-          <svg ref={svgRef} viewBox={`0 0 ${width} ${H}`} style={{ width: "100%", height: "auto", display: "block", minWidth: MIN_W }} role="img" aria-label="Bar chart of monthly gross revenue and total costs with a net income line overlay">
+          <svg ref={svgRef} viewBox={`0 0 ${width} ${H}`} style={{ width, height: "auto", display: "block" }} role="img" aria-label="Bar chart of monthly gross revenue and total costs with a net income line overlay">
             {/* gridlines + y ticks */}
             {[0, 1, 2, 3, 4].map((t) => {
               const val = (yMax / 4) * t;
