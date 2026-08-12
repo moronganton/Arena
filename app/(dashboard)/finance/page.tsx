@@ -8,13 +8,13 @@ import SeasonalityChart from "./SeasonalityChart";
 
 const CATEGORIES = [
   "CLEANING", "LAUNDRY", "PLATFORM_FEES", "ESSENTIALS",
-  "DAMAGES", "INSURANCE", "UTILITIES", "MAINTENANCE", "OTHER",
+  "DAMAGES", "INSURANCE", "UTILITIES", "MAINTENANCE", "MORTGAGE_LOAN", "OTHER",
 ];
 
 const CATEGORY_LABELS: Record<string, string> = {
   CLEANING: "Cleaning", LAUNDRY: "Laundry", PLATFORM_FEES: "Platform Fees",
   ESSENTIALS: "Essentials", DAMAGES: "Damages", INSURANCE: "Insurance",
-  UTILITIES: "Utilities", MAINTENANCE: "Maintenance", OTHER: "Other",
+  UTILITIES: "Utilities", MAINTENANCE: "Maintenance", MORTGAGE_LOAN: "Mortgage/Loan", OTHER: "Other",
 };
 
 const SOURCE_LABELS: Record<string, string> = {

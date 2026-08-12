@@ -18,6 +18,7 @@ export const EXPENSE_CATEGORIES = [
   "INSURANCE",
   "UTILITIES",
   "MAINTENANCE",
+  "MORTGAGE_LOAN",
   "OTHER",
 ] as const;
 
@@ -62,7 +63,8 @@ Extract the expense information and respond with ONLY a JSON object (no markdown
   "category": one of ${JSON.stringify(EXPENSE_CATEGORIES)} — classify what this cost is for:
     CLEANING (cleaning services), LAUNDRY (washing/linen services), PLATFORM_FEES (Booking.com/Airbnb commissions),
     ESSENTIALS (supplies: toilet paper, coffee, soap, consumables), DAMAGES (repairs/replacements of broken items),
-    INSURANCE, UTILITIES (electricity/water/gas/internet), MAINTENANCE (regular upkeep, HVAC service), OTHER,
+    INSURANCE, UTILITIES (electricity/water/gas/internet), MAINTENANCE (regular upkeep, HVAC service),
+    MORTGAGE_LOAN (mortgage or loan payment/statement on the property), OTHER,
   "description": short human summary of what was purchased/paid (max 80 chars),
   "amount": total amount as a number (the final total including tax),
   "currency": 3-letter code (EUR, RON, CZK, USD...) or null if unclear,
