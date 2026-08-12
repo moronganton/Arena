@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
-import { Save, TestTube, RefreshCw, CheckCircle2, AlertTriangle, HelpCircle, Gauge } from "lucide-react";
+import { Save, TestTube, RefreshCw, CheckCircle2, AlertTriangle, HelpCircle, Gauge, Building2 } from "lucide-react";
 
 interface AiSettings {
   id?: string;
@@ -9,6 +9,13 @@ interface AiSettings {
   confidenceThreshold: number;
   language: string;
   customInstructions?: string;
+}
+
+interface Property {
+  id: string;
+  name: string;
+  city: string;
+  aiEnabled: boolean;
 }
 
 interface AiHealth {
@@ -65,6 +72,9 @@ export default function AiSettingsPage() {
   const [testing, setTesting] = useState(false);
   const [health, setHealth] = useState<AiHealth | null>(null);
   const [refreshingHealth, setRefreshingHealth] = useState(false);
+  const [properties, setProperties] = useState<Property[]>([]);
+  const [propertiesLoading, setPropertiesLoading] = useState(true);
+  const [togglingPropertyId, setTogglingPropertyId] = useState<string | null>(null);
 
   async function loadHealth() {
     setRefreshingHealth(true);
@@ -83,7 +93,23 @@ export default function AiSettingsPage() {
         if (data) setSettings(data);
       });
     loadHealth();
+    fetch("/api/properties")
+      .then((r) => r.json())
+      .then((data) => setProperties(Array.isArray(data) ? data : []))
+      .finally(() => setPropertiesLoading(false));
   }, []);
+
+  async function togglePropertyAi(property: Property) {
+    setTogglingPropertyId(property.id);
+    const next = !property.aiEnabled;
+    setProperties((prev) => prev.map((p) => (p.id === property.id ? { ...p, aiEnabled: next } : p)));
+    await fetch(`/api/properties/${property.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ aiEnabled: next }),
+    });
+    setTogglingPropertyId(null);
+  }
 
   async function saveSettings() {
     setSaving(true);
@@ -233,6 +259,44 @@ export default function AiSettingsPage() {
           {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
           {saved ? "Saved!" : "Save Settings"}
         </button>
+      </div>
+
+      {/* Per-property on/off */}
+      <div className="bg-white rounded-2xl border border-slate-100 p-6 mb-6">
+        <h2 className="font-semibold text-slate-900 mb-1">Properties</h2>
+        <p className="text-sm text-slate-500 mb-5">
+          Turn the assistant off for a specific property without affecting the rest — useful if you want to
+          handle one property's guests yourself while the AI covers the others.
+        </p>
+        {propertiesLoading ? (
+          <p className="text-sm text-slate-400">Loading properties…</p>
+        ) : properties.length === 0 ? (
+          <p className="text-sm text-slate-400">No properties yet.</p>
+        ) : (
+          <div className="space-y-1">
+            {properties.map((p) => (
+              <div key={p.id} className="flex items-center justify-between py-2.5 border-b border-slate-50 last:border-0">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <Building2 className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <p className="font-medium text-slate-900 text-sm truncate">{p.name}</p>
+                    <p className="text-xs text-slate-500">{p.city}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => togglePropertyAi(p)}
+                  disabled={togglingPropertyId === p.id || !settings.enabled}
+                  title={!settings.enabled ? "Turn on the AI Assistant above first" : undefined}
+                  className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors disabled:opacity-40 ${
+                    p.aiEnabled && settings.enabled ? "bg-indigo-600" : "bg-slate-300"
+                  }`}
+                >
+                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${p.aiEnabled ? "translate-x-6" : "translate-x-1"}`} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Test AI */}

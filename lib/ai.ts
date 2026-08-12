@@ -271,6 +271,10 @@ async function processIncomingMessagesImpl(messageIds: string[]): Promise<void> 
     console.log(`[ai] skipped messages ${messageIds.join(",")}: AI assistant disabled`);
     return;
   }
+  if (!reservation.property.aiEnabled) {
+    console.log(`[ai] skipped messages ${messageIds.join(",")}: AI assistant disabled for property "${reservation.property.name}"`);
+    return;
+  }
 
   const knowledgeEntries = await prisma.propertyKnowledge.findMany({
     where: { propertyId: reservation.propertyId, active: true },

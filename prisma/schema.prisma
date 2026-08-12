@@ -209,6 +209,10 @@ model Property {
   timezone    String   @default("UTC")
   imageUrl    String?
   active      Boolean  @default(true)
+  // Per-property override of the account-wide AI Assistant switch - lets a
+  // host run the assistant for some properties and handle others by hand,
+  // without turning it off account-wide.
+  aiEnabled   Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

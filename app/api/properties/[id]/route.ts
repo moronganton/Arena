@@ -48,6 +48,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       timezone: body.timezone,
       imageUrl: body.imageUrl,
       active: body.active,
+      aiEnabled: body.aiEnabled,
     },
   });
 
