@@ -361,6 +361,7 @@ model CleaningTask {
   property   Property @relation(fields: [propertyId], references: [id])
 
   reservationId String?
+  reservation   Reservation? @relation(fields: [reservationId], references: [id])
 
   damageReports DamageReport[]
 
@@ -446,6 +447,7 @@ model Reservation {
 
   messages     Message[]
   accessCodes  AccessCode[]
+  cleaningTasks CleaningTask[]
 
   @@index([propertyId])
   @@index([guestId])
