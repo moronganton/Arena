@@ -83,6 +83,7 @@ export default async function MessagesPage({
           <p className="text-slate-500 text-sm mt-0.5">Unified inbox from all channels</p>
         </div>
         <div className="flex items-center gap-2 mt-1.5">
+          <MessagesAutoSync />
           <MessagesFilters
             properties={properties}
             initial={{
@@ -92,7 +93,6 @@ export default async function MessagesPage({
               needsReply: needsReplyOnly,
             }}
           />
-          <MessagesAutoSync />
         </div>
       </div>
 

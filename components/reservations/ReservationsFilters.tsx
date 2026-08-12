@@ -108,7 +108,7 @@ export function ReservationsFilters({ properties, initial }: Props) {
           </button>
 
           {open && (
-            <div className="absolute right-0 top-full mt-2 w-72 bg-white border border-slate-200 rounded-2xl shadow-xl p-4 z-20">
+            <div className="absolute right-0 top-full mt-2 w-72 max-w-[calc(100vw-2rem)] bg-white border border-slate-200 rounded-2xl shadow-xl p-4 z-20">
               <div className="mb-3.5">
                 <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1.5">Property</p>
                 <div className="border border-slate-200 rounded-lg overflow-hidden max-h-40 overflow-y-auto">
