@@ -5,6 +5,7 @@ import {
   Plus, AlertTriangle, Check, Camera, ChevronRight, ChevronLeft, ChevronDown,
   ListChecks, BarChart3, RefreshCw, X,
 } from "lucide-react";
+import { FilterMenu, FilterSection, FilterList } from "@/components/ui/FilterMenu";
 
 interface Property {
   id: string;
@@ -143,6 +144,8 @@ export default function CleaningPage() {
   const [showForm, setShowForm] = useState(false);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ propertyId: "", scheduledDate: new Date().toISOString().slice(0, 10), notes: "" });
+  // Empty = show every property, on both the calendar and the job list below it.
+  const [visiblePropertyIds, setVisiblePropertyIds] = useState<string[]>([]);
 
   const windowEnd = addDays(windowStart, WINDOW);
 
@@ -186,6 +189,8 @@ export default function CleaningPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [calReservations, windowStart]);
 
+  const visibleProperties = visiblePropertyIds.length > 0 ? properties.filter((p) => visiblePropertyIds.includes(p.id)) : properties;
+
   const resByProperty = new Map<string, CalReservation[]>();
   for (const r of calReservations) {
     if (r.status === "CANCELLED") continue;
@@ -194,6 +199,14 @@ export default function CleaningPage() {
     resByProperty.set(r.property.id, arr);
   }
   const days = Array.from({ length: WINDOW }, (_, i) => addDays(windowStart, i));
+
+  // Same property filter applies to the job list below - re-derive day
+  // groups from the filtered jobs so the "N jobs" counts stay correct.
+  const visiblePriorityDays = visiblePropertyIds.length === 0
+    ? priorityDays
+    : priorityDays
+        .map((d) => ({ ...d, jobs: d.jobs.filter((j) => visiblePropertyIds.includes(j.property.id)) }))
+        .filter((d) => d.jobs.length > 0);
 
   async function handlePhotos(jobId: string, files: FileList | null, action: "checkin" | "checkout") {
     if (!files || files.length === 0) return;
@@ -279,7 +292,7 @@ export default function CleaningPage() {
     await loadPriority();
   }
 
-  const totalJobs = priorityDays.reduce((s, d) => s + d.jobs.length, 0);
+  const visibleTotalJobs = visiblePriorityDays.reduce((s, d) => s + d.jobs.length, 0);
 
   return (
     <div className="p-4 md:p-8 max-w-3xl mx-auto pb-20">
@@ -297,6 +310,21 @@ export default function CleaningPage() {
             <ListChecks className="w-4 h-4" />
             <span className="hidden sm:inline">Checklists</span>
           </Link>
+          <FilterMenu
+            activeCount={visiblePropertyIds.length > 0 ? 1 : 0}
+            onClear={() => setVisiblePropertyIds([])}
+            onApply={() => {}}
+          >
+            <FilterSection label="Properties shown">
+              <FilterList
+                options={properties.map((p) => ({ value: p.id, label: p.name }))}
+                selected={visiblePropertyIds}
+                onToggle={(v) => setVisiblePropertyIds((prev) => (prev.includes(v) ? prev.filter((x) => x !== v) : [...prev, v]))}
+                onClearAll={() => setVisiblePropertyIds([])}
+                allLabel="All Properties"
+              />
+            </FilterSection>
+          </FilterMenu>
           <button onClick={() => setShowForm(true)} className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2.5 rounded-xl text-sm font-medium transition">
             <Plus className="w-4 h-4" />
             <span className="hidden sm:inline">New</span>
@@ -356,13 +384,15 @@ export default function CleaningPage() {
           <div className="py-12 text-center text-slate-400 text-sm">Loading calendar…</div>
         ) : properties.length === 0 ? (
           <div className="py-12 text-center text-slate-400 text-sm">No properties yet</div>
+        ) : visibleProperties.length === 0 ? (
+          <div className="py-12 text-center text-slate-400 text-sm">No properties match the current filter</div>
         ) : (
           <div className="flex" style={{ maxHeight: "50vh", overflowY: "auto" }}>
             <div className="shrink-0 border-r border-slate-200 bg-white" style={{ width: LABEL_W }}>
               <div className="sticky top-0 z-10 border-b border-slate-200 bg-white flex items-center px-3 text-[9px] font-bold uppercase tracking-wide text-slate-400" style={{ height: HEAD_H }}>
                 Property
               </div>
-              {properties.map((p) => (
+              {visibleProperties.map((p) => (
                 <div key={`lab-${p.id}`} className="border-b border-slate-100 px-3 flex flex-col justify-center" style={{ height: ROW_H }}>
                   <p className="text-xs font-bold text-slate-800 truncate">{p.name}</p>
                   <p className="text-[9px] text-slate-400 truncate">{p.city}</p>
@@ -371,7 +401,7 @@ export default function CleaningPage() {
             </div>
 
             <div ref={scrollRef} className="overflow-x-auto flex-1">
-              <div style={{ display: "grid", gridTemplateColumns: `repeat(${WINDOW}, ${DAY_W}px)`, gridTemplateRows: `${HEAD_H}px repeat(${properties.length}, ${ROW_H}px)` }}>
+              <div style={{ display: "grid", gridTemplateColumns: `repeat(${WINDOW}, ${DAY_W}px)`, gridTemplateRows: `${HEAD_H}px repeat(${visibleProperties.length}, ${ROW_H}px)` }}>
                 {days.map((d, i) => {
                   const isToday = dayIndex(today, d) === 0;
                   const isWeekend = d.getDay() === 0 || d.getDay() === 6;
@@ -382,14 +412,14 @@ export default function CleaningPage() {
                     </div>
                   );
                 })}
-                {properties.map((p, r) =>
+                {visibleProperties.map((p, r) =>
                   days.map((d, i) => {
                     const isToday = dayIndex(today, d) === 0;
                     const isWeekend = d.getDay() === 0 || d.getDay() === 6;
                     return <div key={`c-${p.id}-${i}`} className={`border-b border-r border-slate-50 ${isToday ? "bg-indigo-50/40" : isWeekend ? "bg-slate-50/50" : ""}`} style={{ gridRow: r + 2, gridColumn: i + 1 }} />;
                   })
                 )}
-                {properties.map((p, r) =>
+                {visibleProperties.map((p, r) =>
                   (resByProperty.get(p.id) || []).map((res) => {
                     const pos = placeBar(windowStart, new Date(res.checkIn), new Date(res.checkOut));
                     if (!pos) return null;
@@ -429,7 +459,7 @@ export default function CleaningPage() {
             <span className={`w-2 h-2 rounded-full ${testMode ? "bg-amber-500" : "bg-slate-300"}`} />
             Test mode: {testMode ? "future jobs unlocked" : "off"}
           </button>
-          <span className="text-xs text-slate-400">{totalJobs} job{totalJobs === 1 ? "" : "s"}</span>
+          <span className="text-xs text-slate-400">{visibleTotalJobs} job{visibleTotalJobs === 1 ? "" : "s"}</span>
         </div>
       </div>
 
@@ -439,8 +469,12 @@ export default function CleaningPage() {
         <div className="bg-white rounded-2xl border border-slate-100 py-10 text-center text-slate-400 text-sm">
           No check-outs in the next 3 days 🎉
         </div>
+      ) : visiblePriorityDays.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-slate-100 py-10 text-center text-slate-400 text-sm">
+          No jobs match the current filter
+        </div>
       ) : (
-        priorityDays.map((group) => (
+        visiblePriorityDays.map((group) => (
           <div key={group.day} className="mb-1">
             <div className="flex items-center gap-2 mt-3 mb-2 px-0.5">
               <span className={`text-[10px] font-bold uppercase tracking-wide ${group.day === todayKey ? "text-indigo-600" : "text-slate-500"}`}>

@@ -2,7 +2,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, Download, Plus, CalendarDays } from "lucide-react";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, SOURCE_LABELS } from "@/lib/utils";
+import { FilterMenu, FilterSection, FilterPills, FilterList } from "@/components/ui/FilterMenu";
 
 interface Reservation {
   id: string;
@@ -104,6 +105,10 @@ export default function CalendarPage() {
   const [pricesLoaded, setPricesLoaded] = useState(false);
   const [pricesErr, setPricesErr] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Empty = show every property/channel; both are pure display filters over
+  // data already fetched for the window, not re-fetch parameters.
+  const [visiblePropertyIds, setVisiblePropertyIds] = useState<string[]>([]);
+  const [sourceFilter, setSourceFilter] = useState("");
 
   const windowEnd = addDays(windowStart, WINDOW);
 
@@ -168,9 +173,13 @@ export default function CalendarPage() {
   const fmt = (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   const rangeLabel = `${fmt(windowStart)} – ${fmt(addDays(windowStart, WINDOW - 1))}, ${windowStart.getFullYear()}`;
 
+  const visibleProperties = visiblePropertyIds.length > 0 ? properties.filter((p) => visiblePropertyIds.includes(p.id)) : properties;
+  const activeFilterCount = (visiblePropertyIds.length > 0 ? 1 : 0) + (sourceFilter ? 1 : 0);
+
   const resByProperty = new Map<string, Reservation[]>();
   for (const r of reservations) {
     if (r.status === "CANCELLED") continue;
+    if (sourceFilter && r.source !== sourceFilter) continue;
     const arr = resByProperty.get(r.property.id) || [];
     arr.push(r);
     resByProperty.set(r.property.id, arr);
@@ -186,7 +195,7 @@ export default function CalendarPage() {
   const gridStyle: React.CSSProperties = {
     display: "grid",
     gridTemplateColumns: `repeat(${WINDOW}, ${DAY_W}px)`,
-    gridTemplateRows: `${HEAD_H}px repeat(${properties.length}, ${ROW_H}px)`,
+    gridTemplateRows: `${HEAD_H}px repeat(${visibleProperties.length}, ${ROW_H}px)`,
   };
 
   return (
@@ -203,6 +212,28 @@ export default function CalendarPage() {
             <Download className="w-4 h-4" />
             <span className="hidden sm:inline">Export iCal</span>
           </a>
+          <FilterMenu
+            activeCount={activeFilterCount}
+            onClear={() => { setVisiblePropertyIds([]); setSourceFilter(""); }}
+            onApply={() => {}}
+          >
+            <FilterSection label="Properties shown">
+              <FilterList
+                options={properties.map((p) => ({ value: p.id, label: p.name }))}
+                selected={visiblePropertyIds}
+                onToggle={(v) => setVisiblePropertyIds((prev) => (prev.includes(v) ? prev.filter((x) => x !== v) : [...prev, v]))}
+                onClearAll={() => setVisiblePropertyIds([])}
+                allLabel="All Properties"
+              />
+            </FilterSection>
+            <FilterSection label="Channel">
+              <FilterPills
+                options={["BOOKING", "AIRBNB", "VRBO", "EXPEDIA", "DIRECT"].map((s) => ({ value: s, label: SOURCE_LABELS[s] }))}
+                value={sourceFilter}
+                onChange={setSourceFilter}
+              />
+            </FilterSection>
+          </FilterMenu>
           <Link
             href="/reservations/new"
             className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-sm font-medium transition"
@@ -259,6 +290,11 @@ export default function CalendarPage() {
               Add your first property
             </Link>
           </div>
+        ) : visibleProperties.length === 0 ? (
+          <div className="py-16 text-center">
+            <CalendarDays className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+            <p className="text-slate-400 text-sm">No properties match the current filter</p>
+          </div>
         ) : (
           <div className="flex">
             {/* Frozen property column (outside the horizontal scroll) */}
@@ -269,7 +305,7 @@ export default function CalendarPage() {
               >
                 Property
               </div>
-              {properties.map((p) => {
+              {visibleProperties.map((p) => {
                 const notLinked = pricesLoaded && !pricesErr && !currency[p.id];
                 return (
                   <div
@@ -318,7 +354,7 @@ export default function CalendarPage() {
                 })}
 
                 {/* Background cells — with the live Smoobu rate for that day */}
-                {properties.map((p, r) =>
+                {visibleProperties.map((p, r) =>
                   days.map((d, i) => {
                     const isToday = dayIndex(today, d) === 0;
                     const isWeekend = d.getDay() === 0 || d.getDay() === 6;
@@ -342,7 +378,7 @@ export default function CalendarPage() {
                 )}
 
                 {/* Blocked ranges (behind bookings) */}
-                {properties.map((p, r) =>
+                {visibleProperties.map((p, r) =>
                   (blocksByProperty.get(p.id) || []).map((b) => {
                     const pos = placeBar(windowStart, new Date(b.startDate), addDays(new Date(b.endDate), 1));
                     if (!pos) return null;
@@ -366,7 +402,7 @@ export default function CalendarPage() {
                 )}
 
                 {/* Booking bars */}
-                {properties.map((p, r) =>
+                {visibleProperties.map((p, r) =>
                   (resByProperty.get(p.id) || []).map((res) => {
                     const pos = placeBar(windowStart, new Date(res.checkIn), new Date(res.checkOut));
                     if (!pos) return null;

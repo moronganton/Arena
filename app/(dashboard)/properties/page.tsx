@@ -4,23 +4,42 @@ import Link from "next/link";
 import { Plus, MapPin, Bed, Users, Wifi } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import CopyPropertyButton from "@/components/properties/CopyPropertyButton";
+import { PropertiesFilters } from "@/components/properties/PropertiesFilters";
 
-export default async function PropertiesPage() {
+export default async function PropertiesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ city?: string; status?: string }>;
+}) {
   const session = await auth();
+  const params = await searchParams;
 
-  const properties = await prisma.property.findMany({
-    where: { ownerId: session!.user.id },
-    include: {
-      channels: true,
-      locks: true,
-      _count: {
-        select: {
-          reservations: { where: { status: { not: "CANCELLED" } } },
+  const [properties, allProperties] = await Promise.all([
+    prisma.property.findMany({
+      where: {
+        ownerId: session!.user.id,
+        ...(params.city ? { city: params.city } : {}),
+        ...(params.status === "active" ? { active: true } : params.status === "inactive" ? { active: false } : {}),
+      },
+      include: {
+        channels: true,
+        locks: true,
+        _count: {
+          select: {
+            reservations: { where: { status: { not: "CANCELLED" } } },
+          },
         },
       },
-    },
-    orderBy: { createdAt: "asc" },
-  });
+      orderBy: { createdAt: "asc" },
+    }),
+    // Unfiltered, just for the city list in the filter menu - so the option
+    // set doesn't shrink to only what's currently visible once a filter is applied.
+    prisma.property.findMany({
+      where: { ownerId: session!.user.id },
+      select: { city: true },
+    }),
+  ]);
+  const cities = Array.from(new Set(allProperties.map((p) => p.city))).sort();
 
   const CHANNEL_BADGES: Record<string, { color: string; label: string }> = {
     BOOKING: { color: "bg-blue-100 text-blue-700", label: "Booking.com" },
@@ -36,19 +55,24 @@ export default async function PropertiesPage() {
           <h1 className="text-2xl font-bold text-slate-900">Properties</h1>
           <p className="text-slate-500 text-sm mt-0.5">{properties.length} properties</p>
         </div>
-        <Link
-          href="/properties/new"
-          className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition"
-        >
-          <Plus className="w-4 h-4" />
-          Add Property
-        </Link>
+        <div className="flex items-center gap-2">
+          <PropertiesFilters cities={cities} initial={{ city: params.city || "", status: params.status || "" }} />
+          <Link
+            href="/properties/new"
+            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition"
+          >
+            <Plus className="w-4 h-4" />
+            Add Property
+          </Link>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
         {properties.length === 0 && (
           <div className="col-span-3 text-center py-20">
-            <p className="text-slate-400 mb-4">No properties yet</p>
+            <p className="text-slate-400 mb-4">
+              {params.city || params.status ? "No properties match these filters" : "No properties yet"}
+            </p>
             <Link href="/properties/new" className="text-indigo-600 hover:underline text-sm font-medium">
               Add your first property
             </Link>

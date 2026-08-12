@@ -1,8 +1,9 @@
 "use client";
-import { useState, useRef, useEffect } from "react";
+import { useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { Search, Filter, Check } from "lucide-react";
+import { Search } from "lucide-react";
 import { SOURCE_LABELS } from "@/lib/utils";
+import { FilterMenu, FilterSection, FilterPills, FilterList } from "@/components/ui/FilterMenu";
 
 interface Property {
   id: string;
@@ -34,16 +35,6 @@ export function ReservationsFilters({ properties, initial }: Props) {
   const [status, setStatus] = useState(initial.status);
   const [source, setSource] = useState(initial.source);
   const [sort, setSort] = useState(initial.sort || "newest");
-  const [open, setOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function onClickOutside(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", onClickOutside);
-    return () => document.removeEventListener("mousedown", onClickOutside);
-  }, []);
 
   // Sort is an ordering preference, not a narrowing filter - it doesn't count toward the badge.
   const activeCount = [propertyId, status, source].filter(Boolean).length;
@@ -59,21 +50,15 @@ export function ReservationsFilters({ properties, initial }: Props) {
     router.push(qs ? `${pathname}?${qs}` : pathname);
   }
 
-  function apply() {
-    navigate({ q, propertyId, status, source, sort });
-    setOpen(false);
-  }
-
-  function clearAll() {
-    setPropertyId(""); setStatus(""); setSource(""); setSort("newest");
-    navigate({ q, propertyId: "", status: "", source: "", sort: "newest" });
-    setOpen(false);
-  }
-
   function submitSearch(e: React.FormEvent) {
     e.preventDefault();
     navigate({ q, propertyId, status, source, sort });
   }
+
+  const propertyOptions = properties.map((p) => ({ value: p.id, label: p.name }));
+  const statusOptions = STATUSES.map((s) => ({ value: s, label: STATUS_LABELS[s] }));
+  const sourceOptions = SOURCES.map((s) => ({ value: s, label: SOURCE_LABELS[s] }));
+  const sortOptions = SORTS.map(([value, label]) => ({ value, label }));
 
   return (
     <div className="bg-white rounded-2xl border border-slate-100 p-4 mb-6">
@@ -88,139 +73,33 @@ export function ReservationsFilters({ properties, initial }: Props) {
           />
         </form>
 
-        <div className="relative flex-shrink-0" ref={menuRef}>
-          <button
-            type="button"
-            onClick={() => setOpen((v) => !v)}
-            aria-label="Filters"
-            className={`relative w-10 h-10 rounded-xl border flex items-center justify-center transition ${
-              open || activeCount > 0
-                ? "border-indigo-300 bg-indigo-50 text-indigo-600"
-                : "border-slate-200 text-slate-500 hover:bg-slate-50"
-            }`}
-          >
-            <Filter className="w-4 h-4" />
-            {activeCount > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 h-[18px] min-w-[18px] px-1 bg-indigo-600 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
-                {activeCount}
-              </span>
-            )}
-          </button>
-
-          {open && (
-            <div className="absolute right-0 top-full mt-2 w-72 max-w-[calc(100vw-2rem)] bg-white border border-slate-200 rounded-2xl shadow-xl p-4 z-20">
-              <div className="mb-3.5">
-                <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1.5">Property</p>
-                <div className="border border-slate-200 rounded-lg overflow-hidden max-h-40 overflow-y-auto">
-                  <button
-                    type="button"
-                    onClick={() => setPropertyId("")}
-                    className={`w-full flex items-center justify-between px-3 py-2 text-xs text-left border-b border-slate-100 last:border-0 ${
-                      propertyId === "" ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-600 hover:bg-slate-50"
-                    }`}
-                  >
-                    All Properties
-                    {propertyId === "" && <Check className="w-3.5 h-3.5" />}
-                  </button>
-                  {properties.map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => setPropertyId(p.id)}
-                      className={`w-full flex items-center justify-between px-3 py-2 text-xs text-left border-b border-slate-100 last:border-0 truncate ${
-                        propertyId === p.id ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-600 hover:bg-slate-50"
-                      }`}
-                    >
-                      <span className="truncate">{p.name}</span>
-                      {propertyId === p.id && <Check className="w-3.5 h-3.5 flex-shrink-0" />}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="mb-3.5">
-                <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1.5">Status</p>
-                <div className="flex flex-wrap gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => setStatus("")}
-                    className={`text-xs font-medium px-2.5 py-1.5 rounded-full border transition ${
-                      status === "" ? "bg-indigo-600 border-indigo-600 text-white" : "border-slate-200 text-slate-600 hover:border-indigo-300"
-                    }`}
-                  >
-                    All
-                  </button>
-                  {STATUSES.map((s) => (
-                    <button
-                      key={s}
-                      type="button"
-                      onClick={() => setStatus(s)}
-                      className={`text-xs font-medium px-2.5 py-1.5 rounded-full border transition ${
-                        status === s ? "bg-indigo-600 border-indigo-600 text-white" : "border-slate-200 text-slate-600 hover:border-indigo-300"
-                      }`}
-                    >
-                      {STATUS_LABELS[s]}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="mb-3.5">
-                <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1.5">Channel</p>
-                <div className="flex flex-wrap gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => setSource("")}
-                    className={`text-xs font-medium px-2.5 py-1.5 rounded-full border transition ${
-                      source === "" ? "bg-indigo-600 border-indigo-600 text-white" : "border-slate-200 text-slate-600 hover:border-indigo-300"
-                    }`}
-                  >
-                    All
-                  </button>
-                  {SOURCES.map((s) => (
-                    <button
-                      key={s}
-                      type="button"
-                      onClick={() => setSource(s)}
-                      className={`text-xs font-medium px-2.5 py-1.5 rounded-full border transition ${
-                        source === s ? "bg-indigo-600 border-indigo-600 text-white" : "border-slate-200 text-slate-600 hover:border-indigo-300"
-                      }`}
-                    >
-                      {SOURCE_LABELS[s]}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1.5">Sort by</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {SORTS.map(([value, label]) => (
-                    <button
-                      key={value}
-                      type="button"
-                      onClick={() => setSort(value)}
-                      className={`text-xs font-medium px-2.5 py-1.5 rounded-full border transition ${
-                        sort === value ? "bg-indigo-600 border-indigo-600 text-white" : "border-slate-200 text-slate-600 hover:border-indigo-300"
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-100">
-                <button type="button" onClick={clearAll} className="text-xs font-medium text-slate-400 hover:text-slate-600">
-                  Clear all
-                </button>
-                <button type="button" onClick={apply} className="text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition">
-                  Apply
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
+        <FilterMenu
+          activeCount={activeCount}
+          onClear={() => {
+            setPropertyId(""); setStatus(""); setSource(""); setSort("newest");
+            navigate({ q, propertyId: "", status: "", source: "", sort: "newest" });
+          }}
+          onApply={() => navigate({ q, propertyId, status, source, sort })}
+        >
+          <FilterSection label="Property">
+            <FilterList
+              options={propertyOptions}
+              selected={propertyId ? [propertyId] : []}
+              onToggle={(v) => setPropertyId(v)}
+              onClearAll={() => setPropertyId("")}
+              allLabel="All Properties"
+            />
+          </FilterSection>
+          <FilterSection label="Status">
+            <FilterPills options={statusOptions} value={status} onChange={setStatus} />
+          </FilterSection>
+          <FilterSection label="Channel">
+            <FilterPills options={sourceOptions} value={source} onChange={setSource} />
+          </FilterSection>
+          <FilterSection label="Sort by">
+            <FilterPills options={sortOptions} value={sort} onChange={(v) => setSort(v || "newest")} allLabel={null} />
+          </FilterSection>
+        </FilterMenu>
       </div>
     </div>
   );
