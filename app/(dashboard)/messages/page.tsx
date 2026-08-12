@@ -4,18 +4,6 @@ import Link from "next/link";
 import { MessageSquare, Bot, AlertTriangle } from "lucide-react";
 import { SOURCE_COLORS, SOURCE_LABELS } from "@/lib/utils";
 import { MessagesAutoSync } from "@/components/messages/MessagesAutoSync";
-import { countryFromPhone } from "@/lib/phone-country";
-
-// First + last name initials (e.g. "Alex Singh" -> "AS") so the avatar
-// bubble always carries at least 2 characters, even for the guests
-// countryFromPhone can't place - no phone on file, or a number with no
-// recognizable international prefix (very common: many OTAs don't share
-// the guest's phone until close to check-in).
-function nameInitials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-  return (parts[0]?.slice(0, 2) || "?").toUpperCase();
-}
 
 export default async function MessagesPage() {
   const session = await auth();
@@ -84,16 +72,16 @@ export default async function MessagesPage() {
         {conversations.map((conv) => {
           const lastMsg = conv.messages[0];
           const unreadCount = conv._count.messages;
-          const country = countryFromPhone(conv.guest.phone);
+          const nights = Math.round((conv.checkOut.getTime() - conv.checkIn.getTime()) / 86400000);
           return (
             <Link key={conv.id} href={`/reservations/${conv.id}`}>
               <div className={`flex items-start gap-3 p-4 md:p-5 border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-colors ${unreadCount > 0 ? "bg-indigo-50/50" : ""}`}>
                 <div className="relative flex-shrink-0">
                   <div
-                    className="w-11 h-11 bg-slate-100 rounded-full flex items-center justify-center text-slate-600 font-semibold text-xs tracking-wide"
-                    title={country ? `Phone country: ${country}` : "No phone on file — showing initials"}
+                    className="w-11 h-11 bg-slate-100 rounded-full flex items-center justify-center text-slate-600 font-semibold text-[13px]"
+                    title={`${nights} night${nights === 1 ? "" : "s"}`}
                   >
-                    {country || nameInitials(conv.guest.name)}
+                    🌙{nights}
                   </div>
                   {unreadCount > 0 && (
                     <span className="absolute -top-1 -right-1 w-5 h-5 bg-rose-500 text-white text-xs rounded-full flex items-center justify-center font-bold">
