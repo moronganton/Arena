@@ -45,6 +45,8 @@ interface PriorityJob {
 interface PriorityDay {
   day: string;
   label: string;
+  dayOffset: number; // 0 = today (server-decided; never recomputed here)
+  dayWord: string;   // "today" | "tomorrow" | weekday name
   jobs: PriorityJob[];
 }
 
@@ -95,10 +97,6 @@ function placeBar(from: Date, start: Date, end: Date) {
   if (e <= 0 || s >= WINDOW || e <= s) return null;
   return { start: s, span: e - s };
 }
-function relativeDayKey(d: Date | string) {
-  return new Date(d).toISOString().slice(0, 10);
-}
-
 // Compress a photo on the device before upload (max 1024px, JPEG 70%)
 async function compressPhoto(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -122,8 +120,6 @@ const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 export default function CleaningPage() {
   const today = startOfDay(new Date());
-  const todayKey = relativeDayKey(today);
-  const tomorrowKey = relativeDayKey(addDays(today, 1));
   const [windowStart, setWindowStart] = useState(() => addDays(startOfDay(new Date()), -2));
   const [properties, setProperties] = useState<Property[]>([]);
   const [calReservations, setCalReservations] = useState<CalReservation[]>([]);
@@ -477,27 +473,22 @@ export default function CleaningPage() {
         visiblePriorityDays.map((group) => (
           <div key={group.day} className="mb-1">
             <div className="flex items-center gap-2 mt-3 mb-2 px-0.5">
-              <span className={`text-[10px] font-bold uppercase tracking-wide ${group.day === todayKey ? "text-indigo-600" : "text-slate-500"}`}>
+              <span className={`text-[10px] font-bold uppercase tracking-wide ${group.dayOffset === 0 ? "text-indigo-600" : "text-slate-500"}`}>
                 {group.label}
               </span>
               <span className="text-[10px] text-slate-400">{group.jobs.length} job{group.jobs.length === 1 ? "" : "s"}</span>
               <span className="flex-1 h-px bg-slate-200" />
             </div>
             {group.jobs.map((job) => {
-              const isFuture = group.day !== todayKey;
+              // Both come straight from the server's own day grouping - the
+              // client must not recompute "is this today" from a timestamp.
+              const isFuture = group.dayOffset > 0;
               const locked = isFuture && !testMode;
               const done = job.checklist.filter((c) => c.done).length;
               const total = job.checklist.length;
               const expanded = expandedJob === job.id;
               const showingDamageForm = damageForm?.jobId === job.id;
-              const dayWord =
-                job.reservation && relativeDayKey(job.reservation.checkOut) === todayKey
-                  ? "today"
-                  : job.reservation && relativeDayKey(job.reservation.checkOut) === tomorrowKey
-                  ? "tomorrow"
-                  : job.reservation
-                  ? new Date(job.reservation.checkOut).toLocaleDateString(undefined, { weekday: "long" })
-                  : "";
+              const dayWord = group.dayWord;
               return (
                 <div key={job.id} className={`bg-white rounded-2xl border mb-2 overflow-hidden ${job.urgency === "URGENT" && !locked ? "border-red-300 ring-1 ring-red-200" : "border-slate-100"} ${locked ? "opacity-60" : ""}`}>
                   <div className="p-3">

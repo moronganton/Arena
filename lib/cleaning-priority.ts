@@ -21,7 +21,13 @@ export interface PriorityJob {
 
 export interface PriorityDay {
   day: string; // YYYY-MM-DD
-  label: string; // "Today", "Tomorrow", "Wednesday"
+  label: string; // "Today · Aug 13", "Tomorrow · Aug 14", "Friday · Aug 15"
+  // 0 = today, 1 = tomorrow, ... Decided here, where the offset is already
+  // known, so the client never re-derives it from a UTC timestamp - doing
+  // that in the browser made "today" read as a future day for any host not
+  // on UTC, which locked the action buttons on jobs actually due today.
+  dayOffset: number;
+  dayWord: string; // "today" | "tomorrow" | "Friday" - for inline sentences
   jobs: PriorityJob[];
 }
 
@@ -156,6 +162,9 @@ export async function getPriorityDays(ownerId: string, days = 3): Promise<Priori
     result.push({
       day: key,
       label: `${dayLabel(offset, d)} · ${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`,
+      dayOffset: offset,
+      dayWord:
+        offset === 0 ? "today" : offset === 1 ? "tomorrow" : d.toLocaleDateString(undefined, { weekday: "long" }),
       jobs,
     });
   }
