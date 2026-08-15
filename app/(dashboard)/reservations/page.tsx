@@ -51,6 +51,18 @@ export default async function ReservationsPage({
     }),
   ]);
 
+  // Sink dead reservations below live ones. Ordering by date alone left a
+  // cancellation sitting wherever its booking date put it - so a booking
+  // cancelled today could outrank stays that are actually still happening.
+  // Array.sort is stable, so the orderBy above still decides the order
+  // within each group and the chosen sort option keeps working.
+  const DEAD_STATUSES = new Set(["CANCELLED", "NO_SHOW"]);
+  reservations.sort((a, b) => {
+    const aDead = DEAD_STATUSES.has(a.status) ? 1 : 0;
+    const bDead = DEAD_STATUSES.has(b.status) ? 1 : 0;
+    return aDead - bDead;
+  });
+
   return (
     <div className="p-4 md:p-8 max-w-7xl mx-auto">
       <div className="flex items-center justify-between mb-6">
