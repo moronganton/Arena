@@ -24,7 +24,10 @@ export async function POST(req: NextRequest) {
   const pending = await prisma.message.findMany({
     where: {
       reservationId,
-      direction: "INBOUND",
+      // Both directions: the AI answers guests in their own language, so an
+      // OUTBOUND message sent on the host's behalf can be one the host
+      // cannot read. INTERNAL notes stay excluded - those are the host's own
+      // private to-dos, written by them, in their own language.
       channel: { not: "INTERNAL" },
       detectedLanguage: null,
     },

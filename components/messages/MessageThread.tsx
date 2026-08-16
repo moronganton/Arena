@@ -280,9 +280,20 @@ export function MessageThread({
         {messages.map((msg) => {
           const isOutbound = msg.direction === "OUTBOUND";
           const isInternal = msg.channel === "INTERNAL";
-          const showingTranslation = !isOutbound && !!msg.translatedBody && !hiddenTranslations.has(msg.id);
-          const canTranslate = !isOutbound && isNonEnglish(msg.detectedLanguage) && !msg.translatedBody;
-          const canReshowTranslation = !isOutbound && !!msg.translatedBody && hiddenTranslations.has(msg.id);
+          // Translation is offered in BOTH directions: the AI replies to
+          // guests in their own language, so a message sent on the host's
+          // behalf is often one they cannot read back. Internal notes are
+          // excluded - the host wrote those themselves.
+          const translatable = !isInternal;
+          const showingTranslation = translatable && !!msg.translatedBody && !hiddenTranslations.has(msg.id);
+          const canTranslate = translatable && isNonEnglish(msg.detectedLanguage) && !msg.translatedBody;
+          const canReshowTranslation = translatable && !!msg.translatedBody && hiddenTranslations.has(msg.id);
+          // The outbound bubble is indigo with white text, so the divider and
+          // its label need light-on-dark treatment to stay legible.
+          const onDarkBubble = isOutbound && !msg.isDraft && !isInternal;
+          // Outbound bubbles sit on the right, so their translate controls
+          // hug the right edge too instead of drifting to the far left.
+          const actionAlign = isOutbound ? "ml-auto mr-1" : "ml-1";
           return (
             <div key={msg.id} className={`flex ${isOutbound ? "justify-end" : "justify-start"}`}>
               <div className={`max-w-[75%] ${isOutbound ? "order-2" : "order-1"}`}>
@@ -362,10 +373,10 @@ export function MessageThread({
                     <>
                       <p className="whitespace-pre-wrap break-words">{msg.body}</p>
                       <div className="flex items-center gap-2 my-2">
-                        <span className="text-[10px] font-semibold tracking-wide text-slate-400 uppercase whitespace-nowrap">
+                        <span className={`text-[10px] font-semibold tracking-wide uppercase whitespace-nowrap ${onDarkBubble ? "text-indigo-200" : "text-slate-400"}`}>
                           Translated from {msg.detectedLanguage}
                         </span>
-                        <span className="flex-1 h-px bg-slate-200" />
+                        <span className={`flex-1 h-px ${onDarkBubble ? "bg-indigo-400/50" : "bg-slate-200"}`} />
                       </div>
                       <p className="whitespace-pre-wrap break-words">{msg.translatedBody}</p>
                     </>
@@ -377,7 +388,7 @@ export function MessageThread({
                   <button
                     onClick={() => translateMessage(msg.id)}
                     disabled={translatingId === msg.id}
-                    className="mt-1.5 ml-1 inline-flex items-center gap-1.5 text-[11px] font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-60 px-2.5 py-1 rounded-full transition"
+                    className={`mt-1.5 ${actionAlign} flex w-fit items-center gap-1.5 text-[11px] font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-60 px-2.5 py-1 rounded-full transition`}
                   >
                     <GlobeIcon className={`w-3 h-3 ${translatingId === msg.id ? "animate-spin" : ""}`} />
                     {translatingId === msg.id ? "Translating…" : "Translate to English"}
@@ -386,7 +397,7 @@ export function MessageThread({
                 {showingTranslation && (
                   <button
                     onClick={() => toggleTranslation(msg.id)}
-                    className="mt-1 ml-1 text-[11px] text-slate-400 hover:text-slate-600 underline decoration-slate-300 underline-offset-2 transition"
+                    className={`mt-1 ${actionAlign} block w-fit text-[11px] text-slate-400 hover:text-slate-600 underline decoration-slate-300 underline-offset-2 transition`}
                   >
                     Hide translation
                   </button>
@@ -394,7 +405,7 @@ export function MessageThread({
                 {canReshowTranslation && (
                   <button
                     onClick={() => toggleTranslation(msg.id)}
-                    className="mt-1.5 ml-1 inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-500 hover:text-indigo-700 transition"
+                    className={`mt-1.5 ${actionAlign} flex w-fit items-center gap-1.5 text-[11px] font-medium text-slate-500 hover:text-indigo-700 transition`}
                   >
                     <GlobeIcon className="w-3 h-3" />
                     Show translation

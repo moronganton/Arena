@@ -14,8 +14,11 @@ export async function POST(req: NextRequest) {
   const { messageId } = await req.json();
   if (!messageId) return NextResponse.json({ error: "messageId required" }, { status: 400 });
 
+  // Either direction - an AI reply sent to a guest in their own language is
+  // exactly the case the host most needs translated back. Still owner-scoped
+  // via the reservation, so this can only ever reach the caller's own data.
   const message = await prisma.message.findFirst({
-    where: { id: messageId, reservation: { property: { ownerId: session.user.id } }, direction: "INBOUND" },
+    where: { id: messageId, reservation: { property: { ownerId: session.user.id } } },
   });
   if (!message) return NextResponse.json({ error: "Message not found" }, { status: 404 });
 
