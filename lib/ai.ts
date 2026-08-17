@@ -4,6 +4,7 @@ import { sendSmoobuGuestMessage } from "@/lib/channels/smoobu-core";
 import { sendMessageToGuest } from "@/lib/notifications";
 import { recordAiSuccess, recordAiFailure, readRateLimitHeaders } from "@/lib/ai-health";
 import { notifyUser } from "@/lib/notify";
+import { cetDayStartUtc } from "@/lib/cet";
 
 // Lazy init: a missing ANTHROPIC_API_KEY must never crash module import
 // (which would take down message sync and webhooks with it).
@@ -41,6 +42,58 @@ interface AutoReplyResult {
   reasoning?: string;
 }
 
+// Unambiguous calendar date. checkIn/checkOut hold calendar dates pinned to UTC
+// midnight (see cetDayStartUtc), so they format in UTC; "8/16/2026" from a bare
+// toLocaleDateString() is both locale-dependent and ambiguous to the model.
+const DATE_FMT = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "UTC", weekday: "short", day: "numeric", month: "short", year: "numeric",
+});
+const NOW_FMT = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Europe/Berlin", weekday: "short", day: "numeric", month: "short",
+  year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false,
+});
+
+// Where the stay sits relative to right now, stated outright for the prompt.
+//
+// The model has no inherent sense of "today", and without being told it assumed
+// every stay was still upcoming - it told a guest already on night 2 "looking
+// forward to your arrival on the 16th". The phase is computed here rather than
+// left to the model to infer from two dates, because date arithmetic is exactly
+// what a small fast model gets wrong, and stating the answer costs nothing.
+//
+// Days are compared as CET calendar days (Europe/Berlin), matching how lock
+// validity already works app-wide. Note for later: this assumes a CET portfolio.
+// A property genuinely in another timezone needs Property.timezone threaded
+// through here - it currently defaults to "UTC" and is not maintained.
+export function describeStayTiming(checkIn: Date, checkOut: Date, now: Date = new Date()): string {
+  const DAY = 86400000;
+  const today = cetDayStartUtc(now).getTime();
+  const arrive = cetDayStartUtc(checkIn).getTime();
+  const depart = cetDayStartUtc(checkOut).getTime();
+  const nights = Math.max(1, Math.round((depart - arrive) / DAY));
+  const plural = (n: number) => (n === 1 ? "day" : "days");
+
+  if (today < arrive) {
+    const away = Math.round((arrive - today) / DAY);
+    return away === 1
+      ? "Guest arrives TOMORROW. The stay has not started - they are not at the property yet."
+      : `Guest arrives in ${away} ${plural(away)}. The stay has not started - they are not at the property yet.`;
+  }
+  if (today === arrive) {
+    return "Guest ARRIVES TODAY. They may be travelling or already checking in - do not talk about arrival as if it were days away.";
+  }
+  if (today < depart) {
+    const night = Math.round((today - arrive) / DAY) + 1;
+    const left = Math.round((depart - today) / DAY);
+    return `Guest is CURRENTLY STAYING AT THE PROPERTY - night ${night} of ${nights}, checking out in ${left} ${plural(left)}. Their arrival already happened; never refer to it as upcoming.`;
+  }
+  if (today === depart) {
+    return "Guest CHECKS OUT TODAY. Their stay is ending - never refer to their arrival as upcoming.";
+  }
+  const ago = Math.round((today - depart) / DAY);
+  return `Stay ALREADY ENDED ${ago} ${plural(ago)} ago - the guest has checked out and left. Never refer to their arrival or stay as upcoming.`;
+}
+
 export async function generateAutoReply(
   incomingMessage: string,
   context: ReservationContext,
@@ -51,11 +104,14 @@ export async function generateAutoReply(
 ): Promise<AutoReplyResult> {
   const systemPrompt = `You are a helpful property management assistant responding on behalf of a short-term rental host.
 
+RIGHT NOW IT IS: ${NOW_FMT.format(new Date())} (property local time)
+
 Property: ${context.propertyName}
 Address: ${context.propertyAddress}
 Guest: ${context.guestName}
-Check-in: ${context.checkIn.toLocaleDateString()}
-Check-out: ${context.checkOut.toLocaleDateString()}
+Check-in: ${DATE_FMT.format(context.checkIn)}
+Check-out: ${DATE_FMT.format(context.checkOut)}
+STAY STATUS: ${describeStayTiming(context.checkIn, context.checkOut)}
 ${context.confirmationCode ? `Confirmation: ${context.confirmationCode}` : ""}
 ${context.accessCode ? `Access Code: ${context.accessCode}` : ""}
 ${context.specialRequests ? `Guest requests: ${context.specialRequests}` : ""}
@@ -79,6 +135,11 @@ Guidelines:
 - If the knowledge base does not contain the answer, set shouldReply=false so the host replies manually
 - For complex issues (maintenance, damages, refunds, disputes, date changes), set shouldReply=false
 - If the guest asks about WiFi, parking, check-in/check-out, access codes, house rules, appliances or local tips — answer directly when the info is above
+
+Timing — get the tense right, this is highly visible when wrong:
+- Read STAY STATUS above before writing anything about dates. It is authoritative; do not work the timing out yourself from the check-in date.
+- If the guest is already at the property or has checked out, NEVER say you look forward to their arrival, and never refer to check-in as something still to come.
+- Prefer not mentioning dates at all unless the guest asked about them. "Thanks, got it!" is better than a sentence that risks the wrong tense.
 
 Writing style — you are the host personally texting in a messaging app, NOT a support bot:
 - Just answer the question directly, the way a person replies in a chat. Do NOT open with "Hi <name>", "Hello", "Dear guest" etc. — in an ongoing conversation nobody greets on every message. A greeting is only natural in the very first message of the whole conversation.
