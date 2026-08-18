@@ -132,6 +132,30 @@ export async function GET(req: NextRequest) {
     sameDatesAcrossProperties.push({ checkIn, checkOut, rows: rows.map(view) });
   }
 
+  // 3c. The same Booking.com Book Number (or Smoobu id) on more than one row.
+  //     This is the unambiguous "imported twice" signature, and it is checked
+  //     across the WHOLE portfolio and every status - the month-scoped check
+  //     could not see a stay duplicated onto a second property. Blank codes are
+  //     skipped: hand-created reservations all share the empty string.
+  const byCode = new Map<string, typeof all>();
+  for (const r of all) {
+    const code = (r.confirmationCode || "").trim();
+    if (!code) continue;
+    if (!byCode.has(code)) byCode.set(code, []);
+    byCode.get(code)!.push(r);
+  }
+  const duplicateCodes = Array.from(byCode.entries())
+    .filter(([, rows]) => rows.length > 1)
+    .map(([code, rows]) => ({ confirmationCode: code, count: rows.length, rows: rows.map(view) }));
+
+  // Where the overlaps cluster. A month carrying several is a bad import
+  // batch, not a stray double-booking.
+  const overlapsByMonth: Record<string, number> = {};
+  for (const o of overlaps) {
+    const m = o.b.checkIn.slice(0, 7);
+    overlapsByMonth[m] = (overlapsByMonth[m] || 0) + 1;
+  }
+
   // 4. Every property with its live-reservation count - surfaces leftover or
   //    duplicated Property rows (e.g. an original alongside its "(copy)").
   const properties = await prisma.property.findMany({
@@ -168,8 +192,10 @@ export async function GET(req: NextRequest) {
       guestsThatLookDuplicated: repeatedGuests.filter((g) => g.looksDuplicated).length,
       samePropertySameAmountNearbyDates: sameAmountNearby.length,
       identicalDateRangesAcrossProperties: sameDatesAcrossProperties.length,
+      sharedConfirmationCodes: duplicateCodes.length,
       totalProperties: properties.length,
     },
+    overlapsByMonth,
     verdictHint:
       overlaps.length > 0
         ? "OVERLAP FOUND - two stays claim the same night on one property. Almost certainly the duplicate."
@@ -178,6 +204,7 @@ export async function GET(req: NextRequest) {
     guestsThatLookDuplicated: repeatedGuests.filter((g) => g.looksDuplicated),
     samePropertySameAmountNearbyDates: sameAmountNearby,
     identicalDateRangesAcrossProperties: sameDatesAcrossProperties,
+    sharedConfirmationCodes: duplicateCodes,
     augustCheckoutsByProperty: augustByProperty,
     allProperties: properties.map((p) => ({
       name: p.name,
