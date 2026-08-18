@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
@@ -16,7 +16,18 @@ const MOVES = [
   { confirmationCode: "5383184777", guest: "Oleh Kutelmakh" },
 ];
 
+// GET is also supported (not just POST) so this can be run by pasting the
+// URL into a browser address bar - fine for a session-gated, idempotent,
+// exact-id-matched one-off fix like this.
+export async function GET() {
+  return run();
+}
+
 export async function POST() {
+  return run();
+}
+
+async function run() {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
