@@ -295,7 +295,7 @@ export default function CleaningPage() {
       <div className="flex items-center justify-between mb-5 gap-2 flex-wrap">
         <div>
           <h1 className="text-xl md:text-2xl font-bold text-slate-900">Cleaning</h1>
-          <p className="text-slate-500 text-sm mt-0.5">Today's cleanings, ranked by priority</p>
+          <p className="text-slate-500 text-sm mt-0.5">Today&apos;s cleanings, ranked by priority</p>
         </div>
         <div className="flex gap-2">
           <Link href="/cleaning/report" className="flex items-center gap-2 border border-slate-200 hover:bg-slate-50 text-slate-700 px-3 py-2.5 rounded-xl text-sm font-medium transition">

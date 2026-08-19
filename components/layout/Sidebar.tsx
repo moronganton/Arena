@@ -7,7 +7,6 @@ import {
   CalendarDays,
   MessageSquare,
   MessageSquareText,
-  Settings,
   Home,
   BookOpen,
   Key,
@@ -16,7 +15,6 @@ import {
   RefreshCw,
   Sparkles,
   Wallet,
-  ChevronRight,
   Lightbulb,
   ShieldCheck,
 } from "lucide-react";

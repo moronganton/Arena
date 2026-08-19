@@ -1,7 +1,6 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
 import { Send, Bot, User, RefreshCw, AlertTriangle, Reply, X, BookOpen, Check, StickyNote, SendHorizonal } from "lucide-react";
-import { formatDate } from "@/lib/utils";
 
 interface Message {
   id: string;

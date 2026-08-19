@@ -1,7 +1,6 @@
 import ical from "node-ical";
 import { prisma } from "@/lib/prisma";
 import { generateAccessCode } from "@/lib/ttlock";
-import { sendAccessCodeEmail } from "@/lib/notifications";
 
 export type ICalEvent = {
   uid: string;

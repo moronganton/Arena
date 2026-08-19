@@ -222,7 +222,7 @@ export default function AiSettingsPage() {
 
           <div className="py-3 border-b border-slate-50">
             <label className="block font-medium text-slate-900 mb-1">Response Language</label>
-            <p className="text-sm text-slate-500 mb-3">AI will respond in this language (or match guest's language)</p>
+            <p className="text-sm text-slate-500 mb-3">AI will respond in this language (or match guest&apos;s language)</p>
             <select
               value={settings.language}
               onChange={(e) => setSettings({ ...settings, language: e.target.value })}
@@ -266,7 +266,7 @@ export default function AiSettingsPage() {
         <h2 className="font-semibold text-slate-900 mb-1">Properties</h2>
         <p className="text-sm text-slate-500 mb-5">
           Turn the assistant off for a specific property without affecting the rest — useful if you want to
-          handle one property's guests yourself while the AI covers the others.
+          handle one property&apos;s guests yourself while the AI covers the others.
         </p>
         {propertiesLoading ? (
           <p className="text-sm text-slate-400">Loading properties…</p>

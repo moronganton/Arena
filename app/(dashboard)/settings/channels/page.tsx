@@ -255,7 +255,7 @@ export default function ChannelsPage() {
               <>
                 {/* iCal-only for other platforms */}
                 <div className="col-span-2 bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-800">
-                  <strong>iCal Sync Setup:</strong> Find your iCal export URL in each platform's calendar settings:
+                  <strong>iCal Sync Setup:</strong> Find your iCal export URL in each platform&apos;s calendar settings:
                   <ul className="mt-1 ml-4 list-disc space-y-0.5 text-xs">
                     <li><strong>Airbnb:</strong> Calendar → Export Calendar → Copy iCal link</li>
                     <li><strong>VRBO:</strong> Calendar → Import/Export → Export iCal</li>

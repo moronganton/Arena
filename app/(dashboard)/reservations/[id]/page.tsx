@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
 import { formatDate, formatCurrency, SOURCE_COLORS, SOURCE_LABELS, STATUS_COLORS, nightsBetween } from "@/lib/utils";
 import Link from "next/link";
-import { ArrowLeft, Key, MessageSquare, Edit3, Mail, Phone } from "lucide-react";
+import { ArrowLeft, Key, Mail, Phone } from "lucide-react";
 import { MessageThread } from "@/components/messages/MessageThread";
 import ReservationActions from "./ReservationActions";
 import { AccessCodeGenerator } from "@/components/reservations/AccessCodeGenerator";
@@ -83,7 +83,7 @@ export default async function ReservationDetailPage({
             checkIn={reservation.checkIn.toISOString()}
             checkOut={reservation.checkOut.toISOString()}
             adults={reservation.adults}
-            children={reservation.children}
+            childrenCount={reservation.children}
             totalAmount={reservation.totalAmount}
           />
         </div>

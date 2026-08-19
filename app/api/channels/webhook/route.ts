@@ -119,7 +119,7 @@ async function handleAirbnbWebhook(payload: Record<string, unknown>) {
   return NextResponse.json({ success: true });
 }
 
-async function handleVrboWebhook(payload: Record<string, unknown>) {
+async function handleVrboWebhook(_payload: Record<string, unknown>) {
   // VRBO/Expedia webhook handling
   return NextResponse.json({ success: true });
 }

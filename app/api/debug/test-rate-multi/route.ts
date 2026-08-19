@@ -16,7 +16,7 @@ import { SMOOBU_BASE_URL, parseCredential, buildHeaders } from "@/lib/channels/s
 // for every mapped property — so there is a guaranteed fallback (N sequential
 // calls) even if no batched format works at all.
 //   GET /api/debug/test-rate-multi
-export async function GET(req: NextRequest) {
+export async function GET(_req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Log in first" }, { status: 401 });
 

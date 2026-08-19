@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
 
 const BASE_URL = process.env.TTLOCK_BASE_URL || "https://euapi.ttlock.com";
@@ -352,7 +353,7 @@ export async function generateAccessCode(params: {
     lockError = "This lock is not linked to a TTLock device";
   }
 
-  const accessCode = await prisma.accessCode.create({
+  const _accessCode = await prisma.accessCode.create({
     data: {
       code,
       ttlockKeyId,
@@ -395,7 +396,6 @@ function applyTimeToDateCET(date: Date, timeStr: string): Date {
   const utcMidnight = new Date(Date.UTC(cetYear, cetMonth, cetDay, 0, 0, 0, 0));
 
   // Get the offset between UTC and CET for this date (handles DST)
-  const cetMidnightStr = cetFormatter.format(utcMidnight);
   const cetMidnightParts = cetFormatter.formatToParts(utcMidnight);
   const cetMidnightHour = parseInt(cetMidnightParts.find(p => p.type === 'hour')!.value);
   const offset = cetMidnightHour; // Hours offset from UTC
@@ -660,8 +660,5 @@ export async function updateAccessCodePeriodsForReservation(
 
 // Simple MD5 for TTLock (they require this)
 function md5(str: string): string {
-  // In production, use the `crypto` module or a proper md5 library
-  // For now, return a placeholder — install `md5` package for real use
-  const crypto = require("crypto");
   return crypto.createHash("md5").update(str).digest("hex");
 }

@@ -1,7 +1,7 @@
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
-import { Plus, MapPin, Bed, Users, Wifi } from "lucide-react";
+import { Plus, MapPin, Bed, Users } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import CopyPropertyButton from "@/components/properties/CopyPropertyButton";
 import { PropertiesFilters } from "@/components/properties/PropertiesFilters";

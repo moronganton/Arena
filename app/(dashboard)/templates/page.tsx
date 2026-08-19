@@ -658,7 +658,7 @@ export default function TemplatesPage() {
         <aside className="lg:sticky lg:top-6 h-fit">
           <div className="bg-white rounded-2xl border border-slate-100 p-5">
             <h3 className="text-sm font-semibold text-slate-900 mb-1">Dynamic fields</h3>
-            <p className="text-xs text-slate-500 mb-4">Each tag is replaced with the guest's real details. Click to insert.</p>
+            <p className="text-xs text-slate-500 mb-4">Each tag is replaced with the guest&apos;s real details. Click to insert.</p>
             <div className="space-y-1.5">
               {fields.map((f) => (
                 <button key={f.key} onClick={() => insertAtCursor(f.token)} className="w-full text-left p-2.5 rounded-lg border border-slate-100 hover:border-indigo-200 hover:bg-indigo-50/50 transition">

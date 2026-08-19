@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { Plus, Trash2, Edit, DollarSign, CalendarDays } from "lucide-react";
+import { Plus, Trash2, DollarSign, CalendarDays } from "lucide-react";
 
 interface Property {
   id: string;
@@ -37,7 +37,7 @@ export default function PricingPage() {
   const [properties, setProperties] = useState<Property[]>([]);
   const [rules, setRules] = useState<PricingRule[]>([]);
   const [selectedProperty, setSelectedProperty] = useState<string>("");
-  const [loading, setLoading] = useState(true);
+  const [_loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({
     name: "",

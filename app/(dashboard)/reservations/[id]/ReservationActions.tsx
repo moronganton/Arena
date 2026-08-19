@@ -10,7 +10,7 @@ interface Props {
   checkIn: string;
   checkOut: string;
   adults: number;
-  children: number;
+  childrenCount: number;
   totalAmount: number | null;
 }
 
@@ -26,7 +26,7 @@ export default function ReservationActions(props: Props) {
     checkIn: props.checkIn.slice(0, 10),
     checkOut: props.checkOut.slice(0, 10),
     adults: String(props.adults),
-    children: String(props.children),
+    children: String(props.childrenCount),
     totalAmount: props.totalAmount != null ? String(props.totalAmount) : "",
     status: props.status,
   });
