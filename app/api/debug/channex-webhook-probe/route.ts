@@ -42,6 +42,12 @@ export async function GET(req: NextRequest) {
   const webhookPayload = {
     webhook: {
       callback_url: WEBHOOK_URL,
+      // Confirmed via a real 422: property_id is required unless
+      // is_global is true. The receiver being built handles every Channex
+      // property generically, not just this one, so account-wide is the
+      // correct scope, not a per-property webhook that would need
+      // re-registering for every future property.
+      is_global: true,
       // Channex's own event-naming convention is unconfirmed - "booking"
       // is the most likely guess given the resource is literally named
       // that; a validation error here would name the real ones.
