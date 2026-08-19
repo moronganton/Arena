@@ -1,0 +1,150 @@
+import { prisma } from "@/lib/prisma";
+import { pushAriForDateRange } from "./channex-ari";
+
+// Turns queued AriOutbox rows into a small number of batched Channex calls.
+//
+// Coalescing: multiple rows for the same property - a burst of edits, or
+// several kinds enqueued for the same change - merge into the smallest set
+// of non-overlapping date ranges before anything is sent, so 30 rapid edits
+// to overlapping dates cost a handful of calls, not 30.
+//
+// Rate limiting: Channex's own limit is roughly 20 calls/minute, confirmed
+// as an operating constraint in the plan rather than measured directly here
+// (nothing in this integration has come close to it yet). Calls are spaced
+// at a fixed interval across the WHOLE run, not per property, since the
+// limit is account-wide - two properties queued together must still share
+// the same budget.
+//
+// Backoff: a failed range's contributing rows get attempts+1 and a
+// nextAttemptAt pushed out exponentially, so a persistent failure is not
+// hammered every drain cycle. After MAX_ATTEMPTS they flip to FAILED - a
+// terminal state that stops automatic retries and stays visible (queryable,
+// not silently dropped) rather than swallowed.
+
+const MAX_CALLS_PER_RUN = 15; // stays under ~20/min even if the cron fires every minute
+const MIN_MS_BETWEEN_CALLS = 3500; // 60_000 / 20 ≈ 3000ms; padded for safety
+const MAX_ATTEMPTS = 5;
+const BACKOFF_BASE_MS = 60_000; // 1 min, 2 min, 4 min, 8 min, 16 min
+
+function backoffMs(attempts: number): number {
+  return BACKOFF_BASE_MS * 2 ** (attempts - 1);
+}
+
+interface Range {
+  from: Date;
+  to: Date;
+}
+
+// Merges overlapping or touching ranges into the minimal covering set.
+// Exported for direct testing - this is the piece the "30 rapid edits
+// should coalesce" exit criterion is actually about.
+export function mergeRanges(ranges: Range[]): Range[] {
+  if (ranges.length === 0) return [];
+  const sorted = [...ranges].sort((a, b) => a.from.getTime() - b.from.getTime());
+  const merged: Range[] = [{ from: sorted[0].from, to: sorted[0].to }];
+  for (let i = 1; i < sorted.length; i++) {
+    const last = merged[merged.length - 1];
+    const cur = sorted[i];
+    if (cur.from.getTime() <= last.to.getTime()) {
+      if (cur.to.getTime() > last.to.getTime()) last.to = cur.to;
+    } else {
+      merged.push({ from: cur.from, to: cur.to });
+    }
+  }
+  return merged;
+}
+
+export interface DrainSummary {
+  eligibleRows: number;
+  propertiesTouched: number;
+  callsMade: number;
+  callsSucceeded: number;
+  callsFailed: number;
+  rowsDone: number;
+  rowsFailedTerminally: number;
+  stoppedEarly: boolean; // hit MAX_CALLS_PER_RUN with more eligible work left
+}
+
+export async function drainAriOutbox(): Promise<DrainSummary> {
+  const now = new Date();
+  const eligible = await prisma.ariOutbox.findMany({
+    where: {
+      status: "PENDING",
+      OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now } }],
+    },
+    orderBy: { createdAt: "asc" },
+  });
+
+  const summary: DrainSummary = {
+    eligibleRows: eligible.length,
+    propertiesTouched: 0,
+    callsMade: 0,
+    callsSucceeded: 0,
+    callsFailed: 0,
+    rowsDone: 0,
+    rowsFailedTerminally: 0,
+    stoppedEarly: false,
+  };
+  if (eligible.length === 0) return summary;
+
+  const byProperty = new Map<string, typeof eligible>();
+  for (const row of eligible) {
+    if (!byProperty.has(row.propertyId)) byProperty.set(row.propertyId, []);
+    byProperty.get(row.propertyId)!.push(row);
+  }
+
+  let lastCallAt = 0;
+  const throttle = async () => {
+    const wait = lastCallAt === 0 ? 0 : MIN_MS_BETWEEN_CALLS - (Date.now() - lastCallAt);
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    lastCallAt = Date.now();
+  };
+
+  outer: for (const [propertyId, rows] of byProperty) {
+    summary.propertiesTouched++;
+    const merged = mergeRanges(rows.map((r) => ({ from: r.dateFrom, to: r.dateTo })));
+
+    for (const range of merged) {
+      if (summary.callsMade >= MAX_CALLS_PER_RUN) {
+        summary.stoppedEarly = true;
+        break outer;
+      }
+
+      // Every row whose range falls inside this merged range is settled by
+      // this one call, regardless of which property-level rows produced it.
+      const contributing = rows.filter((r) => r.dateFrom >= range.from && r.dateTo <= range.to);
+
+      await throttle();
+      summary.callsMade++;
+      try {
+        await pushAriForDateRange(propertyId, range.from, range.to);
+        summary.callsSucceeded++;
+        await prisma.ariOutbox.updateMany({
+          where: { id: { in: contributing.map((r) => r.id) } },
+          data: { status: "DONE", lastError: null },
+        });
+        summary.rowsDone += contributing.length;
+      } catch (err) {
+        summary.callsFailed++;
+        const message = err instanceof Error ? err.message : String(err);
+        for (const row of contributing) {
+          const attempts = row.attempts + 1;
+          const givingUp = attempts >= MAX_ATTEMPTS;
+          await prisma.ariOutbox.update({
+            where: { id: row.id },
+            data: {
+              attempts,
+              lastError: message.slice(0, 500),
+              status: givingUp ? "FAILED" : "PENDING",
+              nextAttemptAt: givingUp ? null : new Date(Date.now() + backoffMs(attempts)),
+            },
+          });
+          if (givingUp) summary.rowsFailedTerminally++;
+        }
+        console.error(`[drain-ari] property ${propertyId} range ${range.from.toISOString()}..${range.to.toISOString()} failed:`, err);
+      }
+    }
+  }
+
+  return summary;
+}
