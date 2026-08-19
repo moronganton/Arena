@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { autoGenerateCodesForReservation } from "@/lib/ttlock";
+import { enqueueAriUpdate } from "@/lib/channels/ari-outbox";
 import { z } from "zod";
 
 const createSchema = z.object({
@@ -121,6 +122,10 @@ export async function POST(req: NextRequest) {
     reservation.id,
     data.propertyId
   );
+
+  // A new reservation just took these nights - no-op unless the property is
+  // on Channex (see enqueueAriUpdate).
+  await enqueueAriUpdate(data.propertyId, reservation.checkIn, reservation.checkOut, "AVAILABILITY");
 
   return NextResponse.json({ ...reservation, generatedCodes }, { status: 201 });
 }

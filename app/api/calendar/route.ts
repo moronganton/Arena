@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { generateICalFeed } from "@/lib/channels/ical";
+import { enqueueAriUpdate } from "@/lib/channels/ari-outbox";
 
 export async function GET(req: NextRequest) {
   const session = await auth();
@@ -79,6 +80,10 @@ export async function POST(req: NextRequest) {
     },
   });
 
+  // Blocked nights just became unavailable - no-op unless the property is
+  // on Channex.
+  await enqueueAriUpdate(propertyId, block.startDate, block.endDate, "AVAILABILITY");
+
   return NextResponse.json(block, { status: 201 });
 }
 
@@ -96,5 +101,10 @@ export async function DELETE(req: NextRequest) {
   if (!block) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   await prisma.calendarBlock.delete({ where: { id } });
+
+  // Removing the block just freed these nights back up - no-op unless the
+  // property is on Channex.
+  await enqueueAriUpdate(block.propertyId, block.startDate, block.endDate, "AVAILABILITY");
+
   return NextResponse.json({ success: true });
 }

@@ -2,6 +2,30 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
+import { enqueueAriUpdate, defaultHorizon } from "@/lib/channels/ari-outbox";
+
+// A rule's own date range if it has one, otherwise the standard push
+// horizon - a rule with no end date still needs SOME bound to push against,
+// not "forever".
+function ruleRange(rule: { startDate: Date | null; endDate: Date | null }): { from: Date; to: Date } {
+  if (rule.startDate || rule.endDate) {
+    const horizon = defaultHorizon();
+    const from = rule.startDate ?? horizon.from;
+    // endDate on a PricingRule is inclusive (the last day it applies), so
+    // the push range's exclusive end is one day past it.
+    const to = rule.endDate ? new Date(rule.endDate.getTime() + 86400000) : horizon.to;
+    return { from, to };
+  }
+  return defaultHorizon();
+}
+
+async function enqueuePriceChange(propertyId: string, rule: { startDate: Date | null; endDate: Date | null }) {
+  const { from, to } = ruleRange(rule);
+  // Both kinds, since a single rule can set price and/or minNights together
+  // and there is no cheap way to know which changed from here.
+  await enqueueAriUpdate(propertyId, from, to, "RATE");
+  await enqueueAriUpdate(propertyId, from, to, "RESTRICTION");
+}
 
 const ruleSchema = z.object({
   propertyId: z.string(),
@@ -66,6 +90,10 @@ export async function POST(req: NextRequest) {
         active: body.active,
       },
     });
+    // Both the old and new range: a date dropped from the rule's coverage
+    // still needs re-materializing against whatever now applies instead.
+    await enqueuePriceChange(existing.propertyId, existing);
+    await enqueuePriceChange(updated.propertyId, updated);
     return NextResponse.json(updated);
   }
 
@@ -88,6 +116,8 @@ export async function POST(req: NextRequest) {
     },
   });
 
+  await enqueuePriceChange(rule.propertyId, rule);
+
   return NextResponse.json(rule, { status: 201 });
 }
 
@@ -105,5 +135,9 @@ export async function DELETE(req: NextRequest) {
   if (!rule) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   await prisma.pricingRule.delete({ where: { id } });
+
+  // The rule's coverage now needs re-materializing without it.
+  await enqueuePriceChange(rule.propertyId, rule);
+
   return NextResponse.json({ success: true });
 }

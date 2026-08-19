@@ -6,6 +6,7 @@ import {
   updateAccessCodePeriodsForReservation,
 } from "@/lib/ttlock";
 import { sendCancellationEmail, sendDatesChangedEmail } from "@/lib/notifications";
+import { enqueueAriUpdate } from "@/lib/channels/ari-outbox";
 
 // Notify the guest that their reservation was cancelled
 async function notifyGuestOfCancellation(reservationId: string, hadAccessCode: boolean) {
@@ -78,6 +79,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (body.status === "CANCELLED") {
     const result = await revokeAccessCodesForReservation(id, session!.user!.id!);
     await notifyGuestOfCancellation(id, result.revoked > 0);
+    // These nights just freed up - no-op unless the property is on Channex.
+    await enqueueAriUpdate(updated.propertyId, existing.checkIn, existing.checkOut, "AVAILABILITY");
     return NextResponse.json({ ...updated, lockErrors: result.lockErrors });
   }
 
@@ -87,6 +90,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     updated.checkOut.getTime() !== existing.checkOut.getTime();
 
   if (datesChanged) {
+    // The old nights freed up, the new nights are now taken - both need
+    // pushing. Two rows rather than one range, since they are not
+    // necessarily contiguous or overlapping.
+    await enqueueAriUpdate(updated.propertyId, existing.checkIn, existing.checkOut, "AVAILABILITY");
+    await enqueueAriUpdate(updated.propertyId, updated.checkIn, updated.checkOut, "AVAILABILITY");
     const lockErrors = await updateAccessCodePeriodsForReservation(
       id,
       session!.user!.id!,

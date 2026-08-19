@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { enqueueAriUpdate, defaultHorizon } from "@/lib/channels/ari-outbox";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
@@ -51,6 +52,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       aiEnabled: body.aiEnabled,
     },
   });
+
+  // basePrice is the floor every rate materializes from - a change here
+  // affects every date with no rule overriding it.
+  if (body.basePrice != null && body.basePrice !== existing.basePrice) {
+    const { from, to } = defaultHorizon();
+    await enqueueAriUpdate(id, from, to, "RATE");
+  }
 
   return NextResponse.json(updated);
 }
