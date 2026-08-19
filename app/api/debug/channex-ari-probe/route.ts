@@ -104,23 +104,24 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // Multiple candidate read-back shapes, since neither the path nor the
-  // query param style is confirmed. The first round's "bad_request" (no
-  // field-level detail) meant the params were wrong but not how - these add
-  // bracket-array param styles (the shape smoobu-core.ts's /rates needed)
-  // and an explicit rate_plan_id, in case a required param was simply
-  // missing rather than misnamed.
+  // Multiple candidate read-back shapes. Round 1 (flat query params) came
+  // back "filter can't be blank" once the error-swallowing bug was fixed -
+  // a real, actionable reason: Channex expects a top-level `filter` param,
+  // not flat ones. Combined with the {data,meta} envelope and {id,type}
+  // resource shapes seen throughout, this API reads as JSON:API-flavoured,
+  // where filters conventionally go through filter[key]=value bracket
+  // notation. These candidates test that theory in a few plausible shapes.
   let readback: unknown = null;
   if (wroteOk) {
     const p = listing.channexPropertyId;
     const rt = listing.channexRoomTypeId;
     const rp = listing.channexRatePlanId;
     const candidates = [
-      `/restrictions?property_id=${p}&room_type_id=${rt}&date_from=${PROBE_DATE}&date_to=${PROBE_DATE}`,
-      `/availability?property_id=${p}&room_type_id=${rt}&date_from=${PROBE_DATE}&date_to=${PROBE_DATE}`,
-      `/restrictions/${p}?date_from=${PROBE_DATE}&date_to=${PROBE_DATE}`,
-      `/restrictions?property_id=${p}&room_type_ids%5B%5D=${rt}&rate_plan_ids%5B%5D=${rp}&date_from=${PROBE_DATE}&date_to=${PROBE_DATE}`,
-      `/availability?property_id=${p}&room_type_ids%5B%5D=${rt}&date_from=${PROBE_DATE}&date_to=${PROBE_DATE}`,
+      `/restrictions?filter%5Bproperty_id%5D=${p}&filter%5Broom_type_id%5D=${rt}&filter%5Bdate_from%5D=${PROBE_DATE}&filter%5Bdate_to%5D=${PROBE_DATE}`,
+      `/availability?filter%5Bproperty_id%5D=${p}&filter%5Broom_type_id%5D=${rt}&filter%5Bdate_from%5D=${PROBE_DATE}&filter%5Bdate_to%5D=${PROBE_DATE}`,
+      `/restrictions?filter%5Bproperty_id%5D=${p}&filter%5Broom_type_ids%5D%5B%5D=${rt}&filter%5Bdate_from%5D=${PROBE_DATE}&filter%5Bdate_to%5D=${PROBE_DATE}`,
+      `/restrictions?filter%5Bproperty_id%5D=${p}&filter%5Brate_plan_id%5D=${rp}&filter%5Bdate_from%5D=${PROBE_DATE}&filter%5Bdate_to%5D=${PROBE_DATE}`,
+      `/restrictions?filter%5Bproperty_id%5D=${p}&filter%5Broom_type_id%5D=${rt}&filter%5Bdate%5D%5Bfrom%5D=${PROBE_DATE}&filter%5Bdate%5D%5Bto%5D=${PROBE_DATE}`,
     ];
     const tried: unknown[] = [];
     for (const path of candidates) {
