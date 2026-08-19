@@ -39,22 +39,32 @@ export async function GET(req: NextRequest) {
   const registerWebhook = searchParams.get("registerWebhook") === "true";
   const createBooking = searchParams.get("createBooking") === "true";
 
-  const webhookPayload = {
-    webhook: {
-      callback_url: WEBHOOK_URL,
-      // Confirmed via a real 422: property_id is required unless
-      // is_global is true. The receiver being built handles every Channex
-      // property generically, not just this one, so account-wide is the
-      // correct scope, not a per-property webhook that would need
-      // re-registering for every future property.
-      is_global: true,
-      // Confirmed via a real 422: the field is `event_mask`, not `event` -
-      // "mask" suggesting an array of event types rather than one string.
-      // Booking-related event names themselves are still unconfirmed
-      // guesses; a validation error would name the real ones.
-      event_mask: ["booking", "booking_new", "booking_modification", "booking_cancellation"],
-    },
-  };
+  // Confirmed via real 422s: property_id is required unless is_global is
+  // true (using is_global since the receiver handles every Channex
+  // property generically), and the field is event_mask (not event) - an
+  // array, not a single string. What's NOT confirmed yet is which values
+  // event_mask actually accepts: the first real attempt
+  // (["booking","booking_new","booking_modification","booking_cancellation"])
+  // came back "event_mask is invalid" with no indication of which entries
+  // were the problem. Rather than guess another multi-value array blind,
+  // these are tried as separate single-value registrations so each result
+  // isolates exactly one candidate.
+  const EVENT_MASK_CANDIDATES = [
+    ["booking"],
+    ["ari"],
+    ["bookings"],
+    ["*"],
+    ["reservation"],
+    ["booking_created"],
+    ["booking_updated"],
+    ["new_booking"],
+    ["reservation_created"],
+    ["booking_notification"],
+    ["all"],
+  ];
+  function webhookPayloadFor(eventMask: string[]) {
+    return { webhook: { callback_url: WEBHOOK_URL, is_global: true, event_mask: eventMask } };
+  }
 
   const checkinDate = "2027-10-05";
   const checkoutDate = "2027-10-07";
@@ -90,7 +100,7 @@ export async function GET(req: NextRequest) {
       mode: "dry run - nothing sent to Channex",
       property: listing.property.name,
       webhookUrl: WEBHOOK_URL,
-      candidateWebhookPayload: webhookPayload,
+      candidateEventMasks: EVENT_MASK_CANDIDATES,
       candidateBookingPayload: bookingPayload,
       nextStep: "Add ?registerWebhook=true and/or ?createBooking=true to actually send these.",
     });
@@ -99,17 +109,21 @@ export async function GET(req: NextRequest) {
   const results: Record<string, unknown> = {};
 
   if (registerWebhook) {
-    try {
-      const res = await channexPost("/webhooks", webhookPayload);
-      results.webhookRegistration = { status: "ok", payload: webhookPayload, response: res.data };
-    } catch (err) {
-      const e = err as ChannexError;
-      results.webhookRegistration = {
-        status: "failed",
-        payload: webhookPayload,
-        error: { message: e.message, status: e.status, code: e.code, details: e.details },
-      };
+    const attempts: unknown[] = [];
+    let succeeded = false;
+    for (const eventMask of EVENT_MASK_CANDIDATES) {
+      if (succeeded) break; // stop once one is accepted - no need to also register the rest
+      const payload = webhookPayloadFor(eventMask);
+      try {
+        const res = await channexPost("/webhooks", payload);
+        attempts.push({ eventMask, status: "ok", response: res.data });
+        succeeded = true;
+      } catch (err) {
+        const e = err as ChannexError;
+        attempts.push({ eventMask, status: "failed", error: { message: e.message, status: e.status, code: e.code, details: e.details } });
+      }
     }
+    results.webhookRegistration = { attempts, succeeded };
   }
 
   if (createBooking) {
