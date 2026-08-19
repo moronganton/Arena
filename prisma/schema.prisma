@@ -292,6 +292,32 @@ model AriOutbox {
   @@index([status, createdAt])
 }
 
+// Every Channex webhook delivery, stored before any processing is attempted.
+//
+// Channex certification requires the receiver to return 200 even when our own
+// processing fails - returning 500 makes Channex retry and eventually
+// disable the webhook. That means a failure has to be recorded somewhere
+// rather than surfaced in the HTTP response, which is what this table is
+// for: "log and flag internally instead of returning 500".
+//
+// It doubles as the payload-discovery mechanism. The API refuses to create
+// bookings directly (403), so the real booking shape can only be learned
+// from an actual delivery - either the dashboard's "Send test message" or a
+// genuine OTA booking.
+model ChannexWebhookLog {
+  id            String   @id @default(cuid())
+  event         String?  // event_mask value, e.g. "booking"
+  payload       String   // raw request body, exactly as received
+  headers       String?  // raw headers, for diagnosing auth/signature problems
+  processedOk   Boolean  @default(false)
+  error         String?
+  reservationId String?  // set when a delivery resulted in a reservation
+  createdAt     DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([processedOk])
+}
+
 // Per-property knowledge base entries — the AI assistant answers guest
 // questions from these facts.
 model PropertyKnowledge {
