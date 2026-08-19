@@ -12,12 +12,17 @@ import { prisma } from "@/lib/prisma";
 //      just nothing to generate against.
 //
 //   GET /api/debug/pin-code-check?guests=Tayler Stewart,Iga Smulska,...
+//   GET /api/debug/pin-code-check?upcoming=true   -> every not-yet-checked-out
+//                                                     reservation account-wide,
+//                                                     any source or status
+//                                                     that still needs a code
 export async function GET(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Log in first" }, { status: 401 });
 
   const { searchParams } = new URL(req.url);
   const guestsParam = searchParams.get("guests");
+  const upcoming = searchParams.get("upcoming") === "true";
   const guestNames = guestsParam
     ? guestsParam.split(",").map((s) => s.trim()).filter(Boolean)
     : [];
@@ -32,7 +37,9 @@ export async function GET(req: NextRequest) {
       property: { ownerId: session.user.id },
       ...(guestNames.length
         ? { guest: { name: { in: guestNames } } }
-        : { source: "BOOKING", status: "CONFIRMED" }),
+        : upcoming
+          ? { checkOut: { gte: new Date() }, status: { notIn: ["CANCELLED", "NO_SHOW"] } }
+          : { source: "BOOKING", status: "CONFIRMED" }),
     },
     select: {
       id: true,
@@ -52,8 +59,8 @@ export async function GET(req: NextRequest) {
       },
       accessCodes: { select: { id: true, code: true, isActive: true, createdAt: true } },
     },
-    orderBy: { createdAt: "desc" },
-    take: guestNames.length ? undefined : 30,
+    orderBy: upcoming ? { checkIn: "asc" } : { createdAt: "desc" },
+    take: guestNames.length || upcoming ? undefined : 30,
   });
 
   const rows = reservations.map((r) => ({
@@ -81,6 +88,9 @@ export async function GET(req: NextRequest) {
     smoobuAccountConnected: !!account,
     checked: rows.length,
     missingCodeCount: rows.filter((r) => !r.hasCode).length,
+    // Surfaced separately so a large upcoming-reservations list doesn't bury
+    // the rows that actually need attention under the ones that are fine.
+    missingRows: rows.filter((r) => !r.hasCode),
     rows,
   });
 }
