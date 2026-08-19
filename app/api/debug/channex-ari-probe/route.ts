@@ -80,10 +80,15 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // Availability write+readback is now confirmed working end to end. Rate is
-  // a separate kind AriOutbox needs to push - test it the same way, on a
-  // date one day over so it can't collide with the availability write above.
-  const RATE_PROBE_DATE = "2027-06-16";
+  // Availability write+readback is now confirmed working end to end. The
+  // FIRST rate test (rate: 55) came back on readback as "rate":"0.55" - a
+  // 100x scale-down, not a rounding artefact. That is exactly the shape of
+  // a minor-units convention (cents, like Stripe): 55 read as 55 minor
+  // units = EUR 0.55. This second test sends 5500 on a fresh date; if the
+  // theory is right, readback should show "55.00" - confirmed BEFORE
+  // building any real push logic, since getting this wrong would silently
+  // push every price at 1/100th of its real value.
+  const RATE_PROBE_DATE = "2027-06-17";
   const ratePayload = {
     values: [
       {
@@ -91,18 +96,18 @@ export async function GET(req: NextRequest) {
         room_type_id: listing.channexRoomTypeId,
         rate_plan_id: listing.channexRatePlanId,
         date: RATE_PROBE_DATE,
-        rate: 55,
+        rate: 5500,
       },
     ],
   };
   if (!skipWrite) {
     try {
       const res = await channexPost("/restrictions", ratePayload);
-      attempts.push({ endpoint: "POST /restrictions (rate)", payload: ratePayload, status: "ok", response: res.data });
+      attempts.push({ endpoint: "POST /restrictions (rate=5500, testing minor-units theory)", payload: ratePayload, status: "ok", response: res.data });
     } catch (err) {
       const e = err as ChannexError;
       attempts.push({
-        endpoint: "POST /restrictions (rate)",
+        endpoint: "POST /restrictions (rate=5500, testing minor-units theory)",
         payload: ratePayload,
         status: "failed",
         error: { message: e.message, status: e.status, code: e.code, details: e.details },
