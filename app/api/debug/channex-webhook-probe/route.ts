@@ -41,28 +41,27 @@ export async function GET(req: NextRequest) {
 
   // Confirmed via real 422s: property_id is required unless is_global is
   // true (using is_global since the receiver handles every Channex
-  // property generically), and the field is event_mask (not event) - an
-  // array, not a single string. What's NOT confirmed yet is which values
-  // event_mask actually accepts: the first real attempt
-  // (["booking","booking_new","booking_modification","booking_cancellation"])
-  // came back "event_mask is invalid" with no indication of which entries
-  // were the problem. Rather than guess another multi-value array blind,
-  // these are tried as separate single-value registrations so each result
-  // isolates exactly one candidate.
-  const EVENT_MASK_CANDIDATES = [
-    ["booking"],
-    ["ari"],
-    ["bookings"],
-    ["*"],
-    ["reservation"],
-    ["booking_created"],
-    ["booking_updated"],
-    ["new_booking"],
-    ["reservation_created"],
-    ["booking_notification"],
-    ["all"],
+  // property generically), and the field is named event_mask, not event.
+  //
+  // Eleven different string values were then tried as single-element ARRAYS
+  // (booking, bookings, reservation, ari, *, and the created/updated/new/
+  // notification variants) - every one came back "event_mask is invalid".
+  // Eleven failures with zero variation in the error is a strong signal the
+  // TYPE is wrong, not the vocabulary: "mask" conventionally means a
+  // bitmask integer or a wildcard string, and an array was only ever my
+  // inference from the word. So this round varies the type - plain string,
+  // integer bitmask, wildcard patterns - instead of guessing more names.
+  const EVENT_MASK_CANDIDATES: unknown[] = [
+    "booking", // plain string, not wrapped in an array
+    "*",
+    "booking:*",
+    "*:*",
+    1, // bitmask integers
+    255,
+    0,
+    ["*"], // arrays kept for contrast, to confirm the type is the issue
   ];
-  function webhookPayloadFor(eventMask: string[]) {
+  function webhookPayloadFor(eventMask: unknown) {
     return { webhook: { callback_url: WEBHOOK_URL, is_global: true, event_mask: eventMask } };
   }
 
