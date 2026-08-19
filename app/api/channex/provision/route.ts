@@ -109,7 +109,7 @@ export async function GET(req: NextRequest) {
       zip_code: searchParams.get("zip") || "00000",
       latitude: lat,
       longitude: lng,
-      timezone: property.timezone && property.timezone !== "UTC" ? property.timezone : "Europe/Bratislava",
+      timezone: searchParams.get("timezone") || (property.timezone && property.timezone !== "UTC" ? property.timezone : "Europe/Bratislava"),
       property_type: "apartment",
       group_id: groupId,
     },
