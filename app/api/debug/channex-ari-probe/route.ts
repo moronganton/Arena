@@ -71,22 +71,51 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // If the write looked like it worked, try to confirm by reading the
-  // calendar back - path unconfirmed, so this is exploratory too and its
-  // failure doesn't invalidate a successful write above.
-  const wroteOk = (attempts[0] as { status: string }).status === "ok";
-  let readback: unknown = null;
+  const first = attempts[0] as { status: string; response?: unknown };
+  const wroteOk = first.status === "ok";
+
+  // The write returned { id, type: "task" } rather than applying inline -
+  // Channex processes restriction updates asynchronously. Check the task's
+  // own status before trying to read the calendar back, since a still-
+  // pending task would make a calendar read look like a false failure.
+  let taskStatus: unknown = null;
   if (wroteOk) {
-    try {
-      const res = await channexGet(
-        `/availability_calendar?property_id=${listing.channexPropertyId}&room_type_ids[]=${listing.channexRoomTypeId}&date_from=${PROBE_DATE}&date_to=${PROBE_DATE}`
-      );
-      readback = { status: "ok", response: res.data };
-    } catch (err) {
-      const e = err as ChannexError;
-      readback = { status: "failed", error: { message: e.message, status: e.status, code: e.code, details: e.details } };
+    const taskId = (first.response as Array<{ id?: string }> | undefined)?.[0]?.id;
+    if (taskId) {
+      for (const path of [`/tasks/${taskId}`, `/restrictions/tasks/${taskId}`]) {
+        try {
+          const res = await channexGet(path);
+          taskStatus = { path, status: "ok", response: res.data };
+          break;
+        } catch (err) {
+          const e = err as ChannexError;
+          taskStatus = { path, status: "failed", error: { message: e.message, status: e.status, code: e.code } };
+        }
+      }
     }
   }
 
-  return NextResponse.json({ property: listing.property.name, attempts, readback });
+  // Multiple candidate read-back shapes, since neither the path nor the
+  // query param style is confirmed. Stops at the first one that succeeds.
+  let readback: unknown = null;
+  if (wroteOk) {
+    const candidates = [
+      `/restrictions?property_id=${listing.channexPropertyId}&room_type_id=${listing.channexRoomTypeId}&date_from=${PROBE_DATE}&date_to=${PROBE_DATE}`,
+      `/availability?property_id=${listing.channexPropertyId}&room_type_id=${listing.channexRoomTypeId}&date_from=${PROBE_DATE}&date_to=${PROBE_DATE}`,
+      `/restrictions/${listing.channexPropertyId}?date_from=${PROBE_DATE}&date_to=${PROBE_DATE}`,
+    ];
+    const tried: unknown[] = [];
+    for (const path of candidates) {
+      try {
+        const res = await channexGet(path);
+        tried.push({ path, status: "ok", response: res.data });
+      } catch (err) {
+        const e = err as ChannexError;
+        tried.push({ path, status: "failed", error: { message: e.message, status: e.status, code: e.code } });
+      }
+    }
+    readback = tried;
+  }
+
+  return NextResponse.json({ property: listing.property.name, attempts, taskStatus, readback });
 }
