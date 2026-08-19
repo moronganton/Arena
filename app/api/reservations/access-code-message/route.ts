@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { sendAccessCodeEmail } from "@/lib/notifications";
-import { sendSmoobuGuestMessage } from "@/lib/channels/smoobu-core";
+import { smoobuProvider } from "@/lib/channels/smoobu-provider";
 
 export async function POST(req: NextRequest) {
   const session = await auth();
@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
   // Send via Smoobu/OTA
   if (sendSmoobu && reservation.externalId?.startsWith("smoobu-")) {
     try {
-      const sent = await sendSmoobuGuestMessage(session.user.id, reservation.externalId, guestMessage);
+      const sent = await smoobuProvider.sendGuestMessage(session.user.id, reservation.externalId, guestMessage);
       if (sent) results.smoobu = true;
       else results.errors.push("Smoobu: message not sent (trial limitation or OTA blocked)");
     } catch (err) {

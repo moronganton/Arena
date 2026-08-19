@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { prisma } from "@/lib/prisma";
-import { sendSmoobuGuestMessage } from "@/lib/channels/smoobu-core";
+import { smoobuProvider } from "@/lib/channels/smoobu-provider";
 import { sendMessageToGuest } from "@/lib/notifications";
 import { recordAiSuccess, recordAiFailure, readRateLimitHeaders } from "@/lib/ai-health";
 import { notifyUser } from "@/lib/notify";
@@ -212,7 +212,7 @@ export async function deliverAiMessage(messageId: string): Promise<boolean> {
 
   if (reservation.externalId?.startsWith("smoobu-")) {
     try {
-      await sendSmoobuGuestMessage(reservation.property.ownerId, reservation.externalId, message.body);
+      await smoobuProvider.sendGuestMessage(reservation.property.ownerId, reservation.externalId, message.body);
       // Clear a prior failure flag if this (re)send finally got through
       if (message.channelFailed) {
         await prisma.message.update({ where: { id: message.id }, data: { channelFailed: false, channelError: null } });

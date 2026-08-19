@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { getSmoobuRates } from "@/lib/channels/smoobu-core";
+import { smoobuProvider } from "@/lib/channels/smoobu-provider";
 
 // GET /api/pricing/live?propertyId=...&start=YYYY-MM-DD&end=YYYY-MM-DD
 // Read-only mirror of the property's live prices in Smoobu (set by PriceLabs).
@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const rates = await getSmoobuRates(session.user.id, mapping.listingId, start, end);
+    const rates = await smoobuProvider.getRates(session.user.id, mapping.listingId, start, end);
     return NextResponse.json({ connected: true, currency: property.currency, rates });
   } catch (err) {
     return NextResponse.json(

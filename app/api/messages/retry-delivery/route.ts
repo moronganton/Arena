@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { sendSmoobuGuestMessage } from "@/lib/channels/smoobu-core";
+import { smoobuProvider } from "@/lib/channels/smoobu-provider";
 
 // POST { id } — re-attempt delivering an outbound message to the booking
 // channel (Booking.com/Airbnb via Smoobu) after a previous relay failed.
@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    await sendSmoobuGuestMessage(session.user.id, message.reservation.externalId, message.body);
+    await smoobuProvider.sendGuestMessage(session.user.id, message.reservation.externalId, message.body);
     await prisma.message.update({ where: { id }, data: { channelFailed: false, channelError: null } });
     return NextResponse.json({ success: true });
   } catch (err) {

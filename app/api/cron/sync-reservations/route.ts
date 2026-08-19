@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { syncSmoobuBookings } from "@/lib/channels/smoobu";
+import { smoobuProvider } from "@/lib/channels/smoobu-provider";
 
 // Runs syncSmoobuBookings for every connected account on a schedule, instead
 // of relying only on Smoobu's webhook (fires on booking changes) or a host
@@ -57,7 +57,7 @@ async function runSync() {
 
   for (const account of accounts) {
     try {
-      const r = await syncSmoobuBookings(account.userId);
+      const r = await smoobuProvider.syncBookings(account.userId);
       imported += r.imported;
       updated += r.updated;
       cancelled += r.cancelled;

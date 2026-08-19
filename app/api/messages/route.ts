@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { processIncomingMessage } from "@/lib/ai";
 import { sendMessageToGuest } from "@/lib/notifications";
-import { sendSmoobuGuestMessage, syncSmoobuMessagesForReservation } from "@/lib/channels/smoobu-core";
+import { smoobuProvider } from "@/lib/channels/smoobu-provider";
 import { detectLanguage, translateToEnglish } from "@/lib/translate";
 
 export async function GET(req: NextRequest) {
@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
     });
     if (reservation?.externalId?.startsWith("smoobu-")) {
       try {
-        const newIds = await syncSmoobuMessagesForReservation(session!.user!.id!, reservation);
+        const newIds = await smoobuProvider.syncMessagesForReservation(session!.user!.id!, reservation);
         // One reply per message (yesterday's behavior)
         for (const id of newIds) {
           await processIncomingMessage(id);
@@ -161,7 +161,7 @@ export async function POST(req: NextRequest) {
   let channelFailed = false;
   if (reservation.externalId?.startsWith("smoobu-")) {
     try {
-      const sent = await sendSmoobuGuestMessage(
+      const sent = await smoobuProvider.sendGuestMessage(
         session!.user!.id!,
         reservation.externalId,
         messageBody

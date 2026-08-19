@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { syncUserSmoobuMessages } from "@/lib/channels/smoobu";
+import { smoobuProvider } from "@/lib/channels/smoobu-provider";
 
 // Continuously pulls new guest messages from Smoobu for all accounts and runs
 // each through the AI — so replies happen 24/7 without waiting for the host to
@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
   let newMessages = 0;
   for (const account of accounts) {
     try {
-      const r = await syncUserSmoobuMessages(account.userId);
+      const r = await smoobuProvider.syncMessages(account.userId);
       reservationsChecked += r.checked;
       newMessages += r.newMessages;
     } catch (err) {

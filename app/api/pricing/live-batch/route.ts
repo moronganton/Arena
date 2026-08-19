@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { getSmoobuRatesMulti } from "@/lib/channels/smoobu-core";
+import { smoobuProvider } from "@/lib/channels/smoobu-provider";
 
 // GET /api/pricing/live-batch?start=YYYY-MM-DD&end=YYYY-MM-DD
 // Live Smoobu prices for ALL of the host's Smoobu-mapped properties over a date
@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
   for (const m of mappings) currency[m.propertyId] = m.property.currency;
 
   try {
-    const byApt = await getSmoobuRatesMulti(session.user.id, apartmentIds, start, end);
+    const byApt = await smoobuProvider.getRatesMulti(session.user.id, apartmentIds, start, end);
     // Re-key by propertyId, keeping only the price per date (calendar only needs that)
     const prices: Record<string, Record<string, number>> = {};
     for (const [aptId, days] of Object.entries(byApt)) {
