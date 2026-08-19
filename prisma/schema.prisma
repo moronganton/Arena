@@ -277,6 +277,11 @@ model AriOutbox {
   status    String   @default("PENDING") // PENDING | PROCESSING | DONE | FAILED
   attempts  Int      @default(0)
   lastError String?
+  // A failed row is not retried before this - exponential backoff needs
+  // somewhere to record "when", not just "how many times". Null means
+  // eligible immediately (a fresh PENDING row, or a row that has never
+  // failed).
+  nextAttemptAt DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
