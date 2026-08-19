@@ -48,10 +48,11 @@ export async function GET(req: NextRequest) {
       // correct scope, not a per-property webhook that would need
       // re-registering for every future property.
       is_global: true,
-      // Channex's own event-naming convention is unconfirmed - "booking"
-      // is the most likely guess given the resource is literally named
-      // that; a validation error here would name the real ones.
-      event: "booking",
+      // Confirmed via a real 422: the field is `event_mask`, not `event` -
+      // "mask" suggesting an array of event types rather than one string.
+      // Booking-related event names themselves are still unconfirmed
+      // guesses; a validation error would name the real ones.
+      event_mask: ["booking", "booking_new", "booking_modification", "booking_cancellation"],
     },
   };
 
