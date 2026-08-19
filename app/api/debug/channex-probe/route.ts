@@ -30,13 +30,53 @@ function authVariants(key: string): Array<{ label: string; headers: Record<strin
   ];
 }
 
+// The object model to map before writing anything. Channex nests
+// property -> room type -> rate plan, and properties belong to a group, so
+// these are the collections provisioning will have to address.
+const EXPLORE_PATHS = [
+  "/groups",
+  "/properties",
+  "/room_types",
+  "/rate_plans",
+  "/facilities",
+  "/property_types",
+];
+
 export async function GET(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Log in first" }, { status: 401 });
 
   const key = process.env.CHANNEX_API_KEY || "";
   const base = (process.env.CHANNEX_BASE_URL || DEFAULT_BASE).replace(/\/+$/, "");
-  const probePath = new URL(req.url).searchParams.get("path") || "/properties";
+  const { searchParams } = new URL(req.url);
+  const probePath = searchParams.get("path") || "/properties";
+
+  // ?explore=true walks the whole object model in one round trip, using the
+  // auth scheme already proven to work. Still GET-only.
+  if (searchParams.get("explore") === "true") {
+    if (!key) return NextResponse.json({ error: "CHANNEX_API_KEY is not set" }, { status: 400 });
+    const explored = [];
+    for (const p of EXPLORE_PATHS) {
+      const started = Date.now();
+      try {
+        const res = await fetch(`${base}${p}`, {
+          headers: { "user-api-key": key, "Content-Type": "application/json", Accept: "application/json" },
+          cache: "no-store",
+        });
+        const text = await res.text();
+        explored.push({
+          path: p,
+          status: res.status,
+          ok: res.ok,
+          tookMs: Date.now() - started,
+          bodyExcerpt: text.slice(0, 1200),
+        });
+      } catch (err) {
+        explored.push({ path: p, status: null, ok: false, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    return NextResponse.json({ mode: "explore (GET only)", baseUrlInUse: base, explored });
+  }
 
   if (!key) {
     return NextResponse.json({
