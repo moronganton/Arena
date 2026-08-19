@@ -73,13 +73,16 @@ async function request<T>(method: string, path: string, bodyObj?: unknown): Prom
   if (!res.ok) {
     const errors = (parsed as { errors?: { code?: string; title?: string; details?: unknown } } | null)?.errors;
     const title = errors?.title || `Channex API error ${res.status}`;
+    // A "bad_request" (as opposed to "validation_error") has been observed
+    // with no `details` field at all - losing the raw body then meant the
+    // real reason ("bad_request") told us nothing actionable. Always fall
+    // back to the full parsed body (or raw text if it wasn't JSON) so
+    // nothing Channex actually sent is ever silently dropped.
     throw new ChannexError(
       `${title}${errors?.code ? ` (${errors.code})` : ""}`,
       res.status,
       errors?.code,
-      // Validation failures put the per-field reasons here; keep them, since
-      // they are what makes a 422 actionable.
-      errors?.details ?? (parsed === null ? text.slice(0, 300) : undefined)
+      errors?.details ?? parsed ?? text.slice(0, 500)
     );
   }
 

@@ -45,7 +45,12 @@ export async function GET(req: NextRequest) {
     ],
   };
 
-  const apply = new URL(req.url).searchParams.get("apply") === "true";
+  const url = new URL(req.url);
+  const apply = url.searchParams.get("apply") === "true";
+  // The write is already confirmed working (POST /restrictions returns a
+  // task). Skip re-sending it while iterating on the readback shape alone,
+  // so retries don't pile up redundant tasks on Channex's side.
+  const skipWrite = url.searchParams.get("skipWrite") === "true";
   if (!apply) {
     return NextResponse.json({
       mode: "dry run - nothing sent to Channex",
@@ -58,21 +63,25 @@ export async function GET(req: NextRequest) {
 
   const attempts: unknown[] = [];
 
-  try {
-    const res = await channexPost("/restrictions", candidatePayload);
-    attempts.push({ endpoint: "POST /restrictions", payload: candidatePayload, status: "ok", response: res.data });
-  } catch (err) {
-    const e = err as ChannexError;
-    attempts.push({
-      endpoint: "POST /restrictions",
-      payload: candidatePayload,
-      status: "failed",
-      error: { message: e.message, status: e.status, code: e.code, details: e.details },
-    });
+  if (skipWrite) {
+    attempts.push({ endpoint: "POST /restrictions", status: "skipped", note: "skipWrite=true - assuming an earlier apply already wrote this date" });
+  } else {
+    try {
+      const res = await channexPost("/restrictions", candidatePayload);
+      attempts.push({ endpoint: "POST /restrictions", payload: candidatePayload, status: "ok", response: res.data });
+    } catch (err) {
+      const e = err as ChannexError;
+      attempts.push({
+        endpoint: "POST /restrictions",
+        payload: candidatePayload,
+        status: "failed",
+        error: { message: e.message, status: e.status, code: e.code, details: e.details },
+      });
+    }
   }
 
   const first = attempts[0] as { status: string; response?: unknown };
-  const wroteOk = first.status === "ok";
+  const wroteOk = skipWrite || first.status === "ok";
 
   // The write returned { id, type: "task" } rather than applying inline -
   // Channex processes restriction updates asynchronously. Check the task's
@@ -96,13 +105,22 @@ export async function GET(req: NextRequest) {
   }
 
   // Multiple candidate read-back shapes, since neither the path nor the
-  // query param style is confirmed. Stops at the first one that succeeds.
+  // query param style is confirmed. The first round's "bad_request" (no
+  // field-level detail) meant the params were wrong but not how - these add
+  // bracket-array param styles (the shape smoobu-core.ts's /rates needed)
+  // and an explicit rate_plan_id, in case a required param was simply
+  // missing rather than misnamed.
   let readback: unknown = null;
   if (wroteOk) {
+    const p = listing.channexPropertyId;
+    const rt = listing.channexRoomTypeId;
+    const rp = listing.channexRatePlanId;
     const candidates = [
-      `/restrictions?property_id=${listing.channexPropertyId}&room_type_id=${listing.channexRoomTypeId}&date_from=${PROBE_DATE}&date_to=${PROBE_DATE}`,
-      `/availability?property_id=${listing.channexPropertyId}&room_type_id=${listing.channexRoomTypeId}&date_from=${PROBE_DATE}&date_to=${PROBE_DATE}`,
-      `/restrictions/${listing.channexPropertyId}?date_from=${PROBE_DATE}&date_to=${PROBE_DATE}`,
+      `/restrictions?property_id=${p}&room_type_id=${rt}&date_from=${PROBE_DATE}&date_to=${PROBE_DATE}`,
+      `/availability?property_id=${p}&room_type_id=${rt}&date_from=${PROBE_DATE}&date_to=${PROBE_DATE}`,
+      `/restrictions/${p}?date_from=${PROBE_DATE}&date_to=${PROBE_DATE}`,
+      `/restrictions?property_id=${p}&room_type_ids%5B%5D=${rt}&rate_plan_ids%5B%5D=${rp}&date_from=${PROBE_DATE}&date_to=${PROBE_DATE}`,
+      `/availability?property_id=${p}&room_type_ids%5B%5D=${rt}&date_from=${PROBE_DATE}&date_to=${PROBE_DATE}`,
     ];
     const tried: unknown[] = [];
     for (const path of candidates) {
@@ -111,7 +129,7 @@ export async function GET(req: NextRequest) {
         tried.push({ path, status: "ok", response: res.data });
       } catch (err) {
         const e = err as ChannexError;
-        tried.push({ path, status: "failed", error: { message: e.message, status: e.status, code: e.code } });
+        tried.push({ path, status: "failed", error: { message: e.message, status: e.status, code: e.code, details: e.details } });
       }
     }
     readback = tried;
