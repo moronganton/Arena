@@ -117,11 +117,14 @@ export async function GET(req: NextRequest) {
     const rt = listing.channexRoomTypeId;
     const rp = listing.channexRatePlanId;
     const candidates = [
-      `/restrictions?filter%5Bproperty_id%5D=${p}&filter%5Broom_type_id%5D=${rt}&filter%5Bdate_from%5D=${PROBE_DATE}&filter%5Bdate_to%5D=${PROBE_DATE}`,
-      `/availability?filter%5Bproperty_id%5D=${p}&filter%5Broom_type_id%5D=${rt}&filter%5Bdate_from%5D=${PROBE_DATE}&filter%5Bdate_to%5D=${PROBE_DATE}`,
-      `/restrictions?filter%5Bproperty_id%5D=${p}&filter%5Broom_type_ids%5D%5B%5D=${rt}&filter%5Bdate_from%5D=${PROBE_DATE}&filter%5Bdate_to%5D=${PROBE_DATE}`,
-      `/restrictions?filter%5Bproperty_id%5D=${p}&filter%5Brate_plan_id%5D=${rp}&filter%5Bdate_from%5D=${PROBE_DATE}&filter%5Bdate_to%5D=${PROBE_DATE}`,
-      `/restrictions?filter%5Bproperty_id%5D=${p}&filter%5Broom_type_id%5D=${rt}&filter%5Bdate%5D%5Bfrom%5D=${PROBE_DATE}&filter%5Bdate%5D%5Bto%5D=${PROBE_DATE}`,
+      // "date is required" (not date_from/date_to) on the previous round -
+      // singular `date`, suggesting this reads one date at a time.
+      `/restrictions?filter%5Bproperty_id%5D=${p}&filter%5Broom_type_id%5D=${rt}&filter%5Bdate%5D=${PROBE_DATE}`,
+      `/availability?filter%5Bproperty_id%5D=${p}&filter%5Broom_type_id%5D=${rt}&filter%5Bdate%5D=${PROBE_DATE}`,
+      `/restrictions?filter%5Bproperty_id%5D=${p}&filter%5Brate_plan_id%5D=${rp}&filter%5Bdate%5D=${PROBE_DATE}`,
+      `/restrictions?filter%5Bproperty_id%5D=${p}&filter%5Broom_type_ids%5D%5B%5D=${rt}&filter%5Bdate%5D=${PROBE_DATE}`,
+      // In case it wants a range AND a single date together.
+      `/restrictions?filter%5Bproperty_id%5D=${p}&filter%5Broom_type_id%5D=${rt}&filter%5Bdate%5D=${PROBE_DATE}&filter%5Bdate_from%5D=${PROBE_DATE}&filter%5Bdate_to%5D=${PROBE_DATE}`,
     ];
     const tried: unknown[] = [];
     for (const path of candidates) {
