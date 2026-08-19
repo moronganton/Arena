@@ -80,6 +80,36 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // Availability write+readback is now confirmed working end to end. Rate is
+  // a separate kind AriOutbox needs to push - test it the same way, on a
+  // date one day over so it can't collide with the availability write above.
+  const RATE_PROBE_DATE = "2027-06-16";
+  const ratePayload = {
+    values: [
+      {
+        property_id: listing.channexPropertyId,
+        room_type_id: listing.channexRoomTypeId,
+        rate_plan_id: listing.channexRatePlanId,
+        date: RATE_PROBE_DATE,
+        rate: 55,
+      },
+    ],
+  };
+  if (!skipWrite) {
+    try {
+      const res = await channexPost("/restrictions", ratePayload);
+      attempts.push({ endpoint: "POST /restrictions (rate)", payload: ratePayload, status: "ok", response: res.data });
+    } catch (err) {
+      const e = err as ChannexError;
+      attempts.push({
+        endpoint: "POST /restrictions (rate)",
+        payload: ratePayload,
+        status: "failed",
+        error: { message: e.message, status: e.status, code: e.code, details: e.details },
+      });
+    }
+  }
+
   const first = attempts[0] as { status: string; response?: unknown };
   const wroteOk = skipWrite || first.status === "ok";
 
@@ -104,27 +134,24 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // Multiple candidate read-back shapes. Round 1 (flat query params) came
-  // back "filter can't be blank" once the error-swallowing bug was fixed -
-  // a real, actionable reason: Channex expects a top-level `filter` param,
-  // not flat ones. Combined with the {data,meta} envelope and {id,type}
-  // resource shapes seen throughout, this API reads as JSON:API-flavoured,
-  // where filters conventionally go through filter[key]=value bracket
-  // notation. These candidates test that theory in a few plausible shapes.
+  // Availability readback CONFIRMED working:
+  //   GET /availability?filter[property_id]=&filter[room_type_id]=&filter[date]=
+  //   -> { [room_type_id]: { [date]: availabilityValue } }
+  // Kept as the first candidate below (now a confirmation re-check rather
+  // than exploration), alongside new candidates for the rate write and for
+  // /restrictions, which separately demanded "restrictions is required" -
+  // apparently needs filter[restrictions][]=<field name> to say which
+  // restriction fields to return.
   let readback: unknown = null;
   if (wroteOk) {
     const p = listing.channexPropertyId;
     const rt = listing.channexRoomTypeId;
     const rp = listing.channexRatePlanId;
     const candidates = [
-      // "date is required" (not date_from/date_to) on the previous round -
-      // singular `date`, suggesting this reads one date at a time.
-      `/restrictions?filter%5Bproperty_id%5D=${p}&filter%5Broom_type_id%5D=${rt}&filter%5Bdate%5D=${PROBE_DATE}`,
       `/availability?filter%5Bproperty_id%5D=${p}&filter%5Broom_type_id%5D=${rt}&filter%5Bdate%5D=${PROBE_DATE}`,
-      `/restrictions?filter%5Bproperty_id%5D=${p}&filter%5Brate_plan_id%5D=${rp}&filter%5Bdate%5D=${PROBE_DATE}`,
-      `/restrictions?filter%5Bproperty_id%5D=${p}&filter%5Broom_type_ids%5D%5B%5D=${rt}&filter%5Bdate%5D=${PROBE_DATE}`,
-      // In case it wants a range AND a single date together.
-      `/restrictions?filter%5Bproperty_id%5D=${p}&filter%5Broom_type_id%5D=${rt}&filter%5Bdate%5D=${PROBE_DATE}&filter%5Bdate_from%5D=${PROBE_DATE}&filter%5Bdate_to%5D=${PROBE_DATE}`,
+      `/availability?filter%5Bproperty_id%5D=${p}&filter%5Broom_type_id%5D=${rt}&filter%5Bdate%5D=${RATE_PROBE_DATE}`,
+      `/restrictions?filter%5Bproperty_id%5D=${p}&filter%5Broom_type_id%5D=${rt}&filter%5Brate_plan_id%5D=${rp}&filter%5Bdate%5D=${RATE_PROBE_DATE}&filter%5Brestrictions%5D%5B%5D=rate`,
+      `/restrictions?filter%5Bproperty_id%5D=${p}&filter%5Broom_type_id%5D=${rt}&filter%5Brate_plan_id%5D=${rp}&filter%5Bdate%5D=${RATE_PROBE_DATE}&filter%5Brestrictions%5D%5B%5D=rate&filter%5Brestrictions%5D%5B%5D=min_stay_arrival&filter%5Brestrictions%5D%5B%5D=stop_sell`,
     ];
     const tried: unknown[] = [];
     for (const path of candidates) {
