@@ -1,0 +1,33 @@
+name: CI
+
+# Runs on every push and pull request, on every branch — this is the
+# automated check that a change to shared code (like the Channex provider
+# refactor) hasn't silently broken the live Smoobu path, before it can
+# reach main and deploy.
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npx prisma generate
+
+      - name: Type check
+        run: npx tsc --noEmit -p .
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
