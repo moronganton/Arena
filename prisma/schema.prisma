@@ -213,6 +213,13 @@ model Property {
   // host run the assistant for some properties and handle others by hand,
   // without turning it off account-wide.
   aiEnabled   Boolean  @default(true)
+  // Which channel manager owns this property's OTA connectivity. Two
+  // managers must never own the same listing at once - Smoobu and Channex
+  // would fight over availability and could cause an overbooking - so this
+  // is exclusive. It's what lets properties migrate to Channex one at a
+  // time instead of all at once. Every existing property defaults to
+  // SMOOBU, matching how they're actually connected today.
+  channelProvider String @default("SMOOBU") // SMOOBU | CHANNEX | NONE
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -232,8 +239,23 @@ model Property {
   perReservationCosts PerReservationCost[]
   knowledge     PropertyKnowledge[]
   messageTemplates MessageTemplate[]
+  channexListing ChannexListing?
 
   @@index([ownerId])
+}
+
+// Channex models a property as three nested objects (property -> room type
+// -> rate plan). Stored per StayHQ property so ARI pushes and the messaging
+// integration know what to address on Channex's side.
+model ChannexListing {
+  id                String   @id @default(cuid())
+  channexPropertyId String
+  channexRoomTypeId String
+  channexRatePlanId String
+  createdAt         DateTime @default(now())
+
+  propertyId String   @unique
+  property   Property @relation(fields: [propertyId], references: [id])
 }
 
 // Per-property knowledge base entries — the AI assistant answers guest
