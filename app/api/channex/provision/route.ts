@@ -23,6 +23,19 @@ import { channexGet, channexPost, channexConfigured, ChannexError } from "@/lib/
 // sandbox can't reach channex.io to confirm required fields ahead of time,
 // so a 422 here is expected to be informative rather than fatal.
 
+// Only the countries actually in use need to be here - anything else fails
+// with a clear message and a ?countryCode= override instead of guessing.
+const COUNTRY_TO_ISO2: Record<string, string> = {
+  Romania: "RO",
+  "Czech Republic": "CZ",
+  Czechia: "CZ",
+  Slovakia: "SK",
+  Hungary: "HU",
+  Poland: "PL",
+  Austria: "AT",
+  Germany: "DE",
+};
+
 interface StepResult {
   step: string;
   path: string;
@@ -98,12 +111,28 @@ export async function GET(req: NextRequest) {
   const lat = searchParams.get("lat") || "48.1486";
   const lng = searchParams.get("lng") || "17.1077";
 
+  // StayHQ stores the country as a free-text name ("Romania"); Channex
+  // requires ISO 3166-1 alpha-2 ("RO") - confirmed by a real 422 here
+  // ("country should be at most 2 character(s)"). Resolved rather than
+  // guessed: an unmapped name fails with a clear message instead of sending
+  // Channex something silently wrong.
+  const countryCode = searchParams.get("countryCode") || COUNTRY_TO_ISO2[property.country.trim()];
+  if (!countryCode) {
+    return NextResponse.json(
+      {
+        error: `No ISO 3166-1 alpha-2 code known for country "${property.country}"`,
+        hint: "Pass ?countryCode=XX (e.g. RO) to override, or add it to COUNTRY_TO_ISO2 in this route.",
+      },
+      { status: 400 }
+    );
+  }
+
   const propertyPayload = {
     property: {
       title: property.name,
       currency: property.currency,
       email: session.user.email ?? undefined,
-      country: property.country,
+      country: countryCode,
       city: property.city,
       address: property.address,
       zip_code: searchParams.get("zip") || "00000",
