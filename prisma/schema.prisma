@@ -240,6 +240,7 @@ model Property {
   knowledge     PropertyKnowledge[]
   messageTemplates MessageTemplate[]
   channexListing ChannexListing?
+  ariOutbox      AriOutbox[]
 
   @@index([ownerId])
 }
@@ -256,6 +257,34 @@ model ChannexListing {
 
   propertyId String   @unique
   property   Property @relation(fields: [propertyId], references: [id])
+}
+
+// One row queued per date range that needs pushing to Channex. Never call
+// Channex inline on save - reservation changes, CalendarBlock edits, and
+// PricingRule/basePrice edits all enqueue here instead, and a worker drains
+// the queue in batches. This is what lets a burst of edits coalesce into a
+// handful of calls instead of one per change, and what keeps a slow or
+// failing Channex call from blocking the request that triggered it.
+//
+// Only ever written for properties with channelProvider = CHANNEX - with
+// Smoobu, availability/prices flow in, not out, so this table stays empty
+// for every property until one actually migrates.
+model AriOutbox {
+  id        String   @id @default(cuid())
+  dateFrom  DateTime
+  dateTo    DateTime
+  kind      String   // AVAILABILITY | RATE | RESTRICTION
+  status    String   @default("PENDING") // PENDING | PROCESSING | DONE | FAILED
+  attempts  Int      @default(0)
+  lastError String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id])
+
+  @@index([propertyId, status])
+  @@index([status, createdAt])
 }
 
 // Per-property knowledge base entries — the AI assistant answers guest
