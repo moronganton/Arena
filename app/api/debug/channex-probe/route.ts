@@ -40,6 +40,12 @@ const EXPLORE_PATHS = [
   "/rate_plans",
   "/facilities",
   "/property_types",
+  // Step 6 (booking intake) discovery.
+  "/bookings",
+  "/webhooks",
+  "/webhook_settings",
+  "/revision",
+  "/revisions",
 ];
 
 export async function GET(req: NextRequest) {
