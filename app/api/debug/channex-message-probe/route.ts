@@ -14,7 +14,14 @@ import { channexGet, channexPost, ChannexError } from "@/lib/channels/channex-co
 //
 //   GET /api/debug/channex-message-probe                 -> dry run, shows the thread + candidate payload
 //   GET /api/debug/channex-message-probe?send=true         -> actually sends a test message
-const JORGE_SANCHEZ_BOOKING_ID = "e7b956c4-c89a-4627-8dd7-333f812032d3";
+//
+// Uses the thread id confirmed earlier via /message_threads and
+// /message_threads/{id}/messages directly, rather than re-deriving it from
+// the list - that list is sorted by last_message_received_at with a default
+// page size of 10, so on a shared sandbox account other testers' activity
+// can push this thread off page 1 between requests (confirmed: a first
+// attempt at re-deriving it that way came back "not found").
+const JORGE_SANCHEZ_THREAD_ID = "ed43fea2-4562-4ff1-b9c6-c5d6f68724f3";
 
 export async function GET(req: NextRequest) {
   const session = await auth();
@@ -24,13 +31,11 @@ export async function GET(req: NextRequest) {
 
   let thread: { id: string; attributes: Record<string, unknown> } | null = null;
   try {
-    const res = await channexGet<Array<{ id: string; attributes: Record<string, unknown>; relationships?: { booking?: { data?: { id: string } } } }>>(
-      "/message_threads"
-    );
-    thread = (res.data ?? []).find((t) => t.relationships?.booking?.data?.id === JORGE_SANCHEZ_BOOKING_ID) ?? null;
+    const res = await channexGet<{ id: string; attributes: Record<string, unknown> }>(`/message_threads/${JORGE_SANCHEZ_THREAD_ID}`);
+    thread = res.data ?? null;
   } catch (err) {
     const e = err as ChannexError;
-    return NextResponse.json({ error: "Failed to list message_threads", message: e.message, status: e.status }, { status: 500 });
+    return NextResponse.json({ error: "Failed to fetch the known message thread", message: e.message, status: e.status }, { status: 500 });
   }
 
   if (!thread) {
