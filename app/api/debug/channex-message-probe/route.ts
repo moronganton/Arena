@@ -1,52 +1,94 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireDebugAccess } from "@/lib/debug-auth";
-import { fetchBookingMessages, sendBookingMessage } from "@/lib/channels/channex-messages";
+import { prisma } from "@/lib/prisma";
 import { ChannexError } from "@/lib/channels/channex-core";
+import {
+  channexBookingIdFromExternalId,
+  fetchBookingMessages,
+  sendBookingMessage,
+} from "@/lib/channels/channex-messages";
 
-// Tests the real, docs-confirmed booking-level messaging endpoint directly:
-// GET/POST /bookings/:booking_id/messages. Deliberately booking-scoped, not
-// thread-scoped - the message THREAD found earlier expired within minutes on
-// this shared sandbox account, but the underlying BOOKING is still real (it's
-// a live Reservation in our own database), so this sidesteps that volatility
-// entirely.
+// Exercises the outbound half of guest messaging: POST to a booking's message
+// thread, then read the thread back to confirm the message landed with
+// sender "property".
 //
-//   GET /api/debug/channex-message-probe          -> dry run, reads existing messages
-//   GET /api/debug/channex-message-probe?send=true -> also sends a test message
-const JORGE_SANCHEZ_BOOKING_ID = "e7b956c4-c89a-4627-8dd7-333f812032d3";
-
+// Uses the same fetchBookingMessages/sendBookingMessage the production path
+// uses, so a pass here is evidence about the real code rather than about a
+// one-off probe. Booking-scoped rather than thread-scoped because thread ids
+// on the shared sandbox are short-lived - an earlier version of this probe
+// pinned one and started returning 404 once it was purged.
+//
+//   GET /api/debug/channex-message-probe
+//       -> lists reservations with a resolvable Channex booking id
+//   GET /api/debug/channex-message-probe?reservationId=<id>
+//       -> reads that booking's thread, sends nothing
+//   GET /api/debug/channex-message-probe?reservationId=<id>&send=true[&text=...]
+//       -> sends, then reads the thread back
 export async function GET(req: NextRequest) {
   const access = await requireDebugAccess(req);
   if (!access.ok) return access.response;
+  const userId = access.userId;
 
-  const send = new URL(req.url).searchParams.get("send") === "true";
+  const { searchParams } = new URL(req.url);
+  const reservationId = searchParams.get("reservationId");
+  const send = searchParams.get("send") === "true";
+  const text = searchParams.get("text") || "Hello from StayHQ - this is an automated connectivity test, no reply needed.";
 
-  let existingMessages: unknown;
-  try {
-    existingMessages = await fetchBookingMessages(JORGE_SANCHEZ_BOOKING_ID);
-  } catch (err) {
-    const e = err as ChannexError;
-    return NextResponse.json({ error: "Failed to read messages", message: e.message, status: e.status }, { status: 500 });
-  }
-
-  if (!send) {
+  if (!reservationId) {
+    const rows = await prisma.reservation.findMany({
+      where: { externalId: { startsWith: "channex-" }, property: { ownerId: userId } },
+      include: { guest: { select: { name: true } } },
+      orderBy: { checkIn: "asc" },
+    });
     return NextResponse.json({
-      mode: "dry run - nothing sent to Channex",
-      bookingId: JORGE_SANCHEZ_BOOKING_ID,
-      existingMessages,
-      nextStep: "Add ?send=true to actually send a test message.",
+      hint: "Pass ?reservationId=<id>, then &send=true to post a message.",
+      reservations: rows.map((r) => ({
+        reservationId: r.id,
+        guest: r.guest.name,
+        checkIn: r.checkIn,
+        channexBookingId: channexBookingIdFromExternalId(r.externalId ?? ""),
+      })),
     });
   }
 
+  const reservation = await prisma.reservation.findFirst({
+    where: { id: reservationId, property: { ownerId: userId } },
+    include: { guest: { select: { name: true } } },
+  });
+  if (!reservation) return NextResponse.json({ error: "Reservation not found" }, { status: 404 });
+
+  const bookingId = channexBookingIdFromExternalId(reservation.externalId ?? "");
+  if (!bookingId) {
+    return NextResponse.json({ error: "That reservation has no Channex booking id" }, { status: 400 });
+  }
+
+  const result: Record<string, unknown> = { guest: reservation.guest.name, bookingId };
+
+  if (send) {
+    try {
+      const sent = await sendBookingMessage(bookingId, text);
+      result.send = { status: "ok", text, response: sent };
+    } catch (err) {
+      const e = err as ChannexError;
+      result.send = { status: "failed", text, error: { message: e.message, status: e.status, code: e.code, details: e.details } };
+    }
+  } else {
+    result.send = "skipped - add &send=true to actually post";
+  }
+
+  // Read back regardless: on a send this proves the message landed, and on a
+  // dry run it shows what the thread already holds.
   try {
-    const sent = await sendBookingMessage(JORGE_SANCHEZ_BOOKING_ID, `StayHQ test message ${new Date().toISOString()}`);
-    return NextResponse.json({ status: "ok", bookingId: JORGE_SANCHEZ_BOOKING_ID, sent, existingMessages });
+    const messages = await fetchBookingMessages(bookingId);
+    result.thread = messages.map((m) => ({
+      sender: m.attributes.sender,
+      message: m.attributes.message?.slice(0, 200),
+      inserted_at: m.attributes.inserted_at,
+    }));
   } catch (err) {
     const e = err as ChannexError;
-    return NextResponse.json({
-      status: "failed",
-      bookingId: JORGE_SANCHEZ_BOOKING_ID,
-      error: { message: e.message, status: e.status, code: e.code, details: e.details },
-      existingMessages,
-    });
+    result.thread = { error: e.message, status: e.status, code: e.code };
   }
+
+  return NextResponse.json(result);
 }

@@ -364,15 +364,41 @@ async function processIncomingMessagesImpl(messageIds: string[]): Promise<void> 
   const reservation = messages[0].reservation;
   console.log(`[ai] processing ${messages.length} inbound message(s): ${messageIds.join(",")}`);
 
+  // The assistant being switched off means "don't answer for me" - it does not
+  // mean "don't tell me a guest wrote in". Both off-switches below still flag
+  // the message and notify the host, exactly like every other path where the
+  // AI stands down (low confidence, generation failure, unexpected error).
+  // Without this a guest question lands in StayHQ completely silently, which is
+  // how seven real messages - including a check-in time request - sat unseen.
+  async function handOverToHost(reason: string): Promise<void> {
+    console.log(`[ai] messages ${messageIds.join(",")}: ${reason} - handing to host`);
+    await prisma.message.updateMany({ where: { id: { in: messageIds } }, data: { needsHostReply: true } });
+    const guestPreview = messages
+      .map((m) => m.body)
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 140);
+    await notifyUser(reservation.property.ownerId, {
+      type: "guest_reply",
+      title:
+        messages.length > 1
+          ? `${reservation.guest.name} sent ${messages.length} messages - needs a reply`
+          : `${reservation.guest.name} needs a reply`,
+      body: guestPreview,
+      link: `/messages?reservationId=${reservation.id}`,
+    });
+  }
+
   const aiSettings = await prisma.aiSettings.findFirst({
     where: { userId: reservation.property.ownerId, enabled: true },
   });
   if (!aiSettings) {
-    console.log(`[ai] skipped messages ${messageIds.join(",")}: AI assistant disabled`);
+    await handOverToHost("AI assistant disabled");
     return;
   }
   if (!reservation.property.aiEnabled) {
-    console.log(`[ai] skipped messages ${messageIds.join(",")}: AI assistant disabled for property "${reservation.property.name}"`);
+    await handOverToHost(`AI assistant disabled for property "${reservation.property.name}"`);
     return;
   }
 
