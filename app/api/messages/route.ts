@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { processIncomingMessage } from "@/lib/ai";
 import { sendMessageToGuest } from "@/lib/notifications";
 import { smoobuProvider } from "@/lib/channels/smoobu-provider";
+import { relayMessageToChannel } from "@/lib/channels/relay";
 import { detectLanguage, translateToEnglish } from "@/lib/translate";
 
 export async function GET(req: NextRequest) {
@@ -155,28 +156,30 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // If the booking came through Smoobu, also relay the message through the
-  // booking channel (Booking.com / Airbnb inbox) so the guest sees it there.
+  // Relay to whichever channel the booking came from (Booking.com / Airbnb
+  // inbox via Smoobu or Channex), so the guest sees the reply where they
+  // wrote. Channex bookings carry no guest email, so for those this is the
+  // only way the reply reaches anyone.
   let channelRelay: string | null = null;
   let channelFailed = false;
-  if (reservation.externalId?.startsWith("smoobu-")) {
-    try {
-      const sent = await smoobuProvider.sendGuestMessage(
-        session!.user!.id!,
-        reservation.externalId,
-        messageBody
-      );
-      channelRelay = sent ? "sent" : "skipped";
-    } catch (err) {
-      console.error("Failed to relay message via Smoobu:", err);
-      channelRelay = "failed";
-      channelFailed = true;
-      // Persist so the thread shows a "not delivered — retry" affordance
-      await prisma.message.update({
-        where: { id: message.id },
-        data: { channelFailed: true, channelError: (err instanceof Error ? err.message : String(err)).slice(0, 300) },
-      });
-    }
+  const relay = await relayMessageToChannel(
+    { externalId: reservation.externalId, ownerId: session!.user!.id! },
+    messageBody
+  );
+  if (relay.status === "sent") {
+    channelRelay = "sent";
+  } else if (relay.status === "skipped") {
+    channelRelay = "skipped";
+    console.log(`[messages] relay skipped for reservation ${reservationId}: ${relay.reason}`);
+  } else {
+    console.error(`[messages] ${relay.provider} relay failed:`, relay.error);
+    channelRelay = "failed";
+    channelFailed = true;
+    // Persist so the thread shows a "not delivered - retry" affordance
+    await prisma.message.update({
+      where: { id: message.id },
+      data: { channelFailed: true, channelError: relay.error.slice(0, 300) },
+    });
   }
 
   return NextResponse.json({ ...message, channelRelay, channelFailed, knowledgeSaved }, { status: 201 });

@@ -1,7 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { prisma } from "@/lib/prisma";
-import { smoobuProvider } from "@/lib/channels/smoobu-provider";
-import { channexBookingIdFromExternalId, sendBookingMessage } from "@/lib/channels/channex-messages";
+import { relayMessageToChannel } from "@/lib/channels/relay";
 import { sendMessageToGuest } from "@/lib/notifications";
 import { recordAiSuccess, recordAiFailure, readRateLimitHeaders } from "@/lib/ai-health";
 import { notifyUser } from "@/lib/notify";
@@ -211,66 +210,33 @@ export async function deliverAiMessage(messageId: string): Promise<boolean> {
   const { reservation } = message;
   let channelOk = true;
 
-  if (reservation.externalId?.startsWith("smoobu-")) {
-    try {
-      await smoobuProvider.sendGuestMessage(reservation.property.ownerId, reservation.externalId, message.body);
-      // Clear a prior failure flag if this (re)send finally got through
-      if (message.channelFailed) {
-        await prisma.message.update({ where: { id: message.id }, data: { channelFailed: false, channelError: null } });
-      }
-    } catch (err) {
-      channelOk = false;
-      console.error("[ai] channel relay failed:", err);
-      // Surface it: the message looks sent in StayHQ but never reached the guest
-      await prisma.message.update({
-        where: { id: message.id },
-        data: { channelFailed: true, channelError: (err instanceof Error ? err.message : String(err)).slice(0, 300) },
-      });
-      await notifyUser(reservation.property.ownerId, {
-        type: "delivery_failed",
-        title: "Reply didn't reach the guest",
-        body: `Your AI reply to ${reservation.guest.name} (${reservation.property.name}) failed to send. Open the thread to retry.`,
-        link: `/messages?reservationId=${reservation.id}`,
-      });
+  // One shared relay for every channel - see lib/channels/relay.ts for why
+  // this must not be hand-copied per call site again.
+  const relay = await relayMessageToChannel(
+    { externalId: reservation.externalId, ownerId: reservation.property.ownerId },
+    message.body
+  );
+  if (relay.status === "sent") {
+    // Clear a prior failure flag if this (re)send finally got through
+    if (message.channelFailed) {
+      await prisma.message.update({ where: { id: message.id }, data: { channelFailed: false, channelError: null } });
     }
-  } else if (reservation.externalId?.startsWith("channex-")) {
-    const bookingId = channexBookingIdFromExternalId(reservation.externalId);
-    if (bookingId) {
-      try {
-        await sendBookingMessage(bookingId, message.body);
-        if (message.channelFailed) {
-          await prisma.message.update({ where: { id: message.id }, data: { channelFailed: false, channelError: null } });
-        }
-      } catch (err) {
-        const channexErr = err as { status?: number; code?: string };
-        // 422 not_supported is not a delivery failure. It means this
-        // booking's OTA has no message API at all (Channex documents it as
-        // exactly that), so no retry will ever succeed and there is nothing
-        // for the host to act on. Telling them "your reply didn't reach the
-        // guest" would be both alarming and unactionable, and would fire on
-        // EVERY message for such a channel. The email path below still runs,
-        // which is the real delivery route in this case.
-        const otaHasNoMessaging = channexErr.status === 422 && channexErr.code === "not_supported";
-        if (otaHasNoMessaging) {
-          console.log(
-            `[ai] Channex relay skipped for reservation ${reservation.id}: this booking's OTA does not support messaging`
-          );
-        } else {
-          channelOk = false;
-          console.error("[ai] Channex relay failed:", err);
-          await prisma.message.update({
-            where: { id: message.id },
-            data: { channelFailed: true, channelError: (err instanceof Error ? err.message : String(err)).slice(0, 300) },
-          });
-          await notifyUser(reservation.property.ownerId, {
-            type: "delivery_failed",
-            title: "Reply didn't reach the guest",
-            body: `Your AI reply to ${reservation.guest.name} (${reservation.property.name}) failed to send. Open the thread to retry.`,
-            link: `/messages?reservationId=${reservation.id}`,
-          });
-        }
-      }
-    }
+  } else if (relay.status === "skipped") {
+    console.log(`[ai] channel relay skipped for reservation ${reservation.id}: ${relay.reason}`);
+  } else {
+    channelOk = false;
+    console.error(`[ai] ${relay.provider} relay failed:`, relay.error);
+    // Surface it: the message looks sent in StayHQ but never reached the guest
+    await prisma.message.update({
+      where: { id: message.id },
+      data: { channelFailed: true, channelError: relay.error.slice(0, 300) },
+    });
+    await notifyUser(reservation.property.ownerId, {
+      type: "delivery_failed",
+      title: "Reply didn't reach the guest",
+      body: `Your AI reply to ${reservation.guest.name} (${reservation.property.name}) failed to send. Open the thread to retry.`,
+      link: `/messages?reservationId=${reservation.id}`,
+    });
   }
   if (reservation.guest.email) {
     try {

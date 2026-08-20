@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { smoobuProvider } from "@/lib/channels/smoobu-provider";
+import { relayMessageToChannel } from "@/lib/channels/relay";
 
-// POST { id } — re-attempt delivering an outbound message to the booking
-// channel (Booking.com/Airbnb via Smoobu) after a previous relay failed.
+// POST { id } - re-attempt delivering an outbound message to the booking
+// channel (Booking.com / Airbnb, via Smoobu or Channex) after a previous relay
+// failed. Goes through the shared relay so it covers every channel; it
+// previously accepted Smoobu bookings only and rejected everything else as
+// "not linked to a booking channel".
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -16,18 +19,24 @@ export async function POST(req: NextRequest) {
   });
   if (!message) return NextResponse.json({ error: "Message not found" }, { status: 404 });
 
-  if (!message.reservation.externalId?.startsWith("smoobu-")) {
-    return NextResponse.json({ error: "This reservation is not linked to a booking channel" }, { status: 400 });
+  const relay = await relayMessageToChannel(
+    { externalId: message.reservation.externalId, ownerId: session.user.id },
+    message.body
+  );
+
+  if (relay.status === "sent") {
+    await prisma.message.update({ where: { id }, data: { channelFailed: false, channelError: null } });
+    return NextResponse.json({ success: true, provider: relay.provider });
   }
 
-  try {
-    await smoobuProvider.sendGuestMessage(session.user.id, message.reservation.externalId, message.body);
+  if (relay.status === "skipped") {
+    // Nothing to retry against, and no amount of retrying will change that -
+    // clear the failure flag rather than leaving a permanently red message.
     await prisma.message.update({ where: { id }, data: { channelFailed: false, channelError: null } });
-    return NextResponse.json({ success: true });
-  } catch (err) {
-    console.error("[retry-delivery] failed:", err);
-    const msg = err instanceof Error ? err.message : String(err);
-    await prisma.message.update({ where: { id }, data: { channelFailed: true, channelError: msg.slice(0, 300) } });
-    return NextResponse.json({ error: msg }, { status: 502 });
+    return NextResponse.json({ success: false, skipped: relay.reason });
   }
+
+  console.error(`[retry-delivery] ${relay.provider} failed:`, relay.error);
+  await prisma.message.update({ where: { id }, data: { channelFailed: true, channelError: relay.error.slice(0, 300) } });
+  return NextResponse.json({ error: relay.error }, { status: 502 });
 }

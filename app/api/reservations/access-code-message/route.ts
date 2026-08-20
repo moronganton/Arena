@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { sendAccessCodeEmail } from "@/lib/notifications";
-import { smoobuProvider } from "@/lib/channels/smoobu-provider";
+import { relayMessageToChannel } from "@/lib/channels/relay";
 
 export async function POST(req: NextRequest) {
   const session = await auth();
@@ -48,16 +48,23 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Send via Smoobu/OTA
-  if (sendSmoobu && reservation.externalId?.startsWith("smoobu-")) {
-    try {
-      const sent = await smoobuProvider.sendGuestMessage(session.user.id, reservation.externalId, guestMessage);
-      if (sent) results.smoobu = true;
-      else results.errors.push("Smoobu: message not sent (trial limitation or OTA blocked)");
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      results.errors.push(`Smoobu failed: ${msg}`);
-      console.error("Failed to send PIN message via Smoobu:", err);
+  // Send through the booking channel (Smoobu or Channex). This matters most
+  // here of all the outbound paths: a Channex booking carries no guest email,
+  // so if the door code does not go out over the channel it reaches the guest
+  // nowhere at all.
+  if (sendSmoobu) {
+    const relay = await relayMessageToChannel(
+      { externalId: reservation.externalId, ownerId: session.user.id },
+      guestMessage
+    );
+    if (relay.status === "sent") {
+      results.smoobu = true;
+    } else if (relay.status === "skipped") {
+      results.errors.push(`Channel message not sent: ${relay.reason}`);
+      console.log(`[access-code-message] relay skipped for reservation ${reservationId}: ${relay.reason}`);
+    } else {
+      results.errors.push(`${relay.provider} failed: ${relay.error}`);
+      console.error(`Failed to send PIN message via ${relay.provider}:`, relay.error);
     }
   }
 
