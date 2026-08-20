@@ -242,18 +242,33 @@ export async function deliverAiMessage(messageId: string): Promise<boolean> {
           await prisma.message.update({ where: { id: message.id }, data: { channelFailed: false, channelError: null } });
         }
       } catch (err) {
-        channelOk = false;
-        console.error("[ai] Channex relay failed:", err);
-        await prisma.message.update({
-          where: { id: message.id },
-          data: { channelFailed: true, channelError: (err instanceof Error ? err.message : String(err)).slice(0, 300) },
-        });
-        await notifyUser(reservation.property.ownerId, {
-          type: "delivery_failed",
-          title: "Reply didn't reach the guest",
-          body: `Your AI reply to ${reservation.guest.name} (${reservation.property.name}) failed to send. Open the thread to retry.`,
-          link: `/messages?reservationId=${reservation.id}`,
-        });
+        const channexErr = err as { status?: number; code?: string };
+        // 422 not_supported is not a delivery failure. It means this
+        // booking's OTA has no message API at all (Channex documents it as
+        // exactly that), so no retry will ever succeed and there is nothing
+        // for the host to act on. Telling them "your reply didn't reach the
+        // guest" would be both alarming and unactionable, and would fire on
+        // EVERY message for such a channel. The email path below still runs,
+        // which is the real delivery route in this case.
+        const otaHasNoMessaging = channexErr.status === 422 && channexErr.code === "not_supported";
+        if (otaHasNoMessaging) {
+          console.log(
+            `[ai] Channex relay skipped for reservation ${reservation.id}: this booking's OTA does not support messaging`
+          );
+        } else {
+          channelOk = false;
+          console.error("[ai] Channex relay failed:", err);
+          await prisma.message.update({
+            where: { id: message.id },
+            data: { channelFailed: true, channelError: (err instanceof Error ? err.message : String(err)).slice(0, 300) },
+          });
+          await notifyUser(reservation.property.ownerId, {
+            type: "delivery_failed",
+            title: "Reply didn't reach the guest",
+            body: `Your AI reply to ${reservation.guest.name} (${reservation.property.name}) failed to send. Open the thread to retry.`,
+            link: `/messages?reservationId=${reservation.id}`,
+          });
+        }
       }
     }
   }
