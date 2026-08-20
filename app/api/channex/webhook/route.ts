@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { upsertReservationsFromChannexBooking } from "@/lib/channels/channex-bookings";
 
 // Receives Channex webhook deliveries.
 //
@@ -76,13 +77,32 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    // Booking processing is deliberately not implemented yet: the real
-    // payload shape is still unknown (the API refuses to create bookings,
-    // so no sample exists), and guessing it would mean writing reservation
-    // upsert logic against an invented schema. The stored payload from the
-    // first real delivery is what that will be built from.
-    console.log(`[channex-webhook] stored delivery ${logId} (event=${event ?? "unknown"}, ${rawBody.length} bytes)`);
-    await prisma.channexWebhookLog.update({ where: { id: logId }, data: { processedOk: true } });
+    // Channex sends a thin notification - {event, payload:{property_id,
+    // booking_id, revision_id}} - not the full booking. Confirmed against
+    // real deliveries via /api/debug/channex-webhook-log: the actual
+    // reservation data has to be fetched back from the API by booking_id.
+    const bookingId = (parsed as { payload?: { booking_id?: string } } | null)?.payload?.booking_id;
+
+    if (event === "booking" && bookingId) {
+      const { reservationIds, skipped } = await upsertReservationsFromChannexBooking(bookingId);
+      console.log(
+        `[channex-webhook] booking ${bookingId}: ${reservationIds.length} reservation(s) upserted` +
+          (skipped.length ? `, skipped: ${skipped.join("; ")}` : "")
+      );
+      await prisma.channexWebhookLog.update({
+        where: { id: logId },
+        data: {
+          processedOk: true,
+          reservationId: reservationIds[0] ?? null,
+          error: reservationIds.length === 0 && skipped.length > 0 ? skipped.join("; ").slice(0, 900) : null,
+        },
+      });
+    } else {
+      // Unrecognized or non-booking event - stored for visibility, nothing
+      // to process yet.
+      console.log(`[channex-webhook] stored delivery ${logId} (event=${event ?? "unknown"}, ${rawBody.length} bytes)`);
+      await prisma.channexWebhookLog.update({ where: { id: logId }, data: { processedOk: true } });
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[channex-webhook] processing failed for ${logId}:`, err);
