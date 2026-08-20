@@ -22,7 +22,19 @@ export async function GET(req: NextRequest) {
       property: { ownerId: session.user.id },
       scheduledDate: { gte: since },
     },
-    include: {
+    // checklist is needed (it is parsed for the done/outstanding counts), but
+    // checkInPhotos and checkOutPhotos are not read anywhere in this report -
+    // and they are the heavy columns, one task per reservation each holding
+    // base64 photo arrays. Selecting explicitly keeps them in the database.
+    select: {
+      id: true,
+      status: true,
+      scheduledDate: true,
+      notes: true,
+      checklist: true,
+      checkInAt: true,
+      checkOutAt: true,
+      createdAt: true,
       property: { select: { id: true, name: true, city: true } },
       damageReports: { orderBy: { createdAt: "desc" } },
     },
@@ -66,6 +78,9 @@ export async function GET(req: NextRequest) {
     where: { property: { ownerId: session.user.id }, status: "OPEN" },
     include: { property: { select: { id: true, name: true, city: true } } },
     orderBy: { createdAt: "desc" },
+    // Unlike the tasks above this was not windowed at all - every open damage
+    // ever, each carrying its photos, only for those photos to be counted.
+    take: 200,
   });
 
   const completed = report.filter((r) => r.durationMinutes !== null);

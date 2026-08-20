@@ -16,11 +16,31 @@ export async function GET(req: NextRequest) {
       property: { ownerId: session.user.id },
       ...(status ? { status } : {}),
     },
-    include: {
+    // Explicit select, not include. CleaningTask holds checkInPhotos,
+    // checkOutPhotos and checklist, and the photo columns are JSON arrays of
+    // base64 data URLs - a single phone photo is a couple of megabytes once
+    // encoded. Prisma returns every scalar by default, so this list was
+    // shipping every photo any cleaner had ever taken, on every load, to a
+    // page that renders none of them. That is the slowness, and it is on the
+    // wire and in Postgres rather than anywhere a faster host would help.
+    select: {
+      id: true,
+      status: true,
+      scheduledDate: true,
+      notes: true,
+      checkInAt: true,
+      checkOutAt: true,
+      createdAt: true,
+      updatedAt: true,
+      propertyId: true,
+      reservationId: true,
       property: { select: { id: true, name: true, city: true } },
       _count: { select: { damageReports: true } },
     },
     orderBy: { scheduledDate: "desc" },
+    // Unbounded before: every task ever, growing forever with one row per
+    // reservation.
+    take: 500,
   });
 
   return NextResponse.json(tasks);

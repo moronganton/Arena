@@ -17,6 +17,10 @@ export async function GET(req: NextRequest) {
     },
     include: { property: { select: { id: true, name: true } } },
     orderBy: { createdAt: "desc" },
+    // photos is a JSON array of base64 data URLs and this list does render
+    // them, so they have to come back - but unbounded it would eventually
+    // return every photo ever attached to a damage report in one response.
+    take: 200,
   });
 
   return NextResponse.json(reports);
