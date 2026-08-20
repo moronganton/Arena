@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireDebugAccess } from "@/lib/debug-auth";
 import { prisma } from "@/lib/prisma";
 import { SMOOBU_BASE_URL, parseCredential, buildHeaders } from "@/lib/channels/smoobu-core";
 
@@ -48,15 +48,16 @@ async function postRates(cred: ReturnType<typeof parseCredential>, apartmentId: 
 }
 
 export async function GET(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Log in first" }, { status: 401 });
+  const access = await requireDebugAccess(req);
+  if (!access.ok) return access.response;
+  const userId = access.userId;
 
-  const account = await prisma.smoobuAccount.findUnique({ where: { userId: session.user.id } });
+  const account = await prisma.smoobuAccount.findUnique({ where: { userId: userId } });
   if (!account) return NextResponse.json({ error: "Smoobu not connected" }, { status: 400 });
 
   const wantApt = new URL(req.url).searchParams.get("apartmentId");
   const mapping = await prisma.channelConfig.findFirst({
-    where: { channel: "SMOOBU", property: { ownerId: session.user.id }, ...(wantApt ? { listingId: wantApt } : { listingId: { not: null } }) },
+    where: { channel: "SMOOBU", property: { ownerId: userId }, ...(wantApt ? { listingId: wantApt } : { listingId: { not: null } }) },
     include: { property: { select: { name: true } } },
   });
   if (!mapping?.listingId) return NextResponse.json({ error: "No Smoobu-mapped apartment found" }, { status: 404 });

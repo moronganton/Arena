@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireDebugAccess } from "@/lib/debug-auth";
 import { fetchBookingMessages, sendBookingMessage } from "@/lib/channels/channex-messages";
 import { ChannexError } from "@/lib/channels/channex-core";
 
@@ -15,8 +15,8 @@ import { ChannexError } from "@/lib/channels/channex-core";
 const JORGE_SANCHEZ_BOOKING_ID = "e7b956c4-c89a-4627-8dd7-333f812032d3";
 
 export async function GET(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Log in first" }, { status: 401 });
+  const access = await requireDebugAccess(req);
+  if (!access.ok) return access.response;
 
   const send = new URL(req.url).searchParams.get("send") === "true";
 

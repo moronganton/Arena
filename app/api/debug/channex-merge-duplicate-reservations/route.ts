@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireDebugAccess } from "@/lib/debug-auth";
 import { prisma } from "@/lib/prisma";
 import { revokeAccessCodesForReservation } from "@/lib/ttlock";
 
@@ -18,15 +18,16 @@ import { revokeAccessCodesForReservation } from "@/lib/ttlock";
 //   GET /api/debug/channex-merge-duplicate-reservations            -> dry run
 //   GET /api/debug/channex-merge-duplicate-reservations?confirm=true -> applies
 export async function GET(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Log in first" }, { status: 401 });
+  const access = await requireDebugAccess(req);
+  if (!access.ok) return access.response;
+  const userId = access.userId;
 
   const confirm = new URL(req.url).searchParams.get("confirm") === "true";
 
   const candidates = await prisma.reservation.findMany({
     where: {
       externalId: { startsWith: "channex-" },
-      property: { ownerId: session.user.id },
+      property: { ownerId: userId },
       confirmationCode: { not: null },
     },
     include: { property: { select: { id: true, name: true, ownerId: true } }, guest: { select: { id: true, name: true } } },

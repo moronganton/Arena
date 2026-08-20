@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireDebugAccess } from "@/lib/debug-auth";
 import { prisma } from "@/lib/prisma";
 import { SMOOBU_BASE_URL, parseCredential, buildHeaders } from "@/lib/channels/smoobu-core";
 
@@ -29,8 +29,9 @@ import { SMOOBU_BASE_URL, parseCredential, buildHeaders } from "@/lib/channels/s
 //        seeing a commission value - the thing the live-fetch modes above
 //        cannot show, since they only ever see a single snapshot in time.
 export async function GET(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Log in first" }, { status: 401 });
+  const access = await requireDebugAccess(req);
+  if (!access.ok) return access.response;
+  const userId = access.userId;
 
   const { searchParams } = new URL(req.url);
   const wantProperty = searchParams.get("propertyId");
@@ -39,7 +40,7 @@ export async function GET(req: NextRequest) {
 
   if (wantStored) {
     const property = await prisma.property.findFirst({
-      where: { ownerId: session.user.id, ...(wantProperty ? { id: wantProperty } : {}) },
+      where: { ownerId: userId, ...(wantProperty ? { id: wantProperty } : {}) },
       select: { id: true, name: true },
     });
     if (!property) return NextResponse.json({ error: "No property found" }, { status: 404 });
@@ -86,13 +87,13 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const account = await prisma.smoobuAccount.findUnique({ where: { userId: session.user.id } });
+  const account = await prisma.smoobuAccount.findUnique({ where: { userId: userId } });
   if (!account) return NextResponse.json({ error: "Smoobu not connected" }, { status: 400 });
 
   const mapping = await prisma.channelConfig.findFirst({
     where: {
       channel: "SMOOBU",
-      property: { ownerId: session.user.id },
+      property: { ownerId: userId },
       ...(wantProperty ? { propertyId: wantProperty } : { listingId: { not: null } }),
     },
     include: { property: { select: { name: true } } },

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireDebugAccess } from "@/lib/debug-auth";
 import { prisma } from "@/lib/prisma";
 import { smoobuFetch } from "@/lib/channels/smoobu-core";
 
@@ -7,21 +7,22 @@ import { smoobuFetch } from "@/lib/channels/smoobu-core";
 // imported rows so direction-mapping issues can be inspected without log access.
 // GET /api/debug/smoobu-thread?reservationId=...
 export async function GET(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const access = await requireDebugAccess(req);
+  if (!access.ok) return access.response;
+  const userId = access.userId;
 
   const reservationId = new URL(req.url).searchParams.get("reservationId");
   if (!reservationId) return NextResponse.json({ error: "reservationId required" }, { status: 400 });
 
   const reservation = await prisma.reservation.findFirst({
-    where: { id: reservationId, property: { ownerId: session.user.id } },
+    where: { id: reservationId, property: { ownerId: userId } },
     select: { id: true, externalId: true },
   });
   if (!reservation?.externalId?.startsWith("smoobu-")) {
     return NextResponse.json({ error: "Not a Smoobu-linked reservation" }, { status: 404 });
   }
 
-  const account = await prisma.smoobuAccount.findUnique({ where: { userId: session.user.id } });
+  const account = await prisma.smoobuAccount.findUnique({ where: { userId: userId } });
   if (!account) return NextResponse.json({ error: "Smoobu not connected" }, { status: 404 });
 
   const smoobuId = reservation.externalId.replace("smoobu-", "");

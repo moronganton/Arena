@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireDebugAccess } from "@/lib/debug-auth";
 import { prisma } from "@/lib/prisma";
 import { SMOOBU_BASE_URL, parseCredential, buildHeaders } from "@/lib/channels/smoobu-core";
 
@@ -16,15 +16,16 @@ import { SMOOBU_BASE_URL, parseCredential, buildHeaders } from "@/lib/channels/s
 // for every mapped property — so there is a guaranteed fallback (N sequential
 // calls) even if no batched format works at all.
 //   GET /api/debug/test-rate-multi
-export async function GET(_req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Log in first" }, { status: 401 });
+export async function GET(req: NextRequest) {
+  const access = await requireDebugAccess(req);
+  if (!access.ok) return access.response;
+  const userId = access.userId;
 
-  const account = await prisma.smoobuAccount.findUnique({ where: { userId: session.user.id } });
+  const account = await prisma.smoobuAccount.findUnique({ where: { userId: userId } });
   if (!account) return NextResponse.json({ error: "Smoobu not connected" }, { status: 400 });
 
   const mappings = await prisma.channelConfig.findMany({
-    where: { channel: "SMOOBU", listingId: { not: null }, property: { ownerId: session.user.id } },
+    where: { channel: "SMOOBU", listingId: { not: null }, property: { ownerId: userId } },
     include: { property: { select: { name: true } } },
   });
   if (mappings.length === 0) {

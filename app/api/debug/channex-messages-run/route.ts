@@ -1,5 +1,5 @@
-import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { NextRequest, NextResponse } from "next/server";
+import { requireDebugAccess } from "@/lib/debug-auth";
 import { pollChannexMessages } from "@/lib/channels/channex-messages";
 
 // Synchronous version of the /api/cron/channex-messages poller, for seeing
@@ -11,9 +11,9 @@ import { pollChannexMessages } from "@/lib/channels/channex-messages";
 // no message API.
 //
 //   GET /api/debug/channex-messages-run
-export async function GET() {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Log in first" }, { status: 401 });
+export async function GET(req: NextRequest) {
+  const access = await requireDebugAccess(req);
+  if (!access.ok) return access.response;
 
   const result = await pollChannexMessages();
   return NextResponse.json(result);

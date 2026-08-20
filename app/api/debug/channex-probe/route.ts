@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireDebugAccess } from "@/lib/debug-auth";
 
 // Read-only reconnaissance against the Channex API, run from Railway.
 //
@@ -59,8 +59,8 @@ const EXPLORE_PATHS = [
 ];
 
 export async function GET(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Log in first" }, { status: 401 });
+  const access = await requireDebugAccess(req);
+  if (!access.ok) return access.response;
 
   const key = process.env.CHANNEX_API_KEY || "";
   const base = (process.env.CHANNEX_BASE_URL || DEFAULT_BASE).replace(/\/+$/, "");

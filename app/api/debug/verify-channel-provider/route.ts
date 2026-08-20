@@ -1,5 +1,5 @@
-import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { NextRequest, NextResponse } from "next/server";
+import { requireDebugAccess } from "@/lib/debug-auth";
 import { prisma } from "@/lib/prisma";
 
 // Confirms step 3's exit criteria from the Channex build plan (every
@@ -15,12 +15,13 @@ import { prisma } from "@/lib/prisma";
 // BEFORE connecting one.
 //
 //   GET /api/debug/verify-channel-provider
-export async function GET() {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Log in first" }, { status: 401 });
+export async function GET(req: NextRequest) {
+  const access = await requireDebugAccess(req);
+  if (!access.ok) return access.response;
+  const userId = access.userId;
 
   const properties = await prisma.property.findMany({
-    where: { ownerId: session.user.id },
+    where: { ownerId: userId },
     select: {
       id: true,
       name: true,

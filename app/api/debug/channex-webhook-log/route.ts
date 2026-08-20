@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireDebugAccess } from "@/lib/debug-auth";
 import { prisma } from "@/lib/prisma";
 
 // Reads back what Channex actually delivered to /api/channex/webhook.
@@ -18,8 +18,8 @@ import { prisma } from "@/lib/prisma";
 //   GET /api/debug/channex-webhook-log?failed=true -> only failed ones
 //   GET /api/debug/channex-webhook-log?id=<id>     -> one delivery, full payload
 export async function GET(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Log in first" }, { status: 401 });
+  const access = await requireDebugAccess(req);
+  if (!access.ok) return access.response;
 
   const { searchParams } = new URL(req.url);
   const id = searchParams.get("id");

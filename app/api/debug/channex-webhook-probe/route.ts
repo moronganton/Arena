@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireDebugAccess } from "@/lib/debug-auth";
 import { prisma } from "@/lib/prisma";
 import { channexPost, channexGet, ChannexError } from "@/lib/channels/channex-core";
 
@@ -26,11 +26,12 @@ import { channexPost, channexGet, ChannexError } from "@/lib/channels/channex-co
 const WEBHOOK_URL = "https://stayhq-dev.up.railway.app/api/channex/webhook";
 
 export async function GET(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Log in first" }, { status: 401 });
+  const access = await requireDebugAccess(req);
+  if (!access.ok) return access.response;
+  const userId = access.userId;
 
   const listing = await prisma.channexListing.findFirst({
-    where: { property: { ownerId: session.user.id } },
+    where: { property: { ownerId: userId } },
     include: { property: { select: { name: true } } },
   });
   if (!listing) return NextResponse.json({ error: "No ChannexListing found" }, { status: 404 });

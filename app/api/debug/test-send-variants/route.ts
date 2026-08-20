@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireDebugAccess } from "@/lib/debug-auth";
 import { prisma } from "@/lib/prisma";
 import { SMOOBU_BASE_URL, parseCredential, buildHeaders, HMAC_VARIANTS } from "@/lib/channels/smoobu-core";
 
@@ -13,15 +13,16 @@ import { SMOOBU_BASE_URL, parseCredential, buildHeaders, HMAC_VARIANTS } from "@
 // If exactly one variant's marker is found, that's the correct signing variant
 // and the fix is to store it. If none are found, the issue isn't the variant.
 export async function GET(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Log in first" }, { status: 401 });
+  const access = await requireDebugAccess(req);
+  if (!access.ok) return access.response;
+  const userId = access.userId;
 
   const { searchParams } = new URL(req.url);
   const reservationId = searchParams.get("reservationId");
 
   const reservation = await prisma.reservation.findFirst({
     where: {
-      property: { ownerId: session.user.id },
+      property: { ownerId: userId },
       externalId: { startsWith: "smoobu-" },
       ...(reservationId ? { id: reservationId } : {}),
     },
@@ -32,7 +33,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "No Smoobu-linked reservation found" }, { status: 404 });
   }
 
-  const account = await prisma.smoobuAccount.findUnique({ where: { userId: session.user.id } });
+  const account = await prisma.smoobuAccount.findUnique({ where: { userId: userId } });
   if (!account) return NextResponse.json({ error: "Smoobu not connected" }, { status: 400 });
 
   const stored = parseCredential(account.apiKey);

@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireDebugAccess } from "@/lib/debug-auth";
 import { createHash } from "crypto";
 import { readFile } from "fs/promises";
 import path from "path";
-import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 // One-time baseline for the `prisma db push` -> `prisma migrate` transition.
@@ -44,8 +44,8 @@ const CREATE_LEDGER = `
 `;
 
 export async function GET(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Log in first" }, { status: 401 });
+  const access = await requireDebugAccess(req);
+  if (!access.ok) return access.response;
 
   const apply = new URL(req.url).searchParams.get("apply") === "true";
 

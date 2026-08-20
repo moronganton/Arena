@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireDebugAccess } from "@/lib/debug-auth";
 import { prisma } from "@/lib/prisma";
 
 // Answers "why does the finance report count N reservations for this month?"
@@ -19,8 +19,9 @@ import { prisma } from "@/lib/prisma";
 //
 //   GET /api/debug/finance-reservation-count?month=2026-08
 export async function GET(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Log in first" }, { status: 401 });
+  const access = await requireDebugAccess(req);
+  if (!access.ok) return access.response;
+  const userId = access.userId;
 
   const { searchParams } = new URL(req.url);
   const month = searchParams.get("month") || new Date().toISOString().slice(0, 7);
@@ -31,7 +32,7 @@ export async function GET(req: NextRequest) {
   // Identical filter to the finance report.
   const counted = await prisma.reservation.findMany({
     where: {
-      property: { ownerId: session.user.id },
+      property: { ownerId: userId },
       status: { notIn: ["CANCELLED", "NO_SHOW"] },
       checkOut: { gte: start, lt: end },
     },
@@ -86,7 +87,7 @@ export async function GET(req: NextRequest) {
   const margin = 3 * 86400000;
   const neighbours = await prisma.reservation.findMany({
     where: {
-      property: { ownerId: session.user.id },
+      property: { ownerId: userId },
       status: { notIn: ["CANCELLED", "NO_SHOW"] },
       OR: [
         { checkOut: { gte: new Date(start.getTime() - margin), lt: start } },
@@ -101,7 +102,7 @@ export async function GET(req: NextRequest) {
   // the report deliberately does not.
   const excludedByStatus = await prisma.reservation.findMany({
     where: {
-      property: { ownerId: session.user.id },
+      property: { ownerId: userId },
       status: { in: ["CANCELLED", "NO_SHOW"] },
       checkOut: { gte: start, lt: end },
     },

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireDebugAccess } from "@/lib/debug-auth";
 import { prisma } from "@/lib/prisma";
 
 // Flips a property's channelProvider from SMOOBU to CHANNEX and removes its
@@ -17,8 +17,9 @@ import { prisma } from "@/lib/prisma";
 //   GET /api/debug/migrate-to-channex?propertyId=<id>            -> dry run
 //   GET /api/debug/migrate-to-channex?propertyId=<id>&confirm=true -> applies
 export async function GET(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Log in first" }, { status: 401 });
+  const access = await requireDebugAccess(req);
+  if (!access.ok) return access.response;
+  const userId = access.userId;
 
   const { searchParams } = new URL(req.url);
   const propertyId = searchParams.get("propertyId");
@@ -26,7 +27,7 @@ export async function GET(req: NextRequest) {
 
   if (!propertyId) {
     const candidates = await prisma.property.findMany({
-      where: { ownerId: session.user.id },
+      where: { ownerId: userId },
       select: { id: true, name: true, channelProvider: true, channexListing: { select: { id: true } } },
       orderBy: { createdAt: "asc" },
     });
@@ -37,7 +38,7 @@ export async function GET(req: NextRequest) {
   }
 
   const property = await prisma.property.findFirst({
-    where: { id: propertyId, ownerId: session.user.id },
+    where: { id: propertyId, ownerId: userId },
     include: {
       channexListing: true,
       channels: { where: { channel: "SMOOBU" } },

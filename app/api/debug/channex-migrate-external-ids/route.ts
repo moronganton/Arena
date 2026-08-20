@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireDebugAccess } from "@/lib/debug-auth";
 import { prisma } from "@/lib/prisma";
 import { channexGet } from "@/lib/channels/channex-core";
 import { revokeAccessCodesForReservation } from "@/lib/ttlock";
@@ -71,13 +71,14 @@ async function fetchAllBookings(): Promise<{ bookings: BookingListEntry[]; total
 }
 
 export async function GET(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Log in first" }, { status: 401 });
+  const access = await requireDebugAccess(req);
+  if (!access.ok) return access.response;
+  const userId = access.userId;
 
   const confirm = new URL(req.url).searchParams.get("confirm") === "true";
 
   const reservations = await prisma.reservation.findMany({
-    where: { externalId: { startsWith: CHANNEX_PREFIX }, property: { ownerId: session.user.id } },
+    where: { externalId: { startsWith: CHANNEX_PREFIX }, property: { ownerId: userId } },
     include: { guest: { select: { id: true, name: true } }, property: { select: { id: true, ownerId: true } } },
     orderBy: { createdAt: "asc" },
   });

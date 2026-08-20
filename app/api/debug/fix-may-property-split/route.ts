@@ -1,5 +1,5 @@
-import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { NextRequest, NextResponse } from "next/server";
+import { requireDebugAccess } from "@/lib/debug-auth";
 import { prisma } from "@/lib/prisma";
 
 // One-off correction for 3 May 2026 reservations that were sold and paid out
@@ -19,25 +19,26 @@ const MOVES = [
 // GET is also supported (not just POST) so this can be run by pasting the
 // URL into a browser address bar - fine for a session-gated, idempotent,
 // exact-id-matched one-off fix like this.
-export async function GET() {
-  return run();
+export async function GET(req: NextRequest) {
+  return run(req);
 }
 
-export async function POST() {
-  return run();
+export async function POST(req: NextRequest) {
+  return run(req);
 }
 
-async function run() {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+async function run(req: NextRequest) {
+  const access = await requireDebugAccess(req);
+  if (!access.ok) return access.response;
+  const userId = access.userId;
 
   const [from, to] = await Promise.all([
     prisma.property.findFirst({
-      where: { ownerId: session.user.id, name: { startsWith: "29th floor" } },
+      where: { ownerId: userId, name: { startsWith: "29th floor" } },
       select: { id: true, name: true },
     }),
     prisma.property.findFirst({
-      where: { ownerId: session.user.id, name: { startsWith: "28th floor" } },
+      where: { ownerId: userId, name: { startsWith: "28th floor" } },
       select: { id: true, name: true },
     }),
   ]);
@@ -48,7 +49,7 @@ async function run() {
   const results = [];
   for (const move of MOVES) {
     const reservation = await prisma.reservation.findFirst({
-      where: { property: { ownerId: session.user.id }, confirmationCode: move.confirmationCode },
+      where: { property: { ownerId: userId }, confirmationCode: move.confirmationCode },
       select: { id: true, propertyId: true, checkIn: true, checkOut: true, guest: { select: { name: true } } },
     });
     if (!reservation) {

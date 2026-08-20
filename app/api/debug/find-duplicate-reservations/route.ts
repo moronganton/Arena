@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireDebugAccess } from "@/lib/debug-auth";
 import { prisma } from "@/lib/prisma";
 
 // Thorough duplicate hunt across the WHOLE portfolio, not one month.
@@ -20,8 +20,9 @@ import { prisma } from "@/lib/prisma";
 //
 //   GET /api/debug/find-duplicate-reservations[?from=2026-07-01&to=2026-10-01]
 export async function GET(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Log in first" }, { status: 401 });
+  const access = await requireDebugAccess(req);
+  if (!access.ok) return access.response;
+  const userId = access.userId;
 
   const { searchParams } = new URL(req.url);
   const from = searchParams.get("from") ? new Date(searchParams.get("from")!) : new Date("2026-01-01");
@@ -29,7 +30,7 @@ export async function GET(req: NextRequest) {
 
   const all = await prisma.reservation.findMany({
     where: {
-      property: { ownerId: session.user.id },
+      property: { ownerId: userId },
       checkOut: { gte: from, lt: to },
     },
     include: { guest: { select: { name: true } }, property: { select: { id: true, name: true } } },
@@ -159,7 +160,7 @@ export async function GET(req: NextRequest) {
   // 4. Every property with its live-reservation count - surfaces leftover or
   //    duplicated Property rows (e.g. an original alongside its "(copy)").
   const properties = await prisma.property.findMany({
-    where: { ownerId: session.user.id },
+    where: { ownerId: userId },
     select: {
       id: true, name: true, active: true, createdAt: true,
       _count: { select: { reservations: true } },

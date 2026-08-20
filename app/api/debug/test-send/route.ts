@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireDebugAccess } from "@/lib/debug-auth";
 import { prisma } from "@/lib/prisma";
 import { SMOOBU_BASE_URL, parseCredential, buildHeaders } from "@/lib/channels/smoobu-core";
 
@@ -12,8 +12,9 @@ import { SMOOBU_BASE_URL, parseCredential, buildHeaders } from "@/lib/channels/s
 //   - "201 and read-back sees it, but guest/OTA doesn't" → downstream relay
 //   GET /api/debug/test-send?reservationId=...&text=Hello
 export async function GET(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Log in first" }, { status: 401 });
+  const access = await requireDebugAccess(req);
+  if (!access.ok) return access.response;
+  const userId = access.userId;
 
   const { searchParams } = new URL(req.url);
   // Unique marker so we can find THIS exact message in the read-back
@@ -23,7 +24,7 @@ export async function GET(req: NextRequest) {
 
   const reservation = await prisma.reservation.findFirst({
     where: {
-      property: { ownerId: session.user.id },
+      property: { ownerId: userId },
       externalId: { startsWith: "smoobu-" },
       ...(reservationId ? { id: reservationId } : {}),
     },
@@ -34,7 +35,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "No Smoobu-linked reservation found" }, { status: 404 });
   }
 
-  const account = await prisma.smoobuAccount.findUnique({ where: { userId: session.user.id } });
+  const account = await prisma.smoobuAccount.findUnique({ where: { userId: userId } });
   if (!account) return NextResponse.json({ error: "Smoobu not connected" }, { status: 400 });
 
   const smoobuId = reservation.externalId.replace("smoobu-", "");

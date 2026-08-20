@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireDebugAccess } from "@/lib/debug-auth";
 import { prisma } from "@/lib/prisma";
 import { SMOOBU_BASE_URL, parseCredential, buildHeaders } from "@/lib/channels/smoobu-core";
 
@@ -17,10 +17,11 @@ import { SMOOBU_BASE_URL, parseCredential, buildHeaders } from "@/lib/channels/s
 // truth rather than inferred from StayHQ's own database.
 //   GET /api/debug/test-reservation-history?propertyId=...&from=YYYY-MM-DD
 export async function GET(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Log in first" }, { status: 401 });
+  const access = await requireDebugAccess(req);
+  if (!access.ok) return access.response;
+  const userId = access.userId;
 
-  const account = await prisma.smoobuAccount.findUnique({ where: { userId: session.user.id } });
+  const account = await prisma.smoobuAccount.findUnique({ where: { userId: userId } });
   if (!account) return NextResponse.json({ error: "Smoobu not connected" }, { status: 400 });
 
   const { searchParams } = new URL(req.url);
@@ -33,7 +34,7 @@ export async function GET(req: NextRequest) {
   const mapping = await prisma.channelConfig.findFirst({
     where: {
       channel: "SMOOBU",
-      property: { ownerId: session.user.id },
+      property: { ownerId: userId },
       ...(wantProperty ? { propertyId: wantProperty } : { listingId: { not: null } }),
     },
     include: { property: { select: { id: true, name: true } } },

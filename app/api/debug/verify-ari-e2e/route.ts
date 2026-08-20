@@ -1,5 +1,5 @@
-import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { NextRequest, NextResponse } from "next/server";
+import { requireDebugAccess } from "@/lib/debug-auth";
 import { prisma } from "@/lib/prisma";
 import { drainAriOutbox } from "@/lib/channels/ari-drain";
 import { channexGet, ChannexError } from "@/lib/channels/channex-core";
@@ -21,12 +21,13 @@ import { channexGet, ChannexError } from "@/lib/channels/channex-core";
 //   GET /api/debug/verify-ari-e2e
 const TEST_DATE = "2027-08-10";
 
-export async function GET() {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Log in first" }, { status: 401 });
+export async function GET(req: NextRequest) {
+  const access = await requireDebugAccess(req);
+  if (!access.ok) return access.response;
+  const userId = access.userId;
 
   const property = await prisma.property.findFirst({
-    where: { ownerId: session.user.id, name: { startsWith: "Sinteu" } },
+    where: { ownerId: userId, name: { startsWith: "Sinteu" } },
     select: { id: true, name: true },
   });
   if (!property) return NextResponse.json({ error: "Sinteu property not found" }, { status: 404 });

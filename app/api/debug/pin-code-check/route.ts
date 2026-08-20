@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireDebugAccess } from "@/lib/debug-auth";
 import { prisma } from "@/lib/prisma";
 
 // Diagnoses why specific reservations never got an auto-generated access
@@ -17,8 +17,9 @@ import { prisma } from "@/lib/prisma";
 //                                                     any source or status
 //                                                     that still needs a code
 export async function GET(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Log in first" }, { status: 401 });
+  const access = await requireDebugAccess(req);
+  if (!access.ok) return access.response;
+  const userId = access.userId;
 
   const { searchParams } = new URL(req.url);
   const guestsParam = searchParams.get("guests");
@@ -28,13 +29,13 @@ export async function GET(req: NextRequest) {
     : [];
 
   const account = await prisma.smoobuAccount.findUnique({
-    where: { userId: session.user.id },
+    where: { userId: userId },
     select: { automationEnabled: true },
   });
 
   const reservations = await prisma.reservation.findMany({
     where: {
-      property: { ownerId: session.user.id },
+      property: { ownerId: userId },
       ...(guestNames.length
         ? { guest: { name: { in: guestNames } } }
         : upcoming

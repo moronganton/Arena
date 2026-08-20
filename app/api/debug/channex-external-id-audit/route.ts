@@ -1,5 +1,5 @@
-import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { NextRequest, NextResponse } from "next/server";
+import { requireDebugAccess } from "@/lib/debug-auth";
 import { prisma } from "@/lib/prisma";
 
 // Audits Channex reservation externalId formats.
@@ -23,12 +23,13 @@ import { prisma } from "@/lib/prisma";
 //   GET /api/debug/channex-external-id-audit
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-export async function GET() {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Log in first" }, { status: 401 });
+export async function GET(req: NextRequest) {
+  const access = await requireDebugAccess(req);
+  if (!access.ok) return access.response;
+  const userId = access.userId;
 
   const reservations = await prisma.reservation.findMany({
-    where: { externalId: { startsWith: "channex-" }, property: { ownerId: session.user.id } },
+    where: { externalId: { startsWith: "channex-" }, property: { ownerId: userId } },
     include: { guest: { select: { name: true } }, property: { select: { name: true } } },
     orderBy: { createdAt: "asc" },
   });

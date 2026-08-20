@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireDebugAccess } from "@/lib/debug-auth";
 
 // Read-only Channex.io validation: authenticates with a Channex API key and
 // pulls the first page of Properties, Bookings, and Messages, so we can confirm
@@ -31,8 +31,8 @@ async function hit(base: string, path: string, apiKey: string) {
 }
 
 export async function GET(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Log in first" }, { status: 401 });
+  const access = await requireDebugAccess(req);
+  if (!access.ok) return access.response;
 
   const { searchParams } = new URL(req.url);
   const apiKey = searchParams.get("apiKey") || process.env.CHANNEX_API_KEY;

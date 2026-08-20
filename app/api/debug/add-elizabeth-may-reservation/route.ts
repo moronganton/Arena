@@ -1,5 +1,5 @@
-import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { NextRequest, NextResponse } from "next/server";
+import { requireDebugAccess } from "@/lib/debug-auth";
 import { prisma } from "@/lib/prisma";
 
 // One-off addition for a real Airbnb stay the host remembered wasn't in
@@ -10,20 +10,21 @@ import { prisma } from "@/lib/prisma";
 // stays; the confirmation code makes this idempotent to re-run.
 const CONFIRMATION_CODE = "HMH8CR9EZC";
 
-export async function GET() {
-  return run();
+export async function GET(req: NextRequest) {
+  return run(req);
 }
 
-export async function POST() {
-  return run();
+export async function POST(req: NextRequest) {
+  return run(req);
 }
 
-async function run() {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+async function run(req: NextRequest) {
+  const access = await requireDebugAccess(req);
+  if (!access.ok) return access.response;
+  const userId = access.userId;
 
   const existing = await prisma.reservation.findFirst({
-    where: { property: { ownerId: session.user.id }, confirmationCode: CONFIRMATION_CODE },
+    where: { property: { ownerId: userId }, confirmationCode: CONFIRMATION_CODE },
     select: { id: true },
   });
   if (existing) {
@@ -31,7 +32,7 @@ async function run() {
   }
 
   const property = await prisma.property.findFirst({
-    where: { ownerId: session.user.id, name: { startsWith: "29th floor" } },
+    where: { ownerId: userId, name: { startsWith: "29th floor" } },
     select: { id: true, name: true },
   });
   if (!property) {

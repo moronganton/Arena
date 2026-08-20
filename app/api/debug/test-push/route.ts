@@ -1,5 +1,5 @@
-import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { NextRequest, NextResponse } from "next/server";
+import { requireDebugAccess } from "@/lib/debug-auth";
 import { prisma } from "@/lib/prisma";
 import { notifyUser } from "@/lib/notify";
 
@@ -9,13 +9,14 @@ import { notifyUser } from "@/lib/notify";
 // configuration state (VAPID present, how many devices are subscribed) but
 // never sends anything.
 //   GET /api/debug/test-push
-export async function GET() {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Log in first" }, { status: 401 });
+export async function GET(req: NextRequest) {
+  const access = await requireDebugAccess(req);
+  if (!access.ok) return access.response;
+  const userId = access.userId;
 
   const vapidConfigured = Boolean(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY);
   const subscriptions = await prisma.pushSubscription.findMany({
-    where: { userId: session.user.id },
+    where: { userId: userId },
     select: { id: true, userAgent: true, createdAt: true },
   });
 
@@ -37,7 +38,7 @@ export async function GET() {
     });
   }
 
-  await notifyUser(session.user.id, {
+  await notifyUser(userId, {
     type: "info",
     title: "Test push",
     body: `Sent ${new Date().toLocaleTimeString("en-GB")} — if this reached your phone, push is working.`,

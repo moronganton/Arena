@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireDebugAccess } from "@/lib/debug-auth";
 import { prisma } from "@/lib/prisma";
 import { upsertReservationsFromChannexBooking } from "@/lib/channels/channex-bookings";
 
@@ -12,8 +12,8 @@ import { upsertReservationsFromChannexBooking } from "@/lib/channels/channex-boo
 //   GET /api/debug/channex-reprocess-webhooks              -> dry run, lists candidates
 //   GET /api/debug/channex-reprocess-webhooks?confirm=true  -> actually processes them
 export async function GET(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Log in first" }, { status: 401 });
+  const access = await requireDebugAccess(req);
+  if (!access.ok) return access.response;
 
   const confirm = new URL(req.url).searchParams.get("confirm") === "true";
 
