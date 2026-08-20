@@ -16,6 +16,10 @@ import { prisma } from "@/lib/prisma";
 //
 //   GET /api/debug/migrate-to-channex?propertyId=<id>            -> dry run
 //   GET /api/debug/migrate-to-channex?propertyId=<id>&confirm=true -> applies
+// Channels that represent a channel MANAGER owning the listing, as opposed to
+// an OTA reached through one. Only these are mutually exclusive with Channex.
+const MANAGER_CHANNELS = ["SMOOBU", "BEDS24"];
+
 export async function GET(req: NextRequest) {
   const access = await requireDebugAccess(req);
   if (!access.ok) return access.response;
@@ -41,7 +45,7 @@ export async function GET(req: NextRequest) {
     where: { id: propertyId, ownerId: userId },
     include: {
       channexListing: true,
-      channels: { where: { channel: "SMOOBU" } },
+      channels: { where: { channel: { in: MANAGER_CHANNELS } } },
     },
   });
   if (!property) return NextResponse.json({ error: "Property not found" }, { status: 404 });
@@ -57,7 +61,7 @@ export async function GET(req: NextRequest) {
     property: property.name,
     currentChannelProvider: property.channelProvider,
     willSetChannelProviderTo: "CHANNEX",
-    smoobuMappingToRemove: property.channels[0] ?? null,
+    managerMappingsToRemove: property.channels,
   };
 
   if (!confirm) {
@@ -70,8 +74,15 @@ export async function GET(req: NextRequest) {
       data: { channelProvider: "CHANNEX" },
       select: { id: true, name: true, channelProvider: true },
     }),
-    prisma.channelConfig.deleteMany({ where: { propertyId: property.id, channel: "SMOOBU" } }),
+    // Every OTHER channel manager, not just Smoobu. Sinteu still carried a
+    // dead Beds24 mapping after its migration, which left the property page
+    // reporting Beds24 as its connected channel long after Channex had taken
+    // over. Two managers on one listing is the exact overlap this flag exists
+    // to prevent, so none may survive the switch.
+    prisma.channelConfig.deleteMany({
+      where: { propertyId: property.id, channel: { in: MANAGER_CHANNELS } },
+    }),
   ]);
 
-  return NextResponse.json({ applied: true, property: updatedProperty, smoobuMappingRemoved: property.channels.length > 0 });
+  return NextResponse.json({ applied: true, property: updatedProperty, managerMappingsRemoved: property.channels.map((c) => c.channel) });
 }
