@@ -82,6 +82,22 @@ export async function upsertReservationsFromChannexRevision(
   return upsertReservationsFromBookingData(await fetchChannexRevision(revisionId));
 }
 
+// Everything that has to stop happening once a stay is off. Shared by the
+// two ways a reservation gets cancelled - the guest cancelling outright, and
+// a modification that moves them off this unit - so the door code and the
+// cleaner can't be released by one path and left running by the other.
+//
+// No availability push is needed: the change came from Channex, so it
+// already knows, and buildAriValues excludes cancelled stays, which reopens
+// those nights on the next push for any reason.
+async function releaseCancelledReservation(reservationId: string, ownerId: string, label: string): Promise<void> {
+  await revokeAccessCodesForReservation(reservationId, ownerId);
+  // Only PENDING tasks are removed - anything already in progress or
+  // completed describes work that actually happened and stays on the record.
+  await prisma.cleaningTask.deleteMany({ where: { reservationId, status: "PENDING" } });
+  console.log(`[channex-bookings] ${label} cancelled: codes revoked, pending clean removed`);
+}
+
 // Takes the booking data directly, because the revision feed already returns
 // it in full - fetching each revision again by id would be one wasted call
 // per booking on a feed that pages ten at a time.
@@ -104,6 +120,10 @@ export async function upsertReservationsFromBookingData(
   // same booking must collapse into one stay, not two concurrent "whole
   // apartment" reservations for the same nights.
   const byListing = new Map<string, { listing: (typeof listings)[number]; rooms: ChannexBookingRoom[] }>();
+  // Listings this revision does touch, but which StayHQ isn't the owner of
+  // yet. Kept apart from "not present" so the orphan sweep below can't read
+  // a provider flag as a guest cancelling.
+  const offChannexListingIds = new Set<string>();
 
   for (const room of booking.rooms) {
     if (!room.room_type_id || !room.rate_plan_id) {
@@ -123,6 +143,7 @@ export async function upsertReservationsFromBookingData(
     // rather than creating a reservation StayHQ isn't supposed to own yet.
     if (listing.property.channelProvider !== "CHANNEX") {
       skipped.push(`room ${room.booking_room_id}: ${listing.property.name} is not on channelProvider=CHANNEX yet`);
+      offChannexListingIds.add(listing.id);
       continue;
     }
 
@@ -141,9 +162,20 @@ export async function upsertReservationsFromBookingData(
     const totalAmount = rooms.reduce((sum, r) => sum + (r.amount ? Number(r.amount) : 0), 0);
     const adults = rooms.reduce((sum, r) => sum + (r.occupancy?.adults ?? 0), 0) || 1;
     const children = rooms.reduce((sum, r) => sum + (r.occupancy?.children ?? 0), 0);
-    // Only cancelled once every room line making up this stay is cancelled -
-    // a partial cancellation still leaves the guest occupying the unit.
-    const allCancelled = rooms.every((r) => r.is_cancelled);
+    // Channex marks a cancellation at the REVISION level: status is one of
+    // "new", "modified", "cancelled", and that is the authoritative signal.
+    // The per-room is_cancelled flag is for partial cancellations, where one
+    // room of a multi-room booking is dropped and the rest of the stay
+    // stands - it is absent entirely from most cancellation payloads,
+    // including every cancelled example in Channex's own docs. Reading only
+    // the room flag treated a plain cancellation as still confirmed: nights
+    // stayed closed on every channel, the door code stayed live, and a
+    // cleaner was still sent for a guest who was not coming.
+    //
+    // The room flag is still honoured, because a stay whose every room line
+    // is cancelled is cancelled even if other rooms on the booking survive.
+    const bookingCancelled = (booking.status || "").toLowerCase() === "cancelled";
+    const allCancelled = bookingCancelled || rooms.every((r) => r.is_cancelled === true);
     const status = allCancelled ? "CANCELLED" : "CONFIRMED";
 
     const existing = await prisma.reservation.findFirst({ where: { externalId } });
@@ -212,18 +244,7 @@ export async function upsertReservationsFromBookingData(
       reservationIds.push(existing.id);
 
       if (becameCancelled) {
-        await revokeAccessCodesForReservation(existing.id, listing.property.ownerId);
-        // Drop the turnover clean too. Without this a cleaner is still
-        // scheduled for a guest who is no longer coming, which is a real
-        // person making a real trip. Only PENDING tasks are removed -
-        // anything already in progress or completed describes work that
-        // actually happened and stays on the record.
-        await prisma.cleaningTask.deleteMany({ where: { reservationId: existing.id, status: "PENDING" } });
-        console.log(`[channex-bookings] booking ${booking.id} cancelled: codes revoked, pending clean removed`);
-        // No availability push is needed here: the cancellation came from
-        // Channex, so it already knows. The nights free themselves anyway -
-        // buildAriValues ignores cancelled stays, so the next push for any
-        // reason reports them available again.
+        await releaseCancelledReservation(existing.id, listing.property.ownerId, `booking ${booking.id}`);
       } else if (datesChanged && !allCancelled) {
         await updateAccessCodePeriodsForReservation(existing.id, listing.property.ownerId, checkIn, checkOut);
         await prisma.cleaningTask.updateMany({
@@ -231,6 +252,35 @@ export async function upsertReservationsFromBookingData(
           data: { scheduledDate: checkOut },
         });
       }
+    }
+  }
+
+  // A modification can move a booking onto a different unit, and it arrives
+  // as a revision whose rooms[] simply no longer mentions the old one. The
+  // reservation created for that old unit would otherwise sit CONFIRMED
+  // forever, holding nights the guest gave up - the nights never come back
+  // on sale and a cleaner still turns up.
+  //
+  // Only runs when this revision mapped at least one room. A delivery that
+  // mapped nothing is a mapping problem, not a guest changing their mind,
+  // and must never be read as one. Listings deliberately skipped because
+  // their property isn't on Channex yet are excluded for the same reason.
+  if (byListing.size > 0) {
+    const stale = await prisma.reservation.findMany({
+      where: {
+        externalId: { startsWith: `channex-${booking.id}-` },
+        status: { not: "CANCELLED" },
+      },
+      select: { id: true, externalId: true, property: { select: { ownerId: true, name: true } } },
+    });
+
+    for (const row of stale) {
+      const listingId = (row.externalId ?? "").slice(`channex-${booking.id}-`.length);
+      if (byListing.has(listingId) || offChannexListingIds.has(listingId)) continue;
+
+      await prisma.reservation.update({ where: { id: row.id }, data: { status: "CANCELLED" } });
+      reservationIds.push(row.id);
+      await releaseCancelledReservation(row.id, row.property.ownerId, `booking ${booking.id} moved off ${row.property.name}`);
     }
   }
 
