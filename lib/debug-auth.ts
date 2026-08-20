@@ -76,7 +76,11 @@ export async function requireDebugAccess(req: NextRequest): Promise<DebugAccess>
     return { ok: true, userId: user.id, via: "secret" };
   }
 
-  const users = await prisma.user.findMany({ select: { id: true, email: true }, take: 2 });
+  const users = await prisma.user.findMany({
+    select: { id: true, email: true, _count: { select: { properties: true } } },
+    orderBy: { createdAt: "asc" },
+    take: 25,
+  });
   if (users.length === 1) return { ok: true, userId: users[0].id, via: "secret" };
 
   return {
@@ -87,6 +91,13 @@ export async function requireDebugAccess(req: NextRequest): Promise<DebugAccess>
           users.length === 0
             ? "No users exist in this database"
             : "More than one user exists - pass ?userId=<id> to say which one this request is for",
+        // Listing the candidates is what makes that error actionable - without
+        // it there is no way to discover a valid id, and the caller is stuck.
+        // This adds no meaningful exposure: anyone holding DEBUG_API_SECRET can
+        // already read every reservation and guest for whichever id they name.
+        // Property counts are included because they identify the real account
+        // at a glance when several users share a deployment.
+        candidates: users.map((u) => ({ userId: u.id, email: u.email, properties: u._count.properties })),
       },
       { status: 400 }
     ),
