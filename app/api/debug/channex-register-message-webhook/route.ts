@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { channexGet, channexPost, ChannexError } from "@/lib/channels/channex-core";
+import { channexGet, channexPost, channexPut, ChannexError } from "@/lib/channels/channex-core";
 
 // Registers a second Channex webhook for guest-message events, mirroring the
 // booking one already live (same callback_url, same is_global:false scoped
@@ -10,8 +10,15 @@ import { channexGet, channexPost, ChannexError } from "@/lib/channels/channex-co
 // permission that returned 403 on GET /message_threads, or is independent
 // of it.
 //
-//   GET /api/debug/channex-register-message-webhook            -> dry run
-//   GET /api/debug/channex-register-message-webhook?confirm=true -> registers it
+// Installing Channex's "Messages" application unlocked GET /message_threads
+// (403 -> 200) but did NOT retroactively activate a webhook registered
+// beforehand - it still comes back is_active:false. ?activate=true tries
+// PUT /webhooks/{id} to flip it, since no ack/activation endpoint has been
+// confirmed any other way.
+//
+//   GET /api/debug/channex-register-message-webhook              -> dry run
+//   GET /api/debug/channex-register-message-webhook?confirm=true  -> registers it
+//   GET /api/debug/channex-register-message-webhook?activate=true -> tries to activate the existing one
 const WEBHOOK_URL = "https://stayhq-dev.up.railway.app/api/channex/webhook";
 
 // "booking" was the one confirmed value for the booking event - trying its
@@ -28,7 +35,28 @@ export async function GET(req: NextRequest) {
   });
   if (!listing) return NextResponse.json({ error: "No ChannexListing found" }, { status: 404 });
 
-  const confirm = new URL(req.url).searchParams.get("confirm") === "true";
+  const { searchParams } = new URL(req.url);
+  const confirm = searchParams.get("confirm") === "true";
+  const activate = searchParams.get("activate") === "true";
+
+  if (activate) {
+    const existing = await channexGet<Array<{ id: string; attributes: { event_mask: string; is_active: boolean } }>>("/webhooks");
+    const messageWebhook = (existing.data ?? []).find((w) => w.attributes.event_mask === "message");
+    if (!messageWebhook) {
+      return NextResponse.json({ error: "No message webhook registered yet - run with ?confirm=true first" }, { status: 404 });
+    }
+    try {
+      const res = await channexPut(`/webhooks/${messageWebhook.id}`, { webhook: { is_active: true } });
+      return NextResponse.json({ attempted: "PUT is_active:true", status: "ok", response: res.data });
+    } catch (err) {
+      const e = err as ChannexError;
+      return NextResponse.json({
+        attempted: "PUT is_active:true",
+        status: "failed",
+        error: { message: e.message, status: e.status, code: e.code, details: e.details },
+      });
+    }
+  }
 
   if (!confirm) {
     return NextResponse.json({

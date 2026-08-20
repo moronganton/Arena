@@ -52,6 +52,10 @@ const EXPLORE_PATHS = [
   "/threads",
   "/booking_messages",
   "/guest_messages",
+  // message_threads/{id} only carries last_message, not full history - the
+  // real thread found via probing (Jorge Sanchez's) is hardcoded here since
+  // EXPLORE_PATHS has no per-request parameters.
+  "/message_threads/ed43fea2-4562-4ff1-b9c6-c5d6f68724f3/messages",
 ];
 
 export async function GET(req: NextRequest) {
