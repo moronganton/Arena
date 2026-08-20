@@ -450,36 +450,51 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const reservation = await prisma.reservation.create({
-      data: {
-        propertyId: row.propertyId,
-        guestId: guest.id,
-        checkIn: row.checkIn,
-        checkOut: row.checkOut,
-        ...(row.adults != null ? { adults: row.adults } : {}),
-        ...(row.children != null ? { children: row.children } : {}),
-        totalAmount: row.totalAmount,
-        currency: row.currency || "EUR",
-        source: row.source || "DIRECT",
-        status: row.status || "CONFIRMED",
-        // "manual-" never collides with the "smoobu-" scheme the live sync
-        // uses, so this can never silently merge with (or be silently
-        // overwritten by) an actual Smoobu-synced booking.
-        externalId: row.confirmationCode ? `manual-${row.confirmationCode}` : undefined,
-        confirmationCode: row.confirmationCode,
-        specialRequests: row.specialRequests,
-        internalNotes: row.notes ? `Bulk-imported: ${row.notes}` : "Bulk-imported historical reservation",
-        // Preserves the OTA's real booking-creation timestamp when the source
-        // export has one, rather than stamping every backfilled row with
-        // "just now" - Prisma allows overriding a @default(now()) field with
-        // an explicit value.
-        ...(row.bookedOn ? { createdAt: row.bookedOn } : {}),
-        // No platformCommissionSeenAt here on purpose - "delay until Smoobu
-        // reveals it" doesn't apply to historical data we already know at
-        // import time, only to reservations still flowing through live sync.
-        ...(row.platformCommission != null ? { platformCommission: row.platformCommission } : {}),
-      },
-    });
+    // externalId is unique, so re-importing a CSV that was imported before
+    // now fails the row rather than quietly creating a second copy of the
+    // stay. Caught per row: a repeat of one booking must not abort an import
+    // and strand the rows already written, since nothing here is
+    // transactional.
+    let reservation;
+    try {
+      reservation = await prisma.reservation.create({
+        data: {
+          propertyId: row.propertyId,
+          guestId: guest.id,
+          checkIn: row.checkIn,
+          checkOut: row.checkOut,
+          ...(row.adults != null ? { adults: row.adults } : {}),
+          ...(row.children != null ? { children: row.children } : {}),
+          totalAmount: row.totalAmount,
+          currency: row.currency || "EUR",
+          source: row.source || "DIRECT",
+          status: row.status || "CONFIRMED",
+          // "manual-" never collides with the "smoobu-" scheme the live sync
+          // uses, so this can never silently merge with (or be silently
+          // overwritten by) an actual Smoobu-synced booking.
+          externalId: row.confirmationCode ? `manual-${row.confirmationCode}` : undefined,
+          confirmationCode: row.confirmationCode,
+          specialRequests: row.specialRequests,
+          internalNotes: row.notes ? `Bulk-imported: ${row.notes}` : "Bulk-imported historical reservation",
+          // Preserves the OTA's real booking-creation timestamp when the source
+          // export has one, rather than stamping every backfilled row with
+          // "just now" - Prisma allows overriding a @default(now()) field with
+          // an explicit value.
+          ...(row.bookedOn ? { createdAt: row.bookedOn } : {}),
+          // No platformCommissionSeenAt here on purpose - "delay until Smoobu
+          // reveals it" doesn't apply to historical data we already know at
+          // import time, only to reservations still flowing through live sync.
+          ...(row.platformCommission != null ? { platformCommission: row.platformCommission } : {}),
+        },
+      });
+    } catch (err) {
+      // P2002 is the unique-constraint violation: this stay is already here.
+      if ((err as { code?: string }).code === "P2002") {
+        skipped++;
+        continue;
+      }
+      throw err;
+    }
     createdIds.push(reservation.id);
     created++;
   }

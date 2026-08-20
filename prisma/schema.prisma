@@ -511,7 +511,14 @@ model Reservation {
   currency        String   @default("EUR")
   specialRequests String?
   internalNotes   String?
-  externalId      String?  // ID from the OTA
+  // Unique so a re-import can never quietly create a second reservation for
+  // a stay that already exists. That is not hypothetical: a change to how
+  // this id was built left older rows unrecognisable, the poller treated
+  // those bookings as new, and each duplicate generated its own PIN on a real
+  // door lock. A constraint turns that into a failed insert instead of a
+  // second key. Postgres allows any number of NULLs, so direct bookings with
+  // no OTA reference are unaffected.
+  externalId      String?  @unique // ID from the OTA
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
