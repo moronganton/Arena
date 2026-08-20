@@ -46,6 +46,12 @@ const EXPLORE_PATHS = [
   "/webhook_settings",
   "/revision",
   "/revisions",
+  // Step 7 (messaging both directions) discovery.
+  "/messages",
+  "/message_threads",
+  "/threads",
+  "/booking_messages",
+  "/guest_messages",
 ];
 
 export async function GET(req: NextRequest) {
