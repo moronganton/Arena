@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
 
   // If this is a "sync all" request
   if (body.action === "sync_all") {
-    await syncAllChannels();
+    await syncAllChannels(session!.user!.id);
     return NextResponse.json({ success: true, message: "All channels synced" });
   }
 

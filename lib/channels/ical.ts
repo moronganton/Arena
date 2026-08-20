@@ -49,6 +49,31 @@ export async function syncChannelIcal(
     return { created: 0, updated: 0, errors: ["Channel not found or no iCal URL"] };
   }
 
+  // A property whose connectivity belongs to a channel manager must not also
+  // be written by this importer. That is the invariant channelProvider was
+  // introduced for - "two managers must never own the same listing at once" -
+  // and this path was the one place that never checked it.
+  //
+  // This is not theoretical. This importer is the pre-Smoobu integration,
+  // superseded and dropped from the navigation in July with its stored
+  // ChannelConfig rows left behind. When the screen came back, those rows
+  // came back with it, and a single click re-imported an entire OTA calendar
+  // onto a live Smoobu property as confirmed reservations - each one holding
+  // real dates and each one able to program a real door lock.
+  //
+  // Only a property explicitly on no channel manager may be synced this way.
+  if (channel.property.channelProvider !== "NONE") {
+    return {
+      created: 0,
+      updated: 0,
+      errors: [
+        `${channel.property.name} is managed by ${channel.property.channelProvider}. ` +
+          `Calendar-feed import is disabled for it, because that manager already owns its ` +
+          `availability and importing again would create duplicate stays.`,
+      ],
+    };
+  }
+
   const errors: string[] = [];
   let created = 0;
   let updated = 0;
@@ -133,9 +158,14 @@ export async function syncChannelIcal(
   return { created, updated, errors };
 }
 
-export async function syncAllChannels(): Promise<void> {
+// Scoped to one owner. It previously selected every active feed in the
+// database regardless of who it belonged to, so one host pressing "Sync All"
+// reached into every other host's properties. Only one account exists today,
+// so nothing came of it, but it is a cross-tenant write and does not survive
+// a second customer.
+export async function syncAllChannels(ownerId: string): Promise<void> {
   const channels = await prisma.channelConfig.findMany({
-    where: { isActive: true, icalUrl: { not: null } },
+    where: { isActive: true, icalUrl: { not: null }, property: { ownerId } },
   });
 
   await Promise.allSettled(channels.map((c) => syncChannelIcal(c.id)));
