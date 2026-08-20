@@ -46,12 +46,12 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "No message webhook registered yet - run with ?confirm=true first" }, { status: 404 });
     }
     try {
-      const res = await channexPut(`/webhooks/${messageWebhook.id}`, { webhook: { is_active: true } });
-      return NextResponse.json({ attempted: "PUT is_active:true", status: "ok", response: res.data });
+      const res = await channexPut(`/webhooks/${messageWebhook.id}`, { webhook: { is_active: true, send_data: true } });
+      return NextResponse.json({ attempted: "PUT is_active:true, send_data:true", status: "ok", response: res.data });
     } catch (err) {
       const e = err as ChannexError;
       return NextResponse.json({
-        attempted: "PUT is_active:true",
+        attempted: "PUT is_active:true, send_data:true",
         status: "failed",
         error: { message: e.message, status: e.status, code: e.code, details: e.details },
       });
