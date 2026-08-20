@@ -36,11 +36,26 @@ export async function buildAriValues(
   dateFrom: Date,
   dateTo: Date
 ): Promise<RestrictionValue[]> {
-  const [listing, property, rules, blocks] = await Promise.all([
+  const [listing, property, rules, blocks, stays] = await Promise.all([
     prisma.channexListing.findUnique({ where: { propertyId } }),
     prisma.property.findUniqueOrThrow({ where: { id: propertyId }, select: { basePrice: true } }),
     prisma.pricingRule.findMany({ where: { propertyId, active: true } }),
     prisma.calendarBlock.findMany({ where: { propertyId } }),
+    // Nights already sold. Cancelled stays are excluded, which is exactly what
+    // frees those nights again the moment a guest cancels - no separate
+    // release step, the next push simply reports them available.
+    //
+    // Overlap, not containment: a stay that started before this window and
+    // ends inside it still occupies part of it.
+    prisma.reservation.findMany({
+      where: {
+        propertyId,
+        status: { not: "CANCELLED" },
+        checkIn: { lt: dateTo },
+        checkOut: { gt: dateFrom },
+      },
+      select: { checkIn: true, checkOut: true },
+    }),
   ]);
   if (!listing) throw new Error(`buildAriValues: no ChannexListing for property ${propertyId}`);
 
@@ -49,7 +64,8 @@ export async function buildAriValues(
     rules as PricingRuleLike[],
     blocks as CalendarBlockLike[],
     dateFrom,
-    dateTo
+    dateTo,
+    stays
   );
 
   return days.map((d) => ({

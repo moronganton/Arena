@@ -59,8 +59,20 @@ function ruleAppliesOn(rule: PricingRuleLike, date: Date): boolean {
   return true;
 }
 
+export interface StayLike {
+  checkIn: Date;
+  checkOut: Date; // exclusive
+}
+
 function isBlocked(date: Date, blocks: CalendarBlockLike[]): boolean {
   return blocks.some((b) => date >= b.startDate && date < b.endDate);
+}
+
+// A night someone is already staying in. Half-open like every other range
+// here: the checkout date is free again, because that guest leaves in the
+// morning and the next can arrive the same afternoon.
+function isOccupied(date: Date, stays: StayLike[]): boolean {
+  return stays.some((s) => date >= s.checkIn && date < s.checkOut);
 }
 
 // Rules apply in priority order, LOWEST first, so a higher-priority rule
@@ -92,12 +104,20 @@ function resolveMinStay(applicable: PricingRuleLike[]): number {
   return minStay;
 }
 
+// Existing stays must be passed in, and cancelled ones must be left out by
+// the caller. Availability used to be derived from host-set blocks alone,
+// which meant a booked night still reported as free: taking a booking pushed
+// availability 1 for the very dates it filled, and any later rate change
+// re-opened every booked night inside the push window. On a live property
+// that is a double booking waiting to happen, and it is also what Channex's
+// availability test checks for directly.
 export function materializeRates(
   basePrice: number,
   rules: PricingRuleLike[],
   blocks: CalendarBlockLike[],
   dateFrom: Date,
-  dateTo: Date // exclusive, matching the checkIn/checkOut convention used throughout
+  dateTo: Date, // exclusive, matching the checkIn/checkOut convention used throughout
+  stays: StayLike[] = []
 ): MaterializedDay[] {
   const days: MaterializedDay[] = [];
   const cursor = new Date(Date.UTC(dateFrom.getUTCFullYear(), dateFrom.getUTCMonth(), dateFrom.getUTCDate()));
@@ -109,7 +129,7 @@ export function materializeRates(
       date: toDateKey(cursor),
       price: resolvePrice(basePrice, applicable),
       minStay: resolveMinStay(applicable),
-      available: !isBlocked(cursor, blocks),
+      available: !isBlocked(cursor, blocks) && !isOccupied(cursor, stays),
     });
     cursor.setUTCDate(cursor.getUTCDate() + 1);
   }

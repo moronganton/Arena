@@ -213,6 +213,17 @@ export async function upsertReservationsFromBookingData(
 
       if (becameCancelled) {
         await revokeAccessCodesForReservation(existing.id, listing.property.ownerId);
+        // Drop the turnover clean too. Without this a cleaner is still
+        // scheduled for a guest who is no longer coming, which is a real
+        // person making a real trip. Only PENDING tasks are removed -
+        // anything already in progress or completed describes work that
+        // actually happened and stays on the record.
+        await prisma.cleaningTask.deleteMany({ where: { reservationId: existing.id, status: "PENDING" } });
+        console.log(`[channex-bookings] booking ${booking.id} cancelled: codes revoked, pending clean removed`);
+        // No availability push is needed here: the cancellation came from
+        // Channex, so it already knows. The nights free themselves anyway -
+        // buildAriValues ignores cancelled stays, so the next push for any
+        // reason reports them available again.
       } else if (datesChanged && !allCancelled) {
         await updateAccessCodePeriodsForReservation(existing.id, listing.property.ownerId, checkIn, checkOut);
         await prisma.cleaningTask.updateMany({
