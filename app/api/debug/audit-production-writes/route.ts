@@ -30,8 +30,14 @@ function classifyWriter(externalId: string | null): string {
   if (!externalId) return "manual or CSV import (no externalId)";
   if (externalId.startsWith("smoobu-")) return "Smoobu sync";
   if (externalId.startsWith("channex-")) return "Channex intake";
+  if (externalId.startsWith("manual-")) return "manual entry";
   if (/^\d+$/.test(externalId)) return "Booking.com API import";
-  return "iCal feed import";
+  // An iCal UID is "<unique>@<domain>". Matching that shape rather than
+  // treating every unrecognised id as iCal keeps one hand-entered row from
+  // being reported as an import - which is exactly what happened on the
+  // first run of this audit.
+  if (externalId.includes("@")) return "iCal feed import";
+  return `unrecognised (${externalId.slice(0, 24)})`;
 }
 
 export async function GET(req: NextRequest) {

@@ -22,12 +22,25 @@ import { revokeAccessCodesForReservation } from "@/lib/ttlock";
 // that owns a live PIN would leave that PIN working on a real lock with
 // nothing left in StayHQ pointing at it - an open door no one can find.
 
+// Deliberately a POSITIVE match, not "everything I don't recognise".
+//
+// The first version of this excluded the writers it knew and treated the
+// rest as iCal. That is the wrong shape for a delete tool: a real
+// hand-entered reservation carrying externalId "manual-HMH8CR9EZC" matched
+// none of the exclusions and would have been deleted. A tool that removes
+// data has to name what it takes, not what it spares.
+//
+// An iCal UID is "<unique>@<domain>" - Airbnb, Booking.com and VRBO all
+// emit that shape, and it is what every affected row in this database
+// actually looks like. Anything else is left alone and reported, so a row
+// this does not recognise is visible rather than silently swept up.
 function isIcalWriter(externalId: string | null): boolean {
   if (!externalId) return false; // manual entry - never touched
   if (externalId.startsWith("smoobu-")) return false;
   if (externalId.startsWith("channex-")) return false;
+  if (externalId.startsWith("manual-")) return false;
   if (/^\d+$/.test(externalId)) return false; // Booking.com API import
-  return true;
+  return externalId.includes("@");
 }
 
 export async function GET(req: NextRequest) {
@@ -37,10 +50,22 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const apply = searchParams.get("apply") === "true";
   const propertyId = searchParams.get("propertyId");
+  // Scope to rows written after a moment - e.g. only the batch from one bad
+  // sync, leaving a year of older imports to be judged separately.
+  const createdAfterRaw = searchParams.get("createdAfter");
+  const createdAfter = createdAfterRaw ? new Date(createdAfterRaw) : null;
+  if (createdAfter && Number.isNaN(createdAfter.getTime())) {
+    return NextResponse.json({ error: `createdAfter is not a valid date: ${createdAfterRaw}` }, { status: 400 });
+  }
+  // Revoke the door codes but keep the reservation rows. The fastest safe
+  // move when live PINs are the urgent part and what to do with the history
+  // is still an open question.
+  const codesOnly = searchParams.get("codesOnly") === "true";
 
   const candidates = await prisma.reservation.findMany({
     where: {
       externalId: { not: null },
+      ...(createdAfter ? { createdAt: { gte: createdAfter } } : {}),
       property: {
         ownerId: access.userId,
         channelProvider: { in: ["SMOOBU", "CHANNEX"] },
@@ -65,6 +90,13 @@ export async function GET(req: NextRequest) {
 
   const targets = candidates.filter((r) => isIcalWriter(r.externalId));
 
+  // Everything in range that this refuses to touch, named explicitly. A
+  // delete tool should make its exclusions inspectable rather than leave
+  // the operator to trust that the filter was right.
+  const spared = candidates
+    .filter((r) => !isIcalWriter(r.externalId))
+    .map((r) => ({ externalId: r.externalId, guest: r.guest.name, property: r.property.name }));
+
   const plan = targets.map((r) => ({
     reservationId: r.id,
     property: r.property.name,
@@ -86,10 +118,13 @@ export async function GET(req: NextRequest) {
   if (!apply) {
     return NextResponse.json({
       mode: "dry run - nothing has been changed",
-      wouldRemove: plan.length,
+      wouldAffect: plan.length,
+      action: codesOnly ? "revoke door codes only, keep the reservations" : "revoke door codes AND delete the reservations",
       totalCodesToRevoke: plan.reduce((n, p) => n + p.accessCodes, 0),
       codesThatReachedARealLock: plan.reduce((n, p) => n + p.codesOnRealLocks, 0),
-      hint: "Re-run with &apply=true to remove these.",
+      hint: "Re-run with &apply=true. Add &codesOnly=true to revoke PINs without deleting rows, " +
+        "or &createdAfter=2026-08-20T22:00:00Z to limit this to one sync's batch.",
+      notTouched: spared,
       plan,
     });
   }
@@ -101,9 +136,18 @@ export async function GET(req: NextRequest) {
   for (const r of targets) {
     try {
       if (r.accessCodes.length > 0) {
-        await revokeAccessCodesForReservation(r.id, r.property.ownerId);
+        const { lockErrors } = await revokeAccessCodesForReservation(r.id, r.property.ownerId);
         codesRevoked += r.accessCodes.length;
+        // A code the lock refused to drop is still live on the door. That
+        // has to reach the operator, not just the log.
+        if (lockErrors.length) errors.push(`${r.id} lock: ${lockErrors.join("; ")}`);
       }
+
+      if (codesOnly) {
+        removed.push(r.id);
+        continue;
+      }
+
       // Dependent rows first - these relations have no cascade, so the
       // delete below fails outright if anything still points at the row.
       await prisma.message.deleteMany({ where: { reservationId: r.id } });
@@ -125,9 +169,10 @@ export async function GET(req: NextRequest) {
   }
 
   return NextResponse.json({
-    mode: "applied",
-    removed: removed.length,
+    mode: codesOnly ? "applied - codes revoked, reservations kept" : "applied - codes revoked and reservations deleted",
+    affected: removed.length,
     codesRevoked,
+    notTouched: spared.length,
     errors,
   });
 }
