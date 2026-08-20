@@ -20,7 +20,7 @@ import { upsertReservationsFromBookingData, type ChannexBookingAttributes } from
 // revisions of one booking, and why the revision is what gets acknowledged.
 
 const FEED_PAGE_LIMIT = 10; // Channex's own page size for this endpoint
-const MAX_PAGES = 20; // 200 revisions in one run is far beyond a normal backlog
+const MAX_BATCHES = 20; // 200 revisions in one run is far beyond a normal backlog
 
 export interface ChannexRevisionsPollResult {
   fetched: number;
@@ -38,11 +38,15 @@ interface RevisionEnvelope {
 }
 
 // Oldest first, so a booking and its later modification are applied in the
-// order they happened rather than the modification being overwritten by the
-// original.
-async function fetchFeedPage(page: number): Promise<RevisionEnvelope[]> {
+// order they happened rather than the modification overwriting the original.
+//
+// Always the first page, never page 2. The feed contains only unacknowledged
+// revisions, so acknowledging one removes it - which means the next batch is
+// always at the front. Paging forward through a list that shrinks underneath
+// you skips exactly as many items as you just acknowledged.
+async function fetchFeedBatch(): Promise<RevisionEnvelope[]> {
   const res = await channexGet<RevisionEnvelope[]>(
-    `/booking_revisions/feed?order[inserted_at]=asc&pagination[page]=${page}&pagination[limit]=${FEED_PAGE_LIMIT}`
+    `/booking_revisions/feed?order[inserted_at]=asc&pagination[page]=1&pagination[limit]=${FEED_PAGE_LIMIT}`
   );
   return res.data ?? [];
 }
@@ -63,20 +67,20 @@ export async function pollChannexRevisions(): Promise<ChannexRevisionsPollResult
 
   const seen = new Set<string>();
 
-  for (let page = 1; page <= MAX_PAGES; page++) {
+  for (let batchNo = 1; batchNo <= MAX_BATCHES; batchNo++) {
     let batch: RevisionEnvelope[];
     try {
-      batch = await fetchFeedPage(page);
+      batch = await fetchFeedBatch();
     } catch (err) {
       const e = err as ChannexError;
-      result.errors.push(`feed page ${page}: ${e.message}`);
+      result.errors.push(`feed batch ${batchNo}: ${e.message}`);
       break;
     }
     if (batch.length === 0) break;
 
-    // An unacknowledged revision stays in the feed, so paging forward past one
-    // that was left for retry would return it again. Stop when a page adds
-    // nothing new rather than looping over the same backlog.
+    // A revision left unacknowledged after a failure stays at the front of
+    // the feed and would be handed back forever. Stopping when a batch brings
+    // nothing new is what ends the loop in that case.
     let added = 0;
 
     for (const rev of batch) {
@@ -116,7 +120,6 @@ export async function pollChannexRevisions(): Promise<ChannexRevisionsPollResult
     }
 
     if (added === 0) break;
-    if (batch.length < FEED_PAGE_LIMIT) break;
   }
 
   return result;
