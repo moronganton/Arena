@@ -1,80 +1,162 @@
 import { prisma } from "@/lib/prisma";
-import { channexGet } from "@/lib/channels/channex-core";
-import { upsertReservationsFromChannexBooking } from "@/lib/channels/channex-bookings";
+import { channexGet, channexPost, ChannexError } from "@/lib/channels/channex-core";
+import { upsertReservationsFromBookingData, type ChannexBookingAttributes } from "@/lib/channels/channex-bookings";
 
-// Backstop for the webhook receiver: polls Channex's booking list for
-// anything with an unacknowledged revision and runs it through the same
-// upsert path the webhook uses. Channex's certification requirements call
-// for this alongside webhooks specifically because webhooks alone aren't
-// considered reliable enough - a delivery can be missed (network blip, a
-// temporary outage on either side) with nothing else to notice.
+// Reads bookings from the unacknowledged revision feed and acknowledges each
+// one once it is safely stored.
 //
-// Deliberately reuses upsertReservationsFromChannexBooking rather than a
-// separate implementation - a booking already processed via webhook is just
-// reprocessed (idempotent by the (booking, property) externalId), so running
-// this on a schedule alongside live webhooks is always safe.
+// Two things Channex requires, both previously missing here. It names the
+// endpoint outright - "be sure that you do not use GET api/v1/bookings...
+// endpoints, use GET api/v1/booking_revisions... instead" - and it makes
+// acknowledgement a condition of certification: "Be sure that you send
+// Booking Acknowledge message. It is required step for certification."
 //
-// GET /bookings has no confirmed filter for "just the pending ones" - the
-// full list is small in this shared sandbox account today, so this pulls
-// everything and filters client-side on acknowledge_status /
-// has_unacked_revisions (both confirmed fields, seen on real bookings via
-// /api/debug/channex-bookings-raw). Worth revisiting for a filtered request
-// once the account has real volume - not a now problem.
+// The feed only ever returns revisions that have not been acknowledged, so
+// acknowledgement is not bookkeeping - it is what advances the cursor. Skip it
+// and the same booking is redelivered every thirty minutes forever.
 //
-// No booking-acknowledgment call is made here: Channex's dashboard shows an
-// "Acked" status per booking, but no ack endpoint has been confirmed against
-// the real API (bookings can't be created there directly either, so there's
-// never been a live delivery to test one against). Left for whenever that
-// gets probed properly, rather than guessed at.
+// A revision is one message from an OTA; a booking is the latest of them.
+// That is why a new booking, a modification and a cancellation are three
+// revisions of one booking, and why the revision is what gets acknowledged.
+
+const FEED_PAGE_LIMIT = 10; // Channex's own page size for this endpoint
+const MAX_PAGES = 20; // 200 revisions in one run is far beyond a normal backlog
+
 export interface ChannexRevisionsPollResult {
-  candidates: number;
-  processed: number;
+  fetched: number;
   reservationsTouched: number;
+  acknowledged: number;
+  skippedButAcknowledged: number;
+  leftForRetry: number;
   errors: string[];
 }
 
-interface PolledBookingAttributes {
+interface RevisionEnvelope {
   id: string;
-  property_id: string;
-  acknowledge_status?: string;
-  has_unacked_revisions?: boolean;
+  type: string;
+  attributes: ChannexBookingAttributes;
+}
+
+// Oldest first, so a booking and its later modification are applied in the
+// order they happened rather than the modification being overwritten by the
+// original.
+async function fetchFeedPage(page: number): Promise<RevisionEnvelope[]> {
+  const res = await channexGet<RevisionEnvelope[]>(
+    `/booking_revisions/feed?order[inserted_at]=asc&pagination[page]=${page}&pagination[limit]=${FEED_PAGE_LIMIT}`
+  );
+  return res.data ?? [];
+}
+
+export async function acknowledgeRevision(revisionId: string): Promise<void> {
+  await channexPost(`/booking_revisions/${revisionId}/ack`, {});
 }
 
 export async function pollChannexRevisions(): Promise<ChannexRevisionsPollResult> {
-  const listings = await prisma.channexListing.findMany({
-    where: { property: { channelProvider: "CHANNEX" } },
-    select: { channexPropertyId: true },
-  });
-  const ourPropertyIds = new Set(listings.map((l) => l.channexPropertyId));
+  const result: ChannexRevisionsPollResult = {
+    fetched: 0,
+    reservationsTouched: 0,
+    acknowledged: 0,
+    skippedButAcknowledged: 0,
+    leftForRetry: 0,
+    errors: [],
+  };
 
-  if (ourPropertyIds.size === 0) {
-    return { candidates: 0, processed: 0, reservationsTouched: 0, errors: [] };
+  const seen = new Set<string>();
+
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    let batch: RevisionEnvelope[];
+    try {
+      batch = await fetchFeedPage(page);
+    } catch (err) {
+      const e = err as ChannexError;
+      result.errors.push(`feed page ${page}: ${e.message}`);
+      break;
+    }
+    if (batch.length === 0) break;
+
+    // An unacknowledged revision stays in the feed, so paging forward past one
+    // that was left for retry would return it again. Stop when a page adds
+    // nothing new rather than looping over the same backlog.
+    let added = 0;
+
+    for (const rev of batch) {
+      if (seen.has(rev.id)) continue;
+      seen.add(rev.id);
+      added++;
+      result.fetched++;
+
+      try {
+        const { reservationIds, skipped } = await upsertReservationsFromBookingData(rev.attributes);
+        result.reservationsTouched += reservationIds.length;
+
+        if (reservationIds.length > 0) {
+          await acknowledgeRevision(rev.id);
+          result.acknowledged++;
+        } else {
+          // Nothing was stored, but nothing ever will be either: the booking
+          // is for a room we do not map or a property not on Channex. Retrying
+          // cannot change that, and leaving it unacknowledged would keep it in
+          // the feed indefinitely, ahead of bookings that do matter. So it is
+          // acknowledged deliberately, and the reason is recorded.
+          await acknowledgeRevision(rev.id);
+          result.skippedButAcknowledged++;
+          console.log(
+            `[channex-revisions] revision ${rev.id} acknowledged without storing: ${skipped.join("; ") || "no mapped rooms"}`
+          );
+        }
+      } catch (err) {
+        // Deliberately NOT acknowledged. This is the case acknowledgement
+        // exists for - the booking stays in the feed and comes back next run,
+        // rather than being lost because we said we had it.
+        const message = err instanceof Error ? err.message : String(err);
+        result.leftForRetry++;
+        result.errors.push(`revision ${rev.id}: ${message}`);
+        console.error(`[channex-revisions] revision ${rev.id} failed, left unacknowledged:`, err);
+      }
+    }
+
+    if (added === 0) break;
+    if (batch.length < FEED_PAGE_LIMIT) break;
   }
 
-  const res = await channexGet<Array<{ attributes: PolledBookingAttributes }>>("/bookings");
-  const bookings = res.data ?? [];
+  return result;
+}
 
-  const pending = bookings.filter(
-    (b) =>
-      ourPropertyIds.has(b.attributes.property_id) &&
-      (b.attributes.acknowledge_status === "pending" || b.attributes.has_unacked_revisions === true)
-  );
+// Bookings that arrived by webhook but were never acknowledged - anything
+// stored before acknowledgement existed. They are no longer in the feed's
+// future, but Channex still considers them outstanding.
+export async function acknowledgeStoredButUnacked(): Promise<{ acknowledged: number; errors: string[] }> {
+  const logs = await prisma.channexWebhookLog.findMany({
+    where: { event: "booking", processedOk: true, reservationId: { not: null } },
+    orderBy: { createdAt: "asc" },
+    take: 200,
+  });
 
-  let processed = 0;
-  let reservationsTouched = 0;
+  let acknowledged = 0;
   const errors: string[] = [];
+  const done = new Set<string>();
 
-  for (const b of pending) {
+  for (const log of logs) {
+    let revisionId: string | null = null;
     try {
-      const { reservationIds } = await upsertReservationsFromChannexBooking(b.attributes.id);
-      reservationsTouched += reservationIds.length;
-      processed++;
+      revisionId = (JSON.parse(log.payload) as { payload?: { revision_id?: string } })?.payload?.revision_id ?? null;
+    } catch {
+      continue;
+    }
+    if (!revisionId || done.has(revisionId)) continue;
+    done.add(revisionId);
+
+    try {
+      await acknowledgeRevision(revisionId);
+      acknowledged++;
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[channex-revisions] booking ${b.attributes.id} failed:`, err);
-      errors.push(`${b.attributes.id}: ${msg}`);
+      const e = err as ChannexError;
+      // A revision already acknowledged, or long gone, is not a problem worth
+      // reporting - the goal is simply that it is no longer outstanding.
+      if (e.status === 404 || e.status === 422) continue;
+      errors.push(`${revisionId}: ${e.message}`);
     }
   }
 
-  return { candidates: pending.length, processed, reservationsTouched, errors };
+  return { acknowledged, errors };
 }

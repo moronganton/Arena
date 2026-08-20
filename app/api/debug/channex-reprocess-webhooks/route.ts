@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireDebugAccess } from "@/lib/debug-auth";
 import { prisma } from "@/lib/prisma";
-import { upsertReservationsFromChannexBooking } from "@/lib/channels/channex-bookings";
+import { upsertReservationsFromChannexRevision } from "@/lib/channels/channex-bookings";
 
 // Re-runs the booking->reservation upsert for deliveries that already sat in
 // ChannexWebhookLog before that logic existed (task #10 shipped before task
@@ -22,10 +22,10 @@ export async function GET(req: NextRequest) {
     orderBy: { createdAt: "asc" },
   });
 
-  const bookingIds = candidates
+  const revisionIds = candidates
     .map((c) => {
       try {
-        return (JSON.parse(c.payload) as { payload?: { booking_id?: string } })?.payload?.booking_id ?? null;
+        return (JSON.parse(c.payload) as { payload?: { revision_id?: string } })?.payload?.revision_id ?? null;
       } catch {
         return null;
       }
@@ -36,21 +36,21 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       mode: "dry run - nothing changed",
       candidateDeliveries: candidates.length,
-      bookingIds,
+      revisionIds,
     });
   }
 
-  const results: Array<{ bookingId: string; reservationIds: string[]; skipped: string[] } | { bookingId: string; error: string }> = [];
-  for (const bookingId of bookingIds) {
+  const results: Array<{ revisionId: string; reservationIds: string[]; skipped: string[] } | { revisionId: string; error: string }> = [];
+  for (const revisionId of revisionIds) {
     try {
-      const { reservationIds, skipped } = await upsertReservationsFromChannexBooking(bookingId);
-      results.push({ bookingId, reservationIds, skipped });
-      const log = candidates.find((c) => c.payload.includes(bookingId));
+      const { reservationIds, skipped } = await upsertReservationsFromChannexRevision(revisionId);
+      results.push({ revisionId, reservationIds, skipped });
+      const log = candidates.find((c) => c.payload.includes(revisionId));
       if (log && reservationIds[0]) {
         await prisma.channexWebhookLog.update({ where: { id: log.id }, data: { reservationId: reservationIds[0] } });
       }
     } catch (err) {
-      results.push({ bookingId, error: err instanceof Error ? err.message : String(err) });
+      results.push({ revisionId, error: err instanceof Error ? err.message : String(err) });
     }
   }
 

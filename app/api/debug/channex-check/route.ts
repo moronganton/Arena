@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
 
   // Properties first — it's the cheapest auth check.
   const properties = await hit(base, "/properties", apiKey);
-  const bookings = await hit(base, "/bookings", apiKey);
+  const bookings = await hit(base, "/booking_revisions/feed", apiKey);
   const messages = await hit(base, "/messages", apiKey);
 
   return NextResponse.json({

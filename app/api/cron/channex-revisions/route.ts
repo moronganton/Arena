@@ -26,6 +26,12 @@ export async function GET(req: NextRequest) {
   return startCronRun("channex-revisions", async () => {
     const r = await pollChannexRevisions();
     if (r.errors.length) throw new Error(r.errors.join("; "));
-    return { candidates: r.candidates, processed: r.processed, reservationsTouched: r.reservationsTouched };
+    return {
+      fetched: r.fetched,
+      reservationsTouched: r.reservationsTouched,
+      acknowledged: r.acknowledged,
+      skippedButAcknowledged: r.skippedButAcknowledged,
+      leftForRetry: r.leftForRetry,
+    };
   });
 }

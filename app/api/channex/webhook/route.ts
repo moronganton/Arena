@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { upsertReservationsFromChannexBooking } from "@/lib/channels/channex-bookings";
+import { upsertReservationsFromChannexRevision } from "@/lib/channels/channex-bookings";
+import { acknowledgeRevision } from "@/lib/channels/channex-revisions";
 import { importGuestMessagesForBooking } from "@/lib/channels/channex-messages";
 
 // Receives Channex webhook deliveries.
@@ -80,16 +81,26 @@ export async function POST(req: NextRequest) {
   try {
     // Channex sends a thin notification - {event, payload:{property_id,
     // booking_id, revision_id}} - not the full booking. Confirmed against
-    // real deliveries via /api/debug/channex-webhook-log: the actual
-    // reservation data has to be fetched back from the API by booking_id.
-    const bookingId = (parsed as { payload?: { booking_id?: string } } | null)?.payload?.booking_id;
+    // real deliveries via /api/debug/channex-webhook-log. The revision id is
+    // what gets read and acknowledged: a booking is only ever the latest of
+    // its revisions, so a modification or cancellation arrives as a new
+    // revision of the same booking.
+    const payload = (parsed as { payload?: { booking_id?: string; revision_id?: string } } | null)?.payload;
+    const revisionId = payload?.revision_id;
 
-    if (event === "booking" && bookingId) {
-      const { reservationIds, skipped } = await upsertReservationsFromChannexBooking(bookingId);
+    if (event === "booking" && revisionId) {
+      const { reservationIds, skipped } = await upsertReservationsFromChannexRevision(revisionId);
       console.log(
-        `[channex-webhook] booking ${bookingId}: ${reservationIds.length} reservation(s) upserted` +
+        `[channex-webhook] revision ${revisionId}: ${reservationIds.length} reservation(s) upserted` +
           (skipped.length ? `, skipped: ${skipped.join("; ")}` : "")
       );
+
+      // Only after it is safely stored, per Channex's rule that a booking is
+      // acknowledged when saved and not before. An unacknowledged revision
+      // stays in the feed and is redelivered, which is the behaviour we want
+      // if anything above threw.
+      await acknowledgeRevision(revisionId);
+
       await prisma.channexWebhookLog.update({
         where: { id: logId },
         data: {
@@ -98,15 +109,16 @@ export async function POST(req: NextRequest) {
           error: reservationIds.length === 0 && skipped.length > 0 ? skipped.join("; ").slice(0, 900) : null,
         },
       });
-    } else if (event === "message" && bookingId) {
-      // The thin notification shape for "message" events hasn't been
-      // confirmed by a live delivery yet - assumed to carry booking_id the
-      // same way "booking" events do, since that's the only field name
-      // convention seen so far. If that assumption is wrong, bookingId is
-      // just undefined and this falls through to the generic branch below,
-      // which still stores the raw payload for inspection - never a crash.
-      const { imported } = await importGuestMessagesForBooking(bookingId);
-      console.log(`[channex-webhook] message event for booking ${bookingId}: ${imported} guest message(s) imported`);
+    } else if (event === "message" && payload?.booking_id) {
+      // Guest messages are keyed by booking, not revision - the messages API
+      // is a sub-resource of the booking and is unaffected by the revisions
+      // rule, which is about how bookings themselves are read.
+      //
+      // This branch has never actually run: no message webhook has ever been
+      // delivered, on either test hotel, which is why the scheduled poll is
+      // the real inbound route rather than a backstop.
+      const { imported } = await importGuestMessagesForBooking(payload.booking_id);
+      console.log(`[channex-webhook] message event for booking ${payload.booking_id}: ${imported} guest message(s) imported`);
       await prisma.channexWebhookLog.update({ where: { id: logId }, data: { processedOk: true } });
     } else {
       // Unrecognized or non-booking event - stored for visibility, nothing

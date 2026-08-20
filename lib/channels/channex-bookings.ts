@@ -54,23 +54,17 @@ export interface ChannexBookingAttributes {
   rooms: ChannexBookingRoom[];
 }
 
-// GET /bookings/{id} is the standard REST shape but was never directly
-// confirmed - staging.channex.io can't be reached from this sandbox to test
-// ahead of time. Only the list endpoint is proven, so that's the fallback if
-// the direct fetch doesn't come back in the expected shape.
-export async function fetchChannexBooking(bookingId: string): Promise<ChannexBookingAttributes> {
-  try {
-    const res = await channexGet<{ attributes?: ChannexBookingAttributes }>(`/bookings/${bookingId}`);
-    const attrs = res.data?.attributes;
-    if (attrs?.id) return attrs;
-  } catch {
-    // fall through to the list scan below
-  }
-
-  const listRes = await channexGet<Array<{ attributes: ChannexBookingAttributes }>>("/bookings");
-  const found = (listRes.data ?? []).find((b) => b.attributes?.id === bookingId);
-  if (!found) throw new Error(`Channex booking ${bookingId} not found`);
-  return found.attributes;
+// Booking data is read through booking revisions, never through /bookings.
+// Channex requires this for certification in as many words: "be sure that you
+// do not use GET api/v1/bookings... endpoints, use GET
+// api/v1/booking_revisions... instead". A revision is the individual message
+// an OTA sent; a booking is only ever the latest of them, which is why the
+// revision is the thing to acknowledge.
+export async function fetchChannexRevision(revisionId: string): Promise<ChannexBookingAttributes> {
+  const res = await channexGet<{ attributes?: ChannexBookingAttributes }>(`/booking_revisions/${revisionId}`);
+  const attrs = res.data?.attributes;
+  if (!attrs?.id) throw new Error(`Channex booking revision ${revisionId} returned no attributes`);
+  return attrs;
 }
 
 function mapOtaNameToSource(otaName: string | null | undefined): string {
@@ -82,10 +76,18 @@ function mapOtaNameToSource(otaName: string | null | undefined): string {
   return "DIRECT";
 }
 
-export async function upsertReservationsFromChannexBooking(
-  bookingId: string
+export async function upsertReservationsFromChannexRevision(
+  revisionId: string
 ): Promise<{ reservationIds: string[]; skipped: string[] }> {
-  const booking = await fetchChannexBooking(bookingId);
+  return upsertReservationsFromBookingData(await fetchChannexRevision(revisionId));
+}
+
+// Takes the booking data directly, because the revision feed already returns
+// it in full - fetching each revision again by id would be one wasted call
+// per booking on a feed that pages ten at a time.
+export async function upsertReservationsFromBookingData(
+  booking: ChannexBookingAttributes
+): Promise<{ reservationIds: string[]; skipped: string[] }> {
 
   const listings = await prisma.channexListing.findMany({ include: { property: true } });
 

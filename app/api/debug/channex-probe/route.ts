@@ -40,8 +40,9 @@ const EXPLORE_PATHS = [
   "/rate_plans",
   "/facilities",
   "/property_types",
-  // Step 6 (booking intake) discovery.
-  "/bookings",
+  // Step 6 (booking intake). Bookings are read through revisions, never
+  // through /bookings - Channex requires that for certification.
+  "/booking_revisions/feed",
   "/webhooks",
   "/webhook_settings",
   "/revision",
