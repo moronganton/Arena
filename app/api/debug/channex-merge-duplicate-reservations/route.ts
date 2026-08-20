@@ -59,6 +59,12 @@ export async function GET(req: NextRequest) {
     for (const dupe of g.slice(1)) {
       const revoke = await revokeAccessCodesForReservation(dupe.id, dupe.property.ownerId);
       await prisma.cleaningTask.deleteMany({ where: { reservationId: dupe.id } });
+      // AccessCode and Message both reference Reservation with no cascade -
+      // revokeAccessCodesForReservation only deactivates codes (removes them
+      // from the physical lock, leaves the row), so the rows still have to
+      // go before the Reservation delete itself is allowed.
+      await prisma.accessCode.deleteMany({ where: { reservationId: dupe.id } });
+      await prisma.message.deleteMany({ where: { reservationId: dupe.id } });
       await prisma.reservation.delete({ where: { id: dupe.id } });
       const otherReservations = await prisma.reservation.count({ where: { guestId: dupe.guest.id } });
       if (otherReservations === 0) {
