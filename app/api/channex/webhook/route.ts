@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { upsertReservationsFromChannexBooking } from "@/lib/channels/channex-bookings";
+import { importGuestMessagesForBooking } from "@/lib/channels/channex-messages";
 
 // Receives Channex webhook deliveries.
 //
@@ -97,6 +98,16 @@ export async function POST(req: NextRequest) {
           error: reservationIds.length === 0 && skipped.length > 0 ? skipped.join("; ").slice(0, 900) : null,
         },
       });
+    } else if (event === "message" && bookingId) {
+      // The thin notification shape for "message" events hasn't been
+      // confirmed by a live delivery yet - assumed to carry booking_id the
+      // same way "booking" events do, since that's the only field name
+      // convention seen so far. If that assumption is wrong, bookingId is
+      // just undefined and this falls through to the generic branch below,
+      // which still stores the raw payload for inspection - never a crash.
+      const { imported } = await importGuestMessagesForBooking(bookingId);
+      console.log(`[channex-webhook] message event for booking ${bookingId}: ${imported} guest message(s) imported`);
+      await prisma.channexWebhookLog.update({ where: { id: logId }, data: { processedOk: true } });
     } else {
       // Unrecognized or non-booking event - stored for visibility, nothing
       // to process yet.

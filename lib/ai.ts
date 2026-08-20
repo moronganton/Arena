@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { prisma } from "@/lib/prisma";
 import { smoobuProvider } from "@/lib/channels/smoobu-provider";
+import { channexBookingIdFromExternalId, sendBookingMessage } from "@/lib/channels/channex-messages";
 import { sendMessageToGuest } from "@/lib/notifications";
 import { recordAiSuccess, recordAiFailure, readRateLimitHeaders } from "@/lib/ai-health";
 import { notifyUser } from "@/lib/notify";
@@ -231,6 +232,29 @@ export async function deliverAiMessage(messageId: string): Promise<boolean> {
         body: `Your AI reply to ${reservation.guest.name} (${reservation.property.name}) failed to send. Open the thread to retry.`,
         link: `/messages?reservationId=${reservation.id}`,
       });
+    }
+  } else if (reservation.externalId?.startsWith("channex-")) {
+    const bookingId = channexBookingIdFromExternalId(reservation.externalId);
+    if (bookingId) {
+      try {
+        await sendBookingMessage(bookingId, message.body);
+        if (message.channelFailed) {
+          await prisma.message.update({ where: { id: message.id }, data: { channelFailed: false, channelError: null } });
+        }
+      } catch (err) {
+        channelOk = false;
+        console.error("[ai] Channex relay failed:", err);
+        await prisma.message.update({
+          where: { id: message.id },
+          data: { channelFailed: true, channelError: (err instanceof Error ? err.message : String(err)).slice(0, 300) },
+        });
+        await notifyUser(reservation.property.ownerId, {
+          type: "delivery_failed",
+          title: "Reply didn't reach the guest",
+          body: `Your AI reply to ${reservation.guest.name} (${reservation.property.name}) failed to send. Open the thread to retry.`,
+          link: `/messages?reservationId=${reservation.id}`,
+        });
+      }
     }
   }
   if (reservation.guest.email) {
