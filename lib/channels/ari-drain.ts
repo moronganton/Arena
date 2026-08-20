@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { pushAriForDateRange } from "./channex-ari";
+import { ChannexError } from "./channex-core";
 
 // Turns queued AriOutbox rows into a small number of batched Channex calls.
 //
@@ -20,6 +21,21 @@ import { pushAriForDateRange } from "./channex-ari";
 // hammered every drain cycle. After MAX_ATTEMPTS they flip to FAILED - a
 // terminal state that stops automatic retries and stays visible (queryable,
 // not silently dropped) rather than swallowed.
+//
+// Retryable vs permanent: every failure used to get the same backoff-then-
+// FAILED treatment regardless of cause. That is wrong for a 422 - a mapping
+// error, a malformed value - which will return the exact same 422 on every
+// retry. Five attempts spread across roughly half an hour just delayed the
+// terminal state that was already certain on attempt one, and for that
+// window the row sat PENDING looking like a transient problem instead of
+// the actual mismatch it was. ChannexError.retryable (429 or 5xx) is the
+// same distinction sendSmoobuGuestMessage already draws for its own
+// retries - now applied here too: retryable errors still back off and
+// retry up to MAX_ATTEMPTS, anything else fails on the first attempt. An
+// error this code cannot classify (a thrown non-ChannexError - a network
+// timeout, say) is treated as retryable, since assuming permanent failure
+// for an error whose cause is unknown risks discarding a row that would
+// have succeeded on retry.
 
 const MAX_CALLS_PER_RUN = 15; // stays under ~20/min even if the cron fires every minute
 const MIN_MS_BETWEEN_CALLS = 3500; // 60_000 / 20 ≈ 3000ms; padded for safety
@@ -127,9 +143,16 @@ export async function drainAriOutbox(): Promise<DrainSummary> {
       } catch (err) {
         summary.callsFailed++;
         const message = err instanceof Error ? err.message : String(err);
+        // Unknown-shaped errors default to retryable - see the module
+        // comment on why guessing "permanent" for an unclassified error is
+        // the riskier default.
+        const retryable = !(err instanceof ChannexError) || err.retryable;
         for (const row of contributing) {
           const attempts = row.attempts + 1;
-          const givingUp = attempts >= MAX_ATTEMPTS;
+          // A non-retryable error is terminal on the FIRST attempt: no
+          // amount of backoff changes a 422, so there is nothing to wait
+          // for. A retryable one still gets the normal budget.
+          const givingUp = !retryable || attempts >= MAX_ATTEMPTS;
           await prisma.ariOutbox.update({
             where: { id: row.id },
             data: {
@@ -141,7 +164,11 @@ export async function drainAriOutbox(): Promise<DrainSummary> {
           });
           if (givingUp) summary.rowsFailedTerminally++;
         }
-        console.error(`[drain-ari] property ${propertyId} range ${range.from.toISOString()}..${range.to.toISOString()} failed:`, err);
+        console.error(
+          `[drain-ari] property ${propertyId} range ${range.from.toISOString()}..${range.to.toISOString()} failed ` +
+            `(${retryable ? "retryable" : "permanent"}):`,
+          err
+        );
       }
     }
   }
