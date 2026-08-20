@@ -93,6 +93,16 @@ export async function upsertReservationsFromChannexBooking(
   const skipped: string[] = [];
   const guestName = `${booking.customer?.name ?? ""} ${booking.customer?.surname ?? ""}`.trim() || "Guest";
 
+  // Group by which StayHQ listing each room resolves to, not one Reservation
+  // per room line-item. Confirmed necessary from real data: Channex's shared
+  // sandbox hotel returned bookings with two "Double Room" line items for the
+  // same dates, both mapped to Sinteu's single room/rate pair - correct for a
+  // hotel with several identical physical rooms, but every ChannexListing
+  // here represents exactly ONE bookable unit, so two mapped lines in the
+  // same booking must collapse into one stay, not two concurrent "whole
+  // apartment" reservations for the same nights.
+  const byListing = new Map<string, { listing: (typeof listings)[number]; rooms: ChannexBookingRoom[] }>();
+
   for (const room of booking.rooms) {
     if (!room.room_type_id || !room.rate_plan_id) {
       skipped.push(`room ${room.booking_room_id}: not mapped to a StayHQ room/rate on Channex`);
@@ -114,16 +124,31 @@ export async function upsertReservationsFromChannexBooking(
       continue;
     }
 
-    const externalId = `channex-${room.booking_room_id}`;
-    const checkIn = new Date(room.checkin_date);
-    const checkOut = new Date(room.checkout_date);
-    const status = room.is_cancelled ? "CANCELLED" : "CONFIRMED";
+    const group = byListing.get(listing.id) ?? { listing, rooms: [] };
+    group.rooms.push(room);
+    byListing.set(listing.id, group);
+  }
+
+  for (const { listing, rooms } of byListing.values()) {
+    // Deterministic per (booking, property) - not per room - so reprocessing
+    // the same booking is still idempotent even though which rooms exist can
+    // shift between deliveries (e.g. a room gets remapped or cancelled).
+    const externalId = `channex-${booking.id}-${listing.id}`;
+    const checkIn = new Date(Math.min(...rooms.map((r) => new Date(r.checkin_date).getTime())));
+    const checkOut = new Date(Math.max(...rooms.map((r) => new Date(r.checkout_date).getTime())));
+    const totalAmount = rooms.reduce((sum, r) => sum + (r.amount ? Number(r.amount) : 0), 0);
+    const adults = rooms.reduce((sum, r) => sum + (r.occupancy?.adults ?? 0), 0) || 1;
+    const children = rooms.reduce((sum, r) => sum + (r.occupancy?.children ?? 0), 0);
+    // Only cancelled once every room line making up this stay is cancelled -
+    // a partial cancellation still leaves the guest occupying the unit.
+    const allCancelled = rooms.every((r) => r.is_cancelled);
+    const status = allCancelled ? "CANCELLED" : "CONFIRMED";
 
     const existing = await prisma.reservation.findFirst({ where: { externalId } });
 
     if (!existing) {
-      if (room.is_cancelled) {
-        skipped.push(`room ${room.booking_room_id}: already cancelled, nothing to import`);
+      if (allCancelled) {
+        skipped.push(`booking ${booking.id} / ${listing.property.name}: already cancelled, nothing to import`);
         continue;
       }
 
@@ -136,9 +161,9 @@ export async function upsertReservationsFromChannexBooking(
           guestId: guest.id,
           checkIn,
           checkOut,
-          adults: room.occupancy?.adults ?? 1,
-          children: room.occupancy?.children ?? 0,
-          totalAmount: room.amount ? Number(room.amount) : undefined,
+          adults,
+          children,
+          totalAmount: totalAmount || undefined,
           currency: booking.currency || listing.property.currency,
           source: mapOtaNameToSource(booking.ota_name),
           status,
@@ -148,7 +173,7 @@ export async function upsertReservationsFromChannexBooking(
 
       const gen = await autoGenerateCodesForReservation(reservation.id, listing.propertyId);
       console.log(
-        `[channex-bookings] booking ${booking.id} room ${room.booking_room_id}: generated ${gen.codes.length} code(s)` +
+        `[channex-bookings] booking ${booking.id} -> ${listing.property.name}: generated ${gen.codes.length} code(s)` +
           (gen.errors.length ? `, errors: ${gen.errors.join("; ")}` : "")
       );
 
@@ -168,7 +193,7 @@ export async function upsertReservationsFromChannexBooking(
     } else {
       const datesChanged =
         existing.checkIn.getTime() !== checkIn.getTime() || existing.checkOut.getTime() !== checkOut.getTime();
-      const becameCancelled = room.is_cancelled && existing.status !== "CANCELLED";
+      const becameCancelled = allCancelled && existing.status !== "CANCELLED";
 
       await prisma.reservation.update({
         where: { id: existing.id },
@@ -176,9 +201,9 @@ export async function upsertReservationsFromChannexBooking(
           status,
           checkIn,
           checkOut,
-          adults: room.occupancy?.adults ?? existing.adults,
-          children: room.occupancy?.children ?? existing.children,
-          totalAmount: room.amount ? Number(room.amount) : existing.totalAmount,
+          adults,
+          children,
+          totalAmount: totalAmount || existing.totalAmount,
           currency: booking.currency || existing.currency,
         },
       });
@@ -186,7 +211,7 @@ export async function upsertReservationsFromChannexBooking(
 
       if (becameCancelled) {
         await revokeAccessCodesForReservation(existing.id, listing.property.ownerId);
-      } else if (datesChanged && !room.is_cancelled) {
+      } else if (datesChanged && !allCancelled) {
         await updateAccessCodePeriodsForReservation(existing.id, listing.property.ownerId, checkIn, checkOut);
         await prisma.cleaningTask.updateMany({
           where: { reservationId: existing.id, status: "PENDING" },
