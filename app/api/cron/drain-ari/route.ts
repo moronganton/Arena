@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { drainAriOutbox } from "@/lib/channels/ari-drain";
+import { startCronRun, closeStaleCronRuns } from "@/lib/cron-run";
 
 // Drains queued AriOutbox rows into batched Channex calls: coalesces
 // overlapping date ranges per property, paces calls to stay under Channex's
@@ -25,21 +26,23 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const started = Date.now();
-  // Deliberately not awaited - see comment above. Errors inside a single
-  // property/range are already caught per-attempt; this outer catch is only
-  // for something failing before drainAriOutbox's own loop even starts.
-  drainAriOutbox()
-    .then((summary) => {
-      console.log(
-        `[cron/drain-ari] done in ${Date.now() - started}ms - eligible=${summary.eligibleRows} ` +
-        `properties=${summary.propertiesTouched} calls=${summary.callsMade} ` +
-        `(${summary.callsSucceeded} ok, ${summary.callsFailed} failed) ` +
-        `rowsDone=${summary.rowsDone} rowsFailedTerminally=${summary.rowsFailedTerminally}` +
-        (summary.stoppedEarly ? " (stopped early - more work queued for next run)" : "")
-      );
-    })
-    .catch((err) => console.error("[cron/drain-ari] background run failed to start:", err));
-
-  return NextResponse.json({ started: true, startedAt: new Date().toISOString() });
+  await closeStaleCronRuns();
+  return startCronRun("drain-ari", async () => {
+    const summary = await drainAriOutbox();
+    // A run that could not complete any of its calls is a failure worth
+    // surfacing; partial failures are already retried by the outbox itself.
+    if (summary.callsMade > 0 && summary.callsSucceeded === 0) {
+      throw new Error(`all ${summary.callsMade} push(es) to Channex failed`);
+    }
+    return {
+      eligibleRows: summary.eligibleRows,
+      propertiesTouched: summary.propertiesTouched,
+      callsMade: summary.callsMade,
+      callsSucceeded: summary.callsSucceeded,
+      callsFailed: summary.callsFailed,
+      rowsDone: summary.rowsDone,
+      rowsFailedTerminally: summary.rowsFailedTerminally,
+      stoppedEarly: summary.stoppedEarly,
+    };
+  });
 }

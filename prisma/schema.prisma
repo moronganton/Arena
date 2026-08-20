@@ -740,3 +740,30 @@ model AiTemplate {
   aiSettingsId String
   aiSettings   AiSettings @relation(fields: [aiSettingsId], references: [id])
 }
+
+// One row per scheduled-job run, so a job that starts failing is visible
+// somewhere other than the server logs.
+//
+// The cron routes here fire their work in the background and return
+// immediately, because free cron pingers cap the request timeout well below
+// how long a full run takes. That has a cost: the HTTP 200 the pinger sees
+// says only "the request arrived", never "the work succeeded", so a job can
+// fail every quarter of an hour indefinitely while the pinger reports it
+// healthy. For guest-message collection that means guests going unanswered
+// with nothing raising a hand.
+//
+// A run cannot report on itself under that pattern, but it can report on the
+// one before it: the route reads the previous run's outcome and answers
+// non-2xx if it failed, which turns the pinger's own failure alerting back
+// into a working signal, one cycle late.
+model CronRun {
+  id         String    @id @default(cuid())
+  job        String    // channex-messages | channex-revisions | drain-ari | sync-reservations
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+  ok         Boolean?  // null while still running
+  summary    String?   // JSON counts from the run, for a quick read of what it did
+  error      String?
+
+  @@index([job, startedAt])
+}

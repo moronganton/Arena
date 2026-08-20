@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { smoobuProvider } from "@/lib/channels/smoobu-provider";
+import { startCronRun, closeStaleCronRuns } from "@/lib/cron-run";
 
 // Runs syncSmoobuBookings for every connected account on a schedule, instead
 // of relying only on Smoobu's webhook (fires on booking changes) or a host
@@ -38,12 +39,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Deliberately not awaited - see comment above. Errors inside are caught
-  // per-account already; this outer catch is only for something failing
-  // before that loop even starts (e.g. the initial account lookup).
-  runSync().catch((err) => console.error("[cron/sync-reservations] background run failed to start:", err));
-
-  return NextResponse.json({ started: true, startedAt: new Date().toISOString() });
+  await closeStaleCronRuns();
+  return startCronRun("sync-reservations", runSync);
 }
 
 async function runSync() {
@@ -74,4 +71,11 @@ async function runSync() {
     `imported=${imported} updated=${updated} cancelled=${cancelled} errors=${errors.length}` +
     (errors.length ? ` (${errors.join("; ")})` : "")
   );
+
+  // Every connected account failing is an outage worth reporting; one account
+  // erroring among several is not, and is already logged above.
+  if (accounts.length > 0 && errors.length >= accounts.length) {
+    throw new Error(errors.join("; "));
+  }
+  return { accounts: accounts.length, imported, updated, cancelled, errors: errors.length };
 }

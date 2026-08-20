@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { pollChannexMessages } from "@/lib/channels/channex-messages";
+import { startCronRun, closeStaleCronRuns } from "@/lib/cron-run";
 
 // Collects new guest messages from Channex on a schedule.
 //
@@ -26,15 +27,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  pollChannexMessages()
-    .then((r) =>
-      console.log(
-        `[channex-messages] done - checked=${r.reservationsChecked} imported=${r.imported} ` +
-          `unsupported=${r.unsupported} errors=${r.errors.length}` +
-          (r.errors.length ? ` (${r.errors.join("; ")})` : "")
-      )
-    )
-    .catch((err) => console.error("[channex-messages] background run failed:", err));
-
-  return NextResponse.json({ started: true, startedAt: new Date().toISOString() });
+  await closeStaleCronRuns();
+  return startCronRun("channex-messages", async () => {
+    const r = await pollChannexMessages();
+    if (r.errors.length) throw new Error(r.errors.join("; "));
+    return { checked: r.reservationsChecked, imported: r.imported, unsupported: r.unsupported };
+  });
 }

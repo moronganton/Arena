@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { pollChannexRevisions } from "@/lib/channels/channex-revisions";
+import { startCronRun, closeStaleCronRuns } from "@/lib/cron-run";
 
 // Runs pollChannexRevisions on a schedule - the belt-and-braces backstop
 // Channex's certification requires alongside webhooks (see
@@ -21,15 +22,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  pollChannexRevisions()
-    .then((r) =>
-      console.log(
-        `[channex-revisions] done - candidates=${r.candidates} processed=${r.processed} ` +
-          `reservationsTouched=${r.reservationsTouched} errors=${r.errors.length}` +
-          (r.errors.length ? ` (${r.errors.join("; ")})` : "")
-      )
-    )
-    .catch((err) => console.error("[channex-revisions] background run failed:", err));
-
-  return NextResponse.json({ started: true, startedAt: new Date().toISOString() });
+  await closeStaleCronRuns();
+  return startCronRun("channex-revisions", async () => {
+    const r = await pollChannexRevisions();
+    if (r.errors.length) throw new Error(r.errors.join("; "));
+    return { candidates: r.candidates, processed: r.processed, reservationsTouched: r.reservationsTouched };
+  });
 }
