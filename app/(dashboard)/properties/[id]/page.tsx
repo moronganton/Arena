@@ -1,5 +1,6 @@
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { getChannelState } from "@/lib/channels/channel-state";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, MapPin, Bed, Bath, Users, DollarSign, Wifi, Key, BookOpen } from "lucide-react";
@@ -13,7 +14,6 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
   const property = await prisma.property.findFirst({
     where: { id, ownerId: session!.user.id },
     include: {
-      channels: true,
       locks: { include: { _count: { select: { accessCodes: true } } } },
       pricingRules: { where: { active: true }, orderBy: { priority: "desc" } },
       _count: {
@@ -25,6 +25,10 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
   });
 
   if (!property) notFound();
+
+  // Same source of truth the Channels settings page uses, so the two screens
+  // can never disagree about who manages this property.
+  const channels = (await getChannelState(property.ownerId, property.id))[0] ?? null;
 
   const upcomingReservations = await prisma.reservation.findMany({
     where: {
@@ -158,36 +162,96 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
             </Link>
           </div>
 
-          {/* Channels */}
+          {/* Channel manager */}
           <div className="bg-white rounded-2xl border border-slate-100 p-5">
             <h3 className="font-semibold text-slate-900 flex items-center gap-2 mb-4">
               <Wifi className="w-4 h-4 text-slate-500" />
-              Connected Channels
+              Channel Manager
             </h3>
-            {property.channels.length === 0 ? (
-              <div>
-                <p className="text-slate-400 text-sm mb-3">No channels connected</p>
-                <Link href="/settings/channels" className="text-sm text-indigo-600 hover:underline">
-                  Connect a channel →
-                </Link>
+
+            {channels?.manager === "CHANNEX" && channels.channex ? (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-teal-100 text-teal-800">Channex</span>
+                  <span className="text-xs text-green-600">Connected</span>
+                </div>
+                <dl className="text-xs text-slate-500 space-y-1">
+                  <div className="flex justify-between gap-3">
+                    <dt>Last availability push</dt>
+                    <dd className="text-slate-700">
+                      {channels.channex.lastPushAt
+                        ? new Date(channels.channex.lastPushAt).toLocaleDateString()
+                        : "Not pushed yet"}
+                    </dd>
+                  </div>
+                  {channels.channex.pendingUpdates > 0 && (
+                    <div className="flex justify-between gap-3">
+                      <dt>Queued updates</dt>
+                      <dd className="text-slate-700">{channels.channex.pendingUpdates}</dd>
+                    </div>
+                  )}
+                  {channels.channex.failedUpdates > 0 && (
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-red-600">Failed updates</dt>
+                      <dd className="text-red-600">{channels.channex.failedUpdates}</dd>
+                    </div>
+                  )}
+                </dl>
+              </div>
+            ) : channels?.manager === "SMOOBU" && channels.smoobu ? (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-orange-100 text-orange-800">Smoobu</span>
+                  <span className="text-xs text-green-600">Connected</span>
+                </div>
+                <p className="text-xs text-slate-500">
+                  {channels.smoobu.lastSyncAt
+                    ? `Last synced ${new Date(channels.smoobu.lastSyncAt).toLocaleDateString()}`
+                    : "Not synced yet"}
+                </p>
               </div>
             ) : (
-              <div className="space-y-2">
-                {property.channels.map((ch) => {
-                  const info = CHANNEL_INFO[ch.channel];
-                  return (
-                    <div key={ch.id} className="flex items-center justify-between">
-                      <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${info?.color || "bg-slate-100 text-slate-600"}`}>
-                        {info?.label || ch.channel}
-                      </span>
-                      <span className={`text-xs ${ch.isActive ? "text-green-600" : "text-slate-400"}`}>
-                        {ch.lastSyncAt ? `Synced ${new Date(ch.lastSyncAt).toLocaleDateString()}` : "Not synced"}
-                      </span>
-                    </div>
-                  );
-                })}
+              <div>
+                <p className="text-slate-400 text-sm mb-3">No channel manager connected</p>
+                <Link href="/settings/channels" className="text-sm text-indigo-600 hover:underline">
+                  Set one up &rarr;
+                </Link>
               </div>
             )}
+
+            {channels?.warning && (
+              <p className="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                {channels.warning}
+              </p>
+            )}
+
+            {/* iCal feeds are per-OTA calendar subscriptions, a separate thing
+                from the manager that owns the listing - so they are listed
+                apart rather than mixed in as if they were equivalent. */}
+            {channels && channels.icalFeeds.length > 0 && (
+              <div className="mt-4 pt-3 border-t border-slate-100">
+                <p className="text-xs font-medium text-slate-500 mb-2">Calendar feeds</p>
+                <div className="space-y-1.5">
+                  {channels.icalFeeds.map((feed) => {
+                    const info = CHANNEL_INFO[feed.channel];
+                    return (
+                      <div key={feed.channel} className="flex items-center justify-between">
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${info?.color || "bg-slate-100 text-slate-600"}`}>
+                          {info?.label || feed.channel}
+                        </span>
+                        <span className="text-xs text-slate-400">
+                          {feed.lastSyncAt ? `Synced ${new Date(feed.lastSyncAt).toLocaleDateString()}` : "Not synced"}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            <Link href="/settings/channels" className="text-sm text-indigo-600 hover:underline mt-3 block">
+              Manage channels &rarr;
+            </Link>
           </div>
 
           {/* Smart Locks */}
