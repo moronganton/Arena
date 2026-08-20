@@ -316,7 +316,7 @@ export default function CalendarPage() {
                     <p className="text-xs font-bold text-slate-800 truncate">{p.name}</p>
                     {notLinked ? (
                       <Link
-                        href="/settings/smoobu"
+                        href="/settings/channels"
                         className="text-[9px] text-amber-600 hover:underline truncate"
                         title="Live prices need this property mapped to a Smoobu listing"
                       >

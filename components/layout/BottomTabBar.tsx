@@ -20,7 +20,7 @@ const MORE_LINKS = [
   { href: "/properties", label: "Properties", icon: Home },
   { href: "/cleaning", label: "Cleaning", icon: Sparkles },
   { href: "/finance", label: "Finance", icon: Wallet },
-  { href: "/settings/smoobu", label: "Smoobu", icon: RefreshCw },
+  { href: "/settings/channels", label: "Channels", icon: RefreshCw },
   { href: "/settings/locks", label: "Smart Locks", icon: Key },
   { href: "/settings/ai", label: "AI Assistant", icon: Bot },
   { href: "/settings/account", label: "Account security", icon: ShieldCheck },
