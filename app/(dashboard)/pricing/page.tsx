@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { Plus, Trash2, Pencil, DollarSign, CalendarDays } from "lucide-react";
+import { Plus, Trash2, Pencil, DollarSign, CalendarDays, X } from "lucide-react";
 
 interface Property {
   id: string;
@@ -225,10 +225,31 @@ export default function PricingPage() {
       </div>
 
       {/* Add / Edit Rule Form - same shape either way, just pre-filled and
-          POSTed with an id when editing (see openEdit / saveRule). */}
+          POSTed with an id when editing (see openEdit / saveRule).
+          Opens as a fixed sheet rather than inline in the page flow: editing
+          a rule near the bottom of a long list used to mean scrolling all
+          the way back to the top to reach the form. Same sheet chrome as the
+          price calendar on the Calendar tab, so it's now the one place in
+          the app "click something in a list, edit it here" looks like. */}
       {showForm && (
-        <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-5 mb-6">
-          <h3 className="font-semibold text-slate-900 mb-4">{editingId ? "Edit Pricing Rule" : "New Pricing Rule"}</h3>
+        <div className="fixed inset-0 z-50 flex items-end justify-center">
+          <div
+            className="absolute inset-0 bg-slate-900/40"
+            onClick={() => { setShowForm(false); setEditingId(null); }}
+          />
+          <div className="relative w-full max-w-2xl max-h-[88vh] bg-white rounded-t-3xl shadow-2xl overflow-y-auto">
+            <div className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b border-slate-100 px-4 py-3 flex items-center gap-3">
+              <span className="w-9 h-1 bg-slate-200 rounded-full absolute left-1/2 -translate-x-1/2 top-1.5" />
+              <h3 className="font-semibold text-slate-900 mt-1">{editingId ? "Edit Pricing Rule" : "New Pricing Rule"}</h3>
+              <button
+                onClick={() => { setShowForm(false); setEditingId(null); }}
+                className="ml-auto p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition shrink-0"
+                aria-label="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-4 sm:p-5">
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Rule Name</label>
@@ -352,6 +373,8 @@ export default function PricingPage() {
             >
               Cancel
             </button>
+          </div>
+            </div>
           </div>
         </div>
       )}
