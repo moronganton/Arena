@@ -42,7 +42,18 @@ export interface ChannexBookingRoom {
 }
 
 export interface ChannexBookingAttributes {
+  // The REVISION's own id - unique per delivery, different on every create,
+  // modify and cancel of the same underlying stay. Confirmed against real
+  // data: for one booking modified once, `id` was f33d88c4... on the create
+  // and cef89c71... on the modify. Not stable, and not what identifies "the
+  // same booking" - see booking_id below for that.
   id: string;
+  // The BOOKING's id - the one that stays constant across every revision of
+  // it. This, not `id` above, is what a Reservation's externalId must be
+  // built from for an update to ever find the row a prior revision created.
+  // Confirmed identical (69c36e81-f316-47f5-9ef9-5e3aee66259b) on both the
+  // create and the modify revision of the same real booking.
+  booking_id: string;
   status: string;
   currency: string;
   amount: string;
@@ -64,6 +75,11 @@ export async function fetchChannexRevision(revisionId: string): Promise<ChannexB
   const res = await channexGet<{ attributes?: ChannexBookingAttributes }>(`/booking_revisions/${revisionId}`);
   const attrs = res.data?.attributes;
   if (!attrs?.id) throw new Error(`Channex booking revision ${revisionId} returned no attributes`);
+  // booking_id specifically, not just any attributes - everything about
+  // finding the RIGHT reservation to update depends on it, and a response
+  // missing it should fail loudly here rather than silently become
+  // "channex-undefined-<listingId>" three call frames away.
+  if (!attrs.booking_id) throw new Error(`Channex booking revision ${revisionId} returned no booking_id`);
   return attrs;
 }
 
@@ -90,7 +106,7 @@ export async function upsertReservationsFromChannexRevision(
 // No availability push is needed: the change came from Channex, so it
 // already knows, and buildAriValues excludes cancelled stays, which reopens
 // those nights on the next push for any reason.
-async function releaseCancelledReservation(reservationId: string, ownerId: string, label: string): Promise<void> {
+export async function releaseCancelledReservation(reservationId: string, ownerId: string, label: string): Promise<void> {
   await revokeAccessCodesForReservation(reservationId, ownerId);
   // Only PENDING tasks are removed - anything already in progress or
   // completed describes work that actually happened and stays on the record.
@@ -156,7 +172,13 @@ export async function upsertReservationsFromBookingData(
     // Deterministic per (booking, property) - not per room - so reprocessing
     // the same booking is still idempotent even though which rooms exist can
     // shift between deliveries (e.g. a room gets remapped or cancelled).
-    const externalId = `channex-${booking.id}-${listing.id}`;
+    //
+    // booking_id, NOT booking.id - the latter is the REVISION's own id and
+    // differs on every create, modify and cancel of the same stay. Building
+    // this from booking.id was the bug: a real modify created a second
+    // reservation instead of updating the first, discovered live when a
+    // real Booking.com date change produced a duplicate on a real property.
+    const externalId = `channex-${booking.booking_id}-${listing.id}`;
     const checkIn = new Date(Math.min(...rooms.map((r) => new Date(r.checkin_date).getTime())));
     const checkOut = new Date(Math.max(...rooms.map((r) => new Date(r.checkout_date).getTime())));
     const totalAmount = rooms.reduce((sum, r) => sum + (r.amount ? Number(r.amount) : 0), 0);
@@ -182,7 +204,7 @@ export async function upsertReservationsFromBookingData(
 
     if (!existing) {
       if (allCancelled) {
-        skipped.push(`booking ${booking.id} / ${listing.property.name}: already cancelled, nothing to import`);
+        skipped.push(`booking ${booking.booking_id} / ${listing.property.name}: already cancelled, nothing to import`);
         continue;
       }
 
@@ -207,7 +229,7 @@ export async function upsertReservationsFromBookingData(
 
       const gen = await autoGenerateCodesForReservation(reservation.id, listing.propertyId);
       console.log(
-        `[channex-bookings] booking ${booking.id} -> ${listing.property.name}: generated ${gen.codes.length} code(s)` +
+        `[channex-bookings] booking ${booking.booking_id} -> ${listing.property.name}: generated ${gen.codes.length} code(s)` +
           (gen.errors.length ? `, errors: ${gen.errors.join("; ")}` : "")
       );
 
@@ -244,7 +266,7 @@ export async function upsertReservationsFromBookingData(
       reservationIds.push(existing.id);
 
       if (becameCancelled) {
-        await releaseCancelledReservation(existing.id, listing.property.ownerId, `booking ${booking.id}`);
+        await releaseCancelledReservation(existing.id, listing.property.ownerId, `booking ${booking.booking_id}`);
       } else if (datesChanged && !allCancelled) {
         await updateAccessCodePeriodsForReservation(existing.id, listing.property.ownerId, checkIn, checkOut);
         await prisma.cleaningTask.updateMany({
@@ -268,19 +290,19 @@ export async function upsertReservationsFromBookingData(
   if (byListing.size > 0) {
     const stale = await prisma.reservation.findMany({
       where: {
-        externalId: { startsWith: `channex-${booking.id}-` },
+        externalId: { startsWith: `channex-${booking.booking_id}-` },
         status: { not: "CANCELLED" },
       },
       select: { id: true, externalId: true, property: { select: { ownerId: true, name: true } } },
     });
 
     for (const row of stale) {
-      const listingId = (row.externalId ?? "").slice(`channex-${booking.id}-`.length);
+      const listingId = (row.externalId ?? "").slice(`channex-${booking.booking_id}-`.length);
       if (byListing.has(listingId) || offChannexListingIds.has(listingId)) continue;
 
       await prisma.reservation.update({ where: { id: row.id }, data: { status: "CANCELLED" } });
       reservationIds.push(row.id);
-      await releaseCancelledReservation(row.id, row.property.ownerId, `booking ${booking.id} moved off ${row.property.name}`);
+      await releaseCancelledReservation(row.id, row.property.ownerId, `booking ${booking.booking_id} moved off ${row.property.name}`);
     }
   }
 
