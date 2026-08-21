@@ -9,12 +9,16 @@ import { ChannexError } from "./channex-core";
 // of non-overlapping date ranges before anything is sent, so 30 rapid edits
 // to overlapping dates cost a handful of calls, not 30.
 //
-// Rate limiting: Channex's own limit is roughly 20 calls/minute, confirmed
-// as an operating constraint in the plan rather than measured directly here
-// (nothing in this integration has come close to it yet). Calls are spaced
-// at a fixed interval across the WHOLE run, not per property, since the
-// limit is account-wide - two properties queued together must still share
-// the same budget.
+// Rate limiting: Channex's published limit (docs.channex.io/api-v.1-
+// documentation/rate-limits) is 20 ARI calls/minute PER PROPERTY, split
+// 10 for restrictions/price and 10 for availability - not account-wide, as
+// an earlier version of this comment assumed before that page was actually
+// read. Calls are still spaced at a fixed interval across the WHOLE run
+// rather than per property, which is stricter than required: two properties
+// queued together share one combined budget instead of getting 20 each.
+// Safe in the conservative direction, just leaves headroom unused - not
+// worth the added complexity of a per-property throttle unless real volume
+// ever needs it.
 //
 // Backoff: a failed range's contributing rows get attempts+1 and a
 // nextAttemptAt pushed out exponentially, so a persistent failure is not
