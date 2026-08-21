@@ -25,6 +25,14 @@ interface PricingRule {
   property: { id: string; name: string; currency: string };
 }
 
+// A rule's currency comes from its property relation, which is not
+// guaranteed to be present on every code path that puts a rule into state.
+// Reading it directly took the whole page down once already, so it degrades
+// to the selected property's currency and then to nothing.
+function ruleCurrency(rule: PricingRule, fallback?: string): string {
+  return rule.property?.currency ?? fallback ?? "";
+}
+
 const RULE_TYPE_LABELS: Record<string, string> = {
   BASE: "Base Price",
   WEEKEND: "Weekend Rate",
@@ -39,6 +47,7 @@ export default function PricingPage() {
   const [selectedProperty, setSelectedProperty] = useState<string>("");
   const [_loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [form, setForm] = useState({
     name: "",
     ruleType: "SEASONAL",
@@ -51,24 +60,32 @@ export default function PricingPage() {
     active: true,
   });
 
+  // Both of these render straight into .map/.find, so a non-array response -
+  // an auth failure or a 500 returning {error} - would crash the page rather
+  // than show it empty. Normalising here keeps a bad response visible as "no
+  // rules" instead of a white screen.
   useEffect(() => {
     fetch("/api/properties")
       .then((r) => r.json())
       .then((data) => {
-        setProperties(data);
-        if (data.length > 0) setSelectedProperty(data[0].id);
+        const list = Array.isArray(data) ? data : [];
+        setProperties(list);
+        if (list.length > 0) setSelectedProperty(list[0].id);
         setLoading(false);
-      });
+      })
+      .catch(() => setLoading(false));
   }, []);
 
   useEffect(() => {
     if (!selectedProperty) return;
     fetch(`/api/pricing?propertyId=${selectedProperty}`)
       .then((r) => r.json())
-      .then(setRules);
+      .then((data) => setRules(Array.isArray(data) ? data : []))
+      .catch(() => setRules([]));
   }, [selectedProperty]);
 
   async function createRule() {
+    setSaveError(null);
     const res = await fetch("/api/pricing", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -85,7 +102,16 @@ export default function PricingPage() {
       setRules((prev) => [...prev, rule]);
       setShowForm(false);
       setForm({ name: "", ruleType: "SEASONAL", startDate: "", endDate: "", price: "", adjustment: "", adjType: "PERCENT", minNights: "1", active: true });
+      return;
     }
+    // A rejected save used to do nothing at all - the form just sat there,
+    // indistinguishable from a click that never registered.
+    const detail = await res.json().catch(() => null);
+    setSaveError(
+      typeof detail?.error === "string"
+        ? detail.error
+        : `Could not save this rule (${res.status}). Check the dates and price and try again.`
+    );
   }
 
   async function deleteRule(id: string) {
@@ -238,6 +264,9 @@ export default function PricingPage() {
               />
             </div>
           </div>
+          {saveError && (
+            <div className="mt-4 px-3 py-2 rounded-lg bg-red-50 text-red-700 text-sm">{saveError}</div>
+          )}
           <div className="flex gap-3 mt-4">
             <button
               onClick={createRule}
@@ -284,10 +313,10 @@ export default function PricingPage() {
                 <dl className="grid grid-cols-2 gap-y-1.5 text-sm">
                   <dt className="text-slate-500">Rate</dt>
                   <dd className="text-right">
-                    {rule.price && <span className="font-medium text-slate-900">{rule.property.currency} {rule.price}/night</span>}
+                    {rule.price && <span className="font-medium text-slate-900">{ruleCurrency(rule)} {rule.price}/night</span>}
                     {rule.adjustment && (
                       <span className={`font-medium ${rule.adjustment > 0 ? "text-green-600" : "text-red-600"}`}>
-                        {rule.adjustment > 0 ? "+" : ""}{rule.adjustment}{rule.adjType === "PERCENT" ? "%" : ` ${rule.property.currency}`}
+                        {rule.adjustment > 0 ? "+" : ""}{rule.adjustment}{rule.adjType === "PERCENT" ? "%" : ` ${ruleCurrency(rule)}`}
                       </span>
                     )}
                     {!rule.price && !rule.adjustment && <span className="text-slate-400">—</span>}
@@ -339,10 +368,10 @@ export default function PricingPage() {
                     </span>
                   </td>
                   <td className="px-5 py-4">
-                    {rule.price && <span className="text-sm font-medium text-slate-900">{rule.property.currency} {rule.price}/night</span>}
+                    {rule.price && <span className="text-sm font-medium text-slate-900">{ruleCurrency(rule)} {rule.price}/night</span>}
                     {rule.adjustment && (
                       <span className={`text-sm font-medium ${rule.adjustment > 0 ? "text-green-600" : "text-red-600"}`}>
-                        {rule.adjustment > 0 ? "+" : ""}{rule.adjustment}{rule.adjType === "PERCENT" ? "%" : ` ${rule.property.currency}`}
+                        {rule.adjustment > 0 ? "+" : ""}{rule.adjustment}{rule.adjType === "PERCENT" ? "%" : ` ${ruleCurrency(rule)}`}
                       </span>
                     )}
                     {!rule.price && !rule.adjustment && <span className="text-slate-400 text-sm">—</span>}

@@ -114,6 +114,11 @@ export async function POST(req: NextRequest) {
       startDate: parsed.data.startDate ? new Date(parsed.data.startDate) : undefined,
       endDate: parsed.data.endDate ? new Date(parsed.data.endDate) : undefined,
     },
+    // Same shape GET returns. Without this the created rule comes back with
+    // no `property`, the page appends it to the list as-is, and rendering
+    // `rule.property.currency` throws - which took the whole Pricing page
+    // down with a client-side exception the moment a rule was saved.
+    include: { property: { select: { id: true, name: true, currency: true } } },
   });
 
   await enqueuePriceChange(rule.propertyId, rule);
