@@ -1,9 +1,10 @@
 "use client";
 import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
-import { ChevronLeft, ChevronRight, Download, Plus, CalendarDays } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, Plus, CalendarDays, Tag, X } from "lucide-react";
 import { formatCurrency, SOURCE_LABELS } from "@/lib/utils";
 import { FilterMenu, FilterSection, FilterPills, FilterList } from "@/components/ui/FilterMenu";
+import PriceCalendarPanel from "@/components/pricing/PriceCalendarPanel";
 
 interface Reservation {
   id: string;
@@ -37,6 +38,8 @@ interface Property {
   name: string;
   city: string;
   active?: boolean;
+  currency?: string;
+  channelProvider?: string;
 }
 
 // Timeline geometry
@@ -109,6 +112,10 @@ export default function CalendarPage() {
   // data already fetched for the window, not re-fetch parameters.
   const [visiblePropertyIds, setVisiblePropertyIds] = useState<string[]>([]);
   const [sourceFilter, setSourceFilter] = useState("");
+  // Opt-in, additive: tapping a property's name opens its price calendar in a
+  // sheet over this same tab, reusing the exact editor already shipped at
+  // Pricing → Live prices. Nothing above this line changes when it's closed.
+  const [expandedProperty, setExpandedProperty] = useState<Property | null>(null);
 
   const windowEnd = addDays(windowStart, WINDOW);
 
@@ -124,7 +131,9 @@ export default function CalendarPage() {
     setBlocks(cal.blocks || []);
     setProperties(
       Array.isArray(props)
-        ? props.filter((p: Property) => p.active !== false).map((p: Property) => ({ id: p.id, name: p.name, city: p.city }))
+        ? props
+            .filter((p: Property) => p.active !== false)
+            .map((p: Property) => ({ id: p.id, name: p.name, city: p.city, currency: p.currency, channelProvider: p.channelProvider }))
         : []
     );
     setLoading(false);
@@ -308,24 +317,31 @@ export default function CalendarPage() {
               {visibleProperties.map((p) => {
                 const notLinked = pricesLoaded && !pricesErr && !currency[p.id];
                 return (
-                  <div
+                  <button
                     key={`lab-${p.id}`}
-                    className="border-b border-slate-100 px-3 flex flex-col justify-center"
+                    type="button"
+                    onClick={() => setExpandedProperty(p)}
+                    className="border-b border-slate-100 px-3 flex flex-col justify-center text-left hover:bg-slate-50 transition group"
                     style={{ height: ROW_H }}
+                    title="Open this property's price calendar"
                   >
-                    <p className="text-xs font-bold text-slate-800 truncate">{p.name}</p>
+                    <span className="flex items-center gap-1 min-w-0">
+                      <span className="text-xs font-bold text-slate-800 truncate">{p.name}</span>
+                      <Tag className="w-2.5 h-2.5 text-slate-300 group-hover:text-indigo-500 shrink-0 transition" />
+                    </span>
                     {notLinked ? (
                       <Link
                         href="/settings/channels"
+                        onClick={(e) => e.stopPropagation()}
                         className="text-[9px] text-amber-600 hover:underline truncate"
                         title="Live prices need this property mapped to a Smoobu listing"
                       >
                         No live prices — link Smoobu
                       </Link>
                     ) : (
-                      <p className="text-[10px] text-slate-400 truncate">{p.city}</p>
+                      <span className="text-[10px] text-slate-400 truncate">{p.city}</span>
                     )}
-                  </div>
+                  </button>
                 );
               })}
             </div>
@@ -462,6 +478,41 @@ export default function CalendarPage() {
           </span>
         </div>
       </div>
+
+      {/* Price calendar sheet — opt-in, additive. Closing it (X, backdrop, or
+          Escape) returns to exactly this page with nothing changed; nothing
+          above this block is touched by it being open or closed. */}
+      {expandedProperty && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center">
+          <div className="absolute inset-0 bg-slate-900/40" onClick={() => setExpandedProperty(null)} />
+          <div className="relative w-full max-w-4xl max-h-[88vh] bg-white rounded-t-3xl shadow-2xl overflow-y-auto">
+            <div className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b border-slate-100 px-4 py-3 flex items-center gap-3">
+              <span className="w-9 h-1 bg-slate-200 rounded-full absolute left-1/2 -translate-x-1/2 top-1.5" />
+              <div className="min-w-0 mt-1">
+                <p className="text-sm font-bold text-slate-900 truncate">{expandedProperty.name}</p>
+                <p className="text-[11px] text-slate-400">Price calendar</p>
+              </div>
+              <button
+                onClick={() => setExpandedProperty(null)}
+                className="ml-auto p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition shrink-0"
+                aria-label="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-3 sm:p-4">
+              <PriceCalendarPanel
+                property={{
+                  id: expandedProperty.id,
+                  name: expandedProperty.name,
+                  currency: expandedProperty.currency || "EUR",
+                  channelProvider: expandedProperty.channelProvider || "NONE",
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
