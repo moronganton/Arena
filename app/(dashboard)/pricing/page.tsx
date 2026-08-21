@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { Plus, Trash2, DollarSign, CalendarDays } from "lucide-react";
+import { Plus, Trash2, Pencil, DollarSign, CalendarDays } from "lucide-react";
 
 interface Property {
   id: string;
@@ -47,8 +47,9 @@ export default function PricingPage() {
   const [selectedProperty, setSelectedProperty] = useState<string>("");
   const [_loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [form, setForm] = useState({
+  const blankForm = {
     name: "",
     ruleType: "SEASONAL",
     startDate: "",
@@ -57,8 +58,10 @@ export default function PricingPage() {
     adjustment: "",
     adjType: "PERCENT",
     minNights: "1",
+    daysOfWeek: [] as number[],
     active: true,
-  });
+  };
+  const [form, setForm] = useState(blankForm);
 
   // Both of these render straight into .map/.find, so a non-array response -
   // an auth failure or a 500 returning {error} - would crash the page rather
@@ -84,24 +87,62 @@ export default function PricingPage() {
       .catch(() => setRules([]));
   }, [selectedProperty]);
 
-  async function createRule() {
+  function openNew() {
+    setEditingId(null);
+    setForm(blankForm);
     setSaveError(null);
+    setShowForm(true);
+  }
+
+  // Prefills the same form used to create a rule, so editing is "open the
+  // rule's own values, change what's wrong, save" rather than a second form
+  // with a different shape. daysOfWeek comes back from the API as a JSON
+  // string ("[5,6]"); everything else is already the right primitive type.
+  function openEdit(rule: PricingRule) {
+    setEditingId(rule.id);
+    setForm({
+      name: rule.name,
+      ruleType: rule.ruleType,
+      startDate: rule.startDate ? rule.startDate.slice(0, 10) : "",
+      endDate: rule.endDate ? rule.endDate.slice(0, 10) : "",
+      price: rule.price != null ? String(rule.price) : "",
+      adjustment: rule.adjustment != null ? String(rule.adjustment) : "",
+      adjType: rule.adjType || "PERCENT",
+      minNights: String(rule.minNights || 1),
+      daysOfWeek: rule.daysOfWeek ? (JSON.parse(rule.daysOfWeek) as number[]) : [],
+      active: rule.active,
+    });
+    setSaveError(null);
+    setShowForm(true);
+  }
+
+  async function saveRule() {
+    setSaveError(null);
+    const body: Record<string, unknown> = {
+      ...form,
+      propertyId: selectedProperty,
+      price: form.price ? Number(form.price) : undefined,
+      adjustment: form.adjustment ? Number(form.adjustment) : undefined,
+      minNights: Number(form.minNights),
+      daysOfWeek: form.daysOfWeek.length > 0 ? form.daysOfWeek : undefined,
+    };
+    if (editingId) body.id = editingId;
     const res = await fetch("/api/pricing", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ...form,
-        propertyId: selectedProperty,
-        price: form.price ? Number(form.price) : undefined,
-        adjustment: form.adjustment ? Number(form.adjustment) : undefined,
-        minNights: Number(form.minNights),
-      }),
+      body: JSON.stringify(body),
     });
     if (res.ok) {
-      const rule = await res.json();
-      setRules((prev) => [...prev, rule]);
+      const saved = await res.json();
+      // The update branch of the API doesn't re-include `property` on its
+      // response (only create does) - spreading onto the existing row keeps
+      // it, the same defensive merge toggleRule already relies on below.
+      setRules((prev) =>
+        editingId ? prev.map((r) => (r.id === saved.id ? { ...r, ...saved } : r)) : [...prev, saved]
+      );
       setShowForm(false);
-      setForm({ name: "", ruleType: "SEASONAL", startDate: "", endDate: "", price: "", adjustment: "", adjType: "PERCENT", minNights: "1", active: true });
+      setEditingId(null);
+      setForm(blankForm);
       return;
     }
     // A rejected save used to do nothing at all - the form just sat there,
@@ -131,6 +172,14 @@ export default function PricingPage() {
     }
   }
 
+  const DOW_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  function toggleDay(d: number) {
+    setForm((f) => ({
+      ...f,
+      daysOfWeek: f.daysOfWeek.includes(d) ? f.daysOfWeek.filter((x) => x !== d) : [...f.daysOfWeek, d].sort(),
+    }));
+  }
+
   const selectedProp = properties.find((p) => p.id === selectedProperty);
 
   return (
@@ -145,7 +194,7 @@ export default function PricingPage() {
             <CalendarDays className="w-4 h-4" /> Live prices
           </Link>
           <button
-            onClick={() => setShowForm(true)}
+            onClick={openNew}
             className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition"
           >
             <Plus className="w-4 h-4" />
@@ -175,10 +224,11 @@ export default function PricingPage() {
         </div>
       </div>
 
-      {/* Add Rule Form */}
+      {/* Add / Edit Rule Form - same shape either way, just pre-filled and
+          POSTed with an id when editing (see openEdit / saveRule). */}
       {showForm && (
         <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-5 mb-6">
-          <h3 className="font-semibold text-slate-900 mb-4">New Pricing Rule</h3>
+          <h3 className="font-semibold text-slate-900 mb-4">{editingId ? "Edit Pricing Rule" : "New Pricing Rule"}</h3>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Rule Name</label>
@@ -201,27 +251,49 @@ export default function PricingPage() {
                 ))}
               </select>
             </div>
-            {(form.ruleType === "SEASONAL" || form.ruleType === "LAST_MINUTE") && (
-              <>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Start Date</label>
-                  <input
-                    type="date"
-                    value={form.startDate}
-                    onChange={(e) => setForm({ ...form, startDate: e.target.value })}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
+            {/* Dates apply to any rule type, not just Seasonal/Last Minute -
+                a Weekend rule can span a season just as easily (see the
+                seeded "Weekend uplift" rule, which covers the whole
+                500-day horizon). Left blank, a rule applies always. */}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Start Date <span className="text-slate-400 font-normal">(optional)</span></label>
+              <input
+                type="date"
+                value={form.startDate}
+                onChange={(e) => setForm({ ...form, startDate: e.target.value })}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">End Date <span className="text-slate-400 font-normal">(optional)</span></label>
+              <input
+                type="date"
+                value={form.endDate}
+                onChange={(e) => setForm({ ...form, endDate: e.target.value })}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+            {form.ruleType === "WEEKEND" && (
+              <div className="col-span-2">
+                <label className="block text-sm font-medium text-slate-700 mb-1">Applies on</label>
+                <div className="flex flex-wrap gap-1.5">
+                  {DOW_LABELS.map((label, d) => (
+                    <button
+                      key={d}
+                      type="button"
+                      onClick={() => toggleDay(d)}
+                      className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border transition ${
+                        form.daysOfWeek.includes(d)
+                          ? "bg-indigo-600 border-indigo-600 text-white"
+                          : "bg-white border-slate-200 text-slate-600 hover:border-indigo-300"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">End Date</label>
-                  <input
-                    type="date"
-                    value={form.endDate}
-                    onChange={(e) => setForm({ ...form, endDate: e.target.value })}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </div>
-              </>
+                <p className="text-xs text-slate-400 mt-1">None selected = every day.</p>
+              </div>
             )}
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Fixed Price (or leave blank)</label>
@@ -269,13 +341,13 @@ export default function PricingPage() {
           )}
           <div className="flex gap-3 mt-4">
             <button
-              onClick={createRule}
+              onClick={saveRule}
               className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-sm font-medium transition"
             >
-              Save Rule
+              {editingId ? "Save Changes" : "Save Rule"}
             </button>
             <button
-              onClick={() => setShowForm(false)}
+              onClick={() => { setShowForm(false); setEditingId(null); }}
               className="bg-white hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-xl text-sm font-medium border border-slate-200 transition"
             >
               Cancel
@@ -303,12 +375,20 @@ export default function PricingPage() {
                       {RULE_TYPE_LABELS[rule.ruleType] || rule.ruleType}
                     </span>
                   </div>
-                  <button
-                    onClick={() => deleteRule(rule.id)}
-                    className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition flex-shrink-0"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    <button
+                      onClick={() => openEdit(rule)}
+                      className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => deleteRule(rule.id)}
+                      className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
                 <dl className="grid grid-cols-2 gap-y-1.5 text-sm">
                   <dt className="text-slate-500">Rate</dt>
@@ -332,11 +412,15 @@ export default function PricingPage() {
                 </dl>
                 <button
                   onClick={() => toggleRule(rule)}
-                  className={`mt-3 w-full text-center text-xs px-2.5 py-1.5 rounded-full font-medium ${
-                    rule.active ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"
+                  className={`mt-3 w-full flex items-center justify-center gap-1.5 text-xs px-2.5 py-1.5 rounded-full font-medium border transition ${
+                    rule.active
+                      ? "bg-green-100 text-green-700 border-green-200 hover:bg-green-200"
+                      : "bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200"
                   }`}
                 >
+                  <span className={`w-1.5 h-1.5 rounded-full ${rule.active ? "bg-green-600" : "bg-slate-400"}`} />
                   {rule.active ? "Active" : "Inactive"}
+                  <span className="text-[10px] opacity-70">— tap to {rule.active ? "deactivate" : "activate"}</span>
                 </button>
               </div>
             ))}
@@ -385,20 +469,32 @@ export default function PricingPage() {
                   <td className="px-5 py-4">
                     <button
                       onClick={() => toggleRule(rule)}
-                      className={`text-xs px-2.5 py-1 rounded-full font-medium ${
-                        rule.active ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"
+                      title={`Tap to ${rule.active ? "deactivate" : "activate"}`}
+                      className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full font-medium border transition ${
+                        rule.active
+                          ? "bg-green-100 text-green-700 border-green-200 hover:bg-green-200"
+                          : "bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200"
                       }`}
                     >
+                      <span className={`w-1.5 h-1.5 rounded-full ${rule.active ? "bg-green-600" : "bg-slate-400"}`} />
                       {rule.active ? "Active" : "Inactive"}
                     </button>
                   </td>
                   <td className="px-5 py-4">
-                    <button
-                      onClick={() => deleteRule(rule.id)}
-                      className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => openEdit(rule)}
+                        className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => deleteRule(rule.id)}
+                        className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
