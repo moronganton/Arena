@@ -183,7 +183,16 @@ export async function GET(req: NextRequest) {
     // member's status says.
     const anyCancelled = members.some((m) => m.status === "CANCELLED");
     const pool = anyCancelled ? members.filter((m) => m.status === "CANCELLED") : members;
-    const survivor = pool.reduce((latest, m) => (m.createdAt > latest.createdAt ? m : latest), pool[0]);
+    // Within that pool, a row ALREADY holding the target externalId is the
+    // canonical one: keeping it means no rename at all, which sidesteps the
+    // externalId unique constraint entirely and makes re-running this
+    // idempotent instead of shuffling which row is canonical each time.
+    // At most one row can hold it, since the column is unique. Falling back
+    // to newest-wins when none does, on the reasoning that later processing
+    // reflects a later revision.
+    const survivor =
+      pool.find((m) => m.externalId === target) ??
+      pool.reduce((latest, m) => (m.createdAt > latest.createdAt ? m : latest), pool[0]);
     const retire = members.filter((m) => m.id !== survivor.id);
 
     plan.push({
@@ -233,17 +242,33 @@ export async function GET(req: NextRequest) {
 
   for (const p of plan) {
     try {
+      // Duplicates are retired FIRST, and their externalId is released as
+      // part of it. Renaming the survivor first fails on the externalId
+      // unique constraint whenever a duplicate still holds the target value -
+      // which is every merge group, since that shared value is exactly what
+      // identifies them as the same booking. Learned the hard way: 14 of 21
+      // groups rolled back mid-run on "Unique constraint failed on the
+      // fields: (externalId)".
+      //
+      // A retired row keeps no externalId at all. It is a superseded
+      // duplicate that must never again be matched by a future revision, and
+      // leaving it holding a now-stale id would both block the rename and
+      // risk a later lookup finding the wrong row. Reservation.externalId is
+      // nullable, and Postgres allows any number of NULLs under a unique
+      // constraint, so retired rows coexist freely.
+      for (const dupe of p.retire) {
+        const ownerId = candidates.find((c) => c.id === dupe.reservationId)!.ownerId;
+        await prisma.reservation.update({
+          where: { id: dupe.reservationId },
+          data: { status: "CANCELLED", externalId: null },
+        });
+        await releaseCancelledReservation(dupe.reservationId, ownerId, `externalId migration: superseded by ${p.survivor.reservationId}`);
+        retired.push(dupe.reservationId);
+      }
+
       if (p.survivor.externalIdChanges) {
         await prisma.reservation.update({ where: { id: p.survivor.reservationId }, data: { externalId: p.targetExternalId } });
         renamed.push(p.survivor.reservationId);
-      }
-      for (const dupe of p.retire) {
-        const ownerId = candidates.find((c) => c.id === dupe.reservationId)!.ownerId;
-        if (dupe.status !== "CANCELLED") {
-          await prisma.reservation.update({ where: { id: dupe.reservationId }, data: { status: "CANCELLED" } });
-        }
-        await releaseCancelledReservation(dupe.reservationId, ownerId, `externalId migration: superseded by ${p.survivor.reservationId}`);
-        retired.push(dupe.reservationId);
       }
     } catch (err) {
       errors.push(`${p.targetExternalId}: ${err instanceof Error ? err.message : String(err)}`);
