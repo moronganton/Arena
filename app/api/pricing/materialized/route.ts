@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { materializeRates, PricingRuleLike, CalendarBlockLike } from "@/lib/channels/rate-materializer";
+import {
+  materializeRates,
+  ruleAppliesOn,
+  PricingRuleLike,
+  CalendarBlockLike,
+} from "@/lib/channels/rate-materializer";
 
 const MANUAL_PREFIX = "[manual]";
 
@@ -10,6 +15,12 @@ const MANUAL_PREFIX = "[manual]";
 // (buildAriValues in channex-ari.ts) uses - so what the calendar shows is
 // guaranteed to be what actually gets pushed to Channex, not a separate
 // approximation of it.
+//
+// Each day also carries WHY it is what it is: which rules applied, and who
+// is staying. materializeRates collapses "blocked" and "occupied" into a
+// single available flag, which is the right answer for Channex but too
+// coarse for a person - a maintenance closure and a paying guest are not
+// the same thing to look at - so both are reported separately here.
 //
 // GET /api/pricing/materialized?propertyId=xxx&start=YYYY-MM-DD&end=YYYY-MM-DD
 export async function GET(req: NextRequest) {
@@ -35,7 +46,7 @@ export async function GET(req: NextRequest) {
 
   const dateFrom = new Date(start);
   // `end` is the last day shown (inclusive); materializeRates wants an
-  // exclusive upper bound, matching checkIn/checkOut convention.
+  // exclusive upper bound, matching the checkIn/checkOut convention.
   const dateTo = new Date(new Date(end).getTime() + 86400000);
 
   const [rules, blocks, stays] = await Promise.all([
@@ -43,7 +54,15 @@ export async function GET(req: NextRequest) {
     prisma.calendarBlock.findMany({ where: { propertyId } }),
     prisma.reservation.findMany({
       where: { propertyId, status: { not: "CANCELLED" }, checkIn: { lt: dateTo }, checkOut: { gt: dateFrom } },
-      select: { checkIn: true, checkOut: true },
+      select: {
+        id: true,
+        checkIn: true,
+        checkOut: true,
+        source: true,
+        totalAmount: true,
+        currency: true,
+        guest: { select: { name: true } },
+      },
     }),
   ]);
 
@@ -56,16 +75,56 @@ export async function GET(req: NextRequest) {
     stays
   );
 
-  // Flags which days a manual calendar-edit currently covers, so the UI can
-  // show an edited day differently from one still following a season/weekend
-  // rule underneath it.
-  const manualRules = rules.filter((r) => r.name.startsWith(MANUAL_PREFIX) && r.startDate && r.endDate);
-  const rates: Record<string, { price: number; minStay: number; available: boolean; manual: boolean }> = {};
-  for (const day of days) {
-    const d = new Date(day.date);
-    const manual = manualRules.some((r) => d >= r.startDate! && d <= r.endDate!);
-    rates[day.date] = { price: day.price, minStay: day.minStay, available: day.available, manual };
+  interface DayOut {
+    price: number;
+    minStay: number;
+    available: boolean;
+    blocked: boolean;
+    blockReason: string | null;
+    manual: boolean;
+    ruleIds: string[];
+    stay: { id: string; guestName: string; source: string } | null;
   }
 
-  return NextResponse.json({ rates, currency: property.currency, basePrice: property.basePrice });
+  const rates: Record<string, DayOut> = {};
+  for (const day of days) {
+    const d = new Date(day.date);
+    // Half-open on both, same as materializeRates: a checkout morning and a
+    // block's end date are free again.
+    const stay = stays.find((s) => d >= s.checkIn && d < s.checkOut);
+    const block = blocks.find((b) => d >= b.startDate && d < b.endDate);
+    const applicable = rules.filter((r) => ruleAppliesOn(r as PricingRuleLike, d));
+    rates[day.date] = {
+      price: day.price,
+      minStay: day.minStay,
+      available: day.available,
+      blocked: !!block,
+      blockReason: block?.reason ?? null,
+      manual: applicable.some((r) => r.name.startsWith(MANUAL_PREFIX)),
+      ruleIds: applicable.map((r) => r.id),
+      stay: stay ? { id: stay.id, guestName: stay.guest.name, source: stay.source } : null,
+    };
+  }
+
+  // Metadata for the rules referenced by ruleIds, so the calendar can show
+  // what is setting a selected range's price the way an OTA extranet lists
+  // the rate plans behind a date.
+  const ruleMeta = rules.map((r) => ({
+    id: r.id,
+    name: r.name,
+    ruleType: r.ruleType,
+    price: r.price,
+    adjustment: r.adjustment,
+    adjType: r.adjType,
+    minNights: r.minNights,
+    priority: r.priority,
+    daysOfWeek: r.daysOfWeek,
+  }));
+
+  return NextResponse.json({
+    rates,
+    rules: ruleMeta,
+    currency: property.currency,
+    basePrice: property.basePrice,
+  });
 }

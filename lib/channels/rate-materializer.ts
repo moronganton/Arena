@@ -50,7 +50,11 @@ function parseDaysOfWeek(json: string | null): number[] | null {
   }
 }
 
-function ruleAppliesOn(rule: PricingRuleLike, date: Date): boolean {
+// Exported so a caller can attribute a materialized date back to the rules
+// that produced it - the pricing calendar shows that breakdown - without
+// reimplementing the predicate and letting the explanation drift from the
+// number it is explaining.
+export function ruleAppliesOn(rule: PricingRuleLike, date: Date): boolean {
   if (!rule.active) return false;
   if (rule.startDate && date < rule.startDate) return false;
   if (rule.endDate && date > rule.endDate) return false;
