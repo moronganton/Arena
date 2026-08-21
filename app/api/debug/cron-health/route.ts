@@ -12,11 +12,17 @@ import { closeStaleCronRuns } from "@/lib/cron-run";
 // and calls it stale when the gap is too wide.
 //
 //   GET /api/debug/cron-health
+// Intervals are deliberately generous rather than matching the pinger
+// exactly: combined with STALE_MULTIPLIER below, a job firing late must read
+// as late, not as an outage.
 const EXPECTED_INTERVAL_MINUTES: Record<string, number> = {
   "channex-messages": 15,
   "channex-revisions": 60,
   "drain-ari": 60,
   "sync-reservations": 60,
+  // Records runs since it moved to startCronRun; without an entry here its
+  // outcomes are stored but never surfaced anywhere.
+  "sync-messages": 15,
 };
 
 // Allow a wide margin before calling a job stale - a pinger firing a little
