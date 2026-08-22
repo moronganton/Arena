@@ -356,6 +356,16 @@ async function processIncomingMessagesImpl(messageIds: string[]): Promise<void> 
     });
   }
 
+  // The AI has no vision capability wired in anywhere in this pipeline - it
+  // never sees message attachments, only text. Auto-replying to a message it
+  // cannot actually read (a photo of a broken lock, a damage report) risks a
+  // confidently wrong answer more than an ordinary unanswerable question
+  // does, so this hands over unconditionally rather than trying anyway.
+  if (messages.some((m) => !!m.attachments)) {
+    await handOverToHost("message includes a photo/attachment the AI can't see");
+    return;
+  }
+
   const aiSettings = await prisma.aiSettings.findFirst({
     where: { userId: reservation.property.ownerId, enabled: true },
   });

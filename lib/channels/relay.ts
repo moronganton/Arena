@@ -1,5 +1,6 @@
 import { smoobuProvider } from "@/lib/channels/smoobu-provider";
 import { channexBookingIdFromExternalId, sendBookingMessage } from "@/lib/channels/channex-messages";
+import { uploadChannexAttachment } from "@/lib/channels/channex-attachments";
 
 // The single place a guest message gets pushed back to whichever channel the
 // booking came from.
@@ -17,7 +18,14 @@ import { channexBookingIdFromExternalId, sendBookingMessage } from "@/lib/channe
 // the only case worth flagging to a host.
 
 export type RelayOutcome =
-  | { status: "sent"; provider: "smoobu" | "channex" }
+  // attachmentSkipped is only ever true on the Smoobu path - their message
+  // API has no attachment support at all (confirmed against their docs), so
+  // a photo attached to a Smoobu-routed reply still sends its text but never
+  // reaches the guest on that channel. Omitted (not false) when no
+  // attachment was requested, or when the channel is Channex - Channex sends
+  // text and attachment together in the one call, so if that call
+  // succeeded, the attachment was part of it.
+  | { status: "sent"; provider: "smoobu" | "channex"; attachmentSkipped?: boolean }
   | { status: "skipped"; reason: string }
   | { status: "failed"; provider: "smoobu" | "channex"; error: string };
 
@@ -26,14 +34,22 @@ export interface RelayTarget {
   ownerId: string;
 }
 
-export async function relayMessageToChannel(target: RelayTarget, body: string): Promise<RelayOutcome> {
+// attachmentDataUrl: a single data:<mime>;base64,... string, as produced by
+// a browser FileReader. Channex's send-message call takes at most one
+// attachment id per call - matched here rather than inventing multi-
+// attachment support their API doesn't have.
+export async function relayMessageToChannel(
+  target: RelayTarget,
+  body: string,
+  attachmentDataUrl?: string
+): Promise<RelayOutcome> {
   const externalId = target.externalId;
   if (!externalId) return { status: "skipped", reason: "Direct booking - no channel to relay to" };
 
   if (externalId.startsWith("smoobu-")) {
     try {
       await smoobuProvider.sendGuestMessage(target.ownerId, externalId, body);
-      return { status: "sent", provider: "smoobu" };
+      return { status: "sent", provider: "smoobu", attachmentSkipped: !!attachmentDataUrl };
     } catch (err) {
       return { status: "failed", provider: "smoobu", error: err instanceof Error ? err.message : String(err) };
     }
@@ -43,7 +59,8 @@ export async function relayMessageToChannel(target: RelayTarget, body: string): 
     const bookingId = channexBookingIdFromExternalId(externalId);
     if (!bookingId) return { status: "skipped", reason: "Channex reservation with no recoverable booking id" };
     try {
-      await sendBookingMessage(bookingId, body);
+      const attachmentId = attachmentDataUrl ? await uploadChannexAttachment(attachmentDataUrl) : undefined;
+      await sendBookingMessage(bookingId, body, attachmentId);
       return { status: "sent", provider: "channex" };
     } catch (err) {
       // 422 not_supported means this booking's OTA has no message API at all,

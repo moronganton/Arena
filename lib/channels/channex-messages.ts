@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { channexGet, channexPost, ChannexError } from "@/lib/channels/channex-core";
+import { fetchChannexAttachmentAsDataUrl } from "@/lib/channels/channex-attachments";
 import { processIncomingMessage } from "@/lib/ai";
 
 // Two-way guest messaging via Channex, confirmed against the real API docs
@@ -29,7 +30,9 @@ export function channexBookingIdFromExternalId(externalId: string): string | nul
 
 export interface ChannexMessageAttributes {
   message: string;
-  attachments: unknown[];
+  // Paths relative to the API base (confirmed by the docs' own instruction
+  // to prepend the environment's API root) - see fetchChannexAttachmentAsDataUrl.
+  attachments: string[];
   sender: "guest" | "property" | "system";
   inserted_at: string;
   updated_at: string;
@@ -86,9 +89,21 @@ export async function fetchBookingMessages(
   return collected;
 }
 
-export async function sendBookingMessage(bookingId: string, text: string): Promise<{ id: string; attributes: ChannexMessageAttributes }> {
+// text may be empty when attachmentId is present - Channex's own docs: "Can
+// be empty, if attachments is present."
+export async function sendBookingMessage(
+  bookingId: string,
+  text: string,
+  attachmentId?: string
+): Promise<{ id: string; attributes: ChannexMessageAttributes }> {
+  if (!text && !attachmentId) throw new Error("sendBookingMessage requires text, an attachment, or both");
+
+  const payload: { message?: string; attachment_id?: string } = {};
+  if (text) payload.message = text;
+  if (attachmentId) payload.attachment_id = attachmentId;
+
   const res = await channexPost<{ id: string; attributes: ChannexMessageAttributes }>(`/bookings/${bookingId}/messages`, {
-    message: { message: text },
+    message: payload,
   });
   if (!res.data) throw new Error("Channex returned no data for the sent message");
   return res.data;
@@ -107,6 +122,15 @@ export function findReservationByChannexBookingId(bookingId: string) {
 // our own outbound sends are already recorded when sent (see
 // deliverAiMessage), and "system" covers things like Airbnb inquiry
 // metadata messages, not real guest content.
+//
+// Attachment-only messages used to be silently dropped here entirely - a
+// guest photo of a broken lock, a lost key, a payment screenshot just
+// vanished. Each attachment path is fetched and stored as a data URL (see
+// fetchChannexAttachmentAsDataUrl); a message with no text gets a short
+// placeholder body instead of an empty bubble, since it still needs
+// something for the thread list, notifications, and the AI hand-over
+// decision below (lib/ai.ts skips auto-reply entirely when attachments are
+// present - it has no way to see what is in the photo).
 export async function importGuestMessagesForBooking(bookingId: string): Promise<{ imported: number }> {
   const reservation = await findReservationByChannexBookingId(bookingId);
   if (!reservation) return { imported: 0 };
@@ -116,20 +140,38 @@ export async function importGuestMessagesForBooking(bookingId: string): Promise<
 
   for (const m of messages) {
     if (m.attributes.sender !== "guest") continue;
-    if (!m.attributes.message) continue; // attachment-only message - not handled yet
+    const attachmentPaths = m.attributes.attachments ?? [];
+    if (!m.attributes.message && attachmentPaths.length === 0) continue; // nothing to import
 
     const externalId = `channex-msg-${m.id}`;
     const existing = await prisma.message.findFirst({ where: { externalId } });
     if (existing) continue;
 
+    const dataUrls: string[] = [];
+    for (const path of attachmentPaths) {
+      try {
+        dataUrls.push(await fetchChannexAttachmentAsDataUrl(path));
+      } catch (err) {
+        // One bad attachment must not lose the rest of the message - logged,
+        // not thrown, so the text (if any) and any other attachments still land.
+        console.error(`[channex-messages] failed to fetch an attachment for message ${m.id}:`, err);
+      }
+    }
+
+    let body = m.attributes.message || "";
+    if (!body) {
+      body = dataUrls.length > 0 ? (dataUrls.length === 1 ? "Sent a photo" : `Sent ${dataUrls.length} photos`) : "Sent an attachment (couldn't be downloaded)";
+    }
+
     const created = await prisma.message.create({
       data: {
-        body: m.attributes.message,
+        body,
         direction: "INBOUND",
         channel: "PLATFORM",
         externalId,
         reservationId: reservation.id,
         createdAt: new Date(m.attributes.inserted_at),
+        attachments: dataUrls.length > 0 ? JSON.stringify(dataUrls) : null,
       },
     });
     imported++;

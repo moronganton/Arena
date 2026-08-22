@@ -554,6 +554,10 @@ model Message {
   channel   String   @default("PLATFORM") // PLATFORM, EMAIL, SMS, INTERNAL
   source    String?  // booking, airbnb, vrbo, expedia, direct
   externalId String? // e.g. smoobu-msg-123 (dedupe for channel-synced messages)
+  // JSON array of data URLs (data:<mime>;base64,...) - guest- or host-sent
+  // files. Same convention as CleaningTask.photos: stored directly rather
+  // than in a separate file-storage service, since volume is low.
+  attachments String?
   isAiGenerated Boolean @default(false)
   isDraft   Boolean  @default(false) // AI draft awaiting host approval — not sent
   isRead    Boolean  @default(false)

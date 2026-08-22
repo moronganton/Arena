@@ -60,9 +60,18 @@ export async function POST(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json();
-  const { reservationId, messageBody, internal, channel, replyToId, saveToKnowledge } = body;
+  const { reservationId, messageBody, internal, channel, replyToId, saveToKnowledge, attachment } = body;
   // Internal notes are private: saved to the thread, never emailed or relayed
   const isInternal = internal === true || channel === "INTERNAL";
+
+  if (!messageBody?.trim() && !attachment) {
+    return NextResponse.json({ error: "messageBody or attachment is required" }, { status: 400 });
+  }
+  // What actually gets stored, emailed, and relayed - an attachment sent with
+  // no caption still needs some text for the thread list, notifications, and
+  // the guest's inbox preview, the same reasoning importGuestMessagesForBooking
+  // applies to an inbound photo with no message.
+  const displayBody: string = messageBody?.trim() || "Sent a photo";
 
   const reservation = await prisma.reservation.findFirst({
     where: { id: reservationId, property: { ownerId: session!.user!.id } },
@@ -72,11 +81,12 @@ export async function POST(req: NextRequest) {
 
   const message = await prisma.message.create({
     data: {
-      body: messageBody,
+      body: displayBody,
       direction: "OUTBOUND",
       channel: isInternal ? "INTERNAL" : "PLATFORM",
       reservationId,
       senderId: session!.user!.id,
+      attachments: attachment ? JSON.stringify([attachment]) : null,
     },
     include: { reservation: { include: { guest: true, property: true } } },
   });
@@ -138,20 +148,22 @@ export async function POST(req: NextRequest) {
           propertyId: reservation.propertyId,
           category: "FAQ",
           title: questionText.replace(/\s+/g, " ").trim().slice(0, 100),
-          content: messageBody,
+          content: displayBody,
         },
       });
       knowledgeSaved = true;
     }
   }
 
-  // Send via email if guest has email address
+  // Send via email if guest has email address. The actual photo isn't
+  // attached to the email itself (out of scope for now) - the guest sees it
+  // on the booking channel via the relay below, or in StayHQ if they reply.
   if (reservation.guest.email) {
     await sendMessageToGuest({
       guestName: reservation.guest.name,
       guestEmail: reservation.guest.email,
       propertyName: reservation.property.name,
-      messageBody,
+      messageBody: displayBody,
       reservationId,
     });
   }
@@ -164,7 +176,8 @@ export async function POST(req: NextRequest) {
   let channelFailed = false;
   const relay = await relayMessageToChannel(
     { externalId: reservation.externalId, ownerId: session!.user!.id! },
-    messageBody
+    displayBody,
+    attachment
   );
   if (relay.status === "sent") {
     channelRelay = "sent";
@@ -182,7 +195,9 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  return NextResponse.json({ ...message, channelRelay, channelFailed, knowledgeSaved }, { status: 201 });
+  const attachmentSkipped = relay.status === "sent" && !!relay.attachmentSkipped;
+
+  return NextResponse.json({ ...message, channelRelay, channelFailed, knowledgeSaved, attachmentSkipped }, { status: 201 });
 }
 
 // Mark messages as read

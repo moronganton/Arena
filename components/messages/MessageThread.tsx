@@ -1,6 +1,6 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
-import { Send, Bot, User, RefreshCw, AlertTriangle, Reply, X, BookOpen, Check, StickyNote, SendHorizonal } from "lucide-react";
+import { Send, Bot, User, RefreshCw, AlertTriangle, Reply, X, BookOpen, Check, StickyNote, SendHorizonal, Paperclip, FileText } from "lucide-react";
 
 interface Message {
   id: string;
@@ -17,6 +17,44 @@ interface Message {
   senderId: string | null;
   detectedLanguage?: string | null;
   translatedBody?: string | null;
+  // JSON string - array of data:<mime>;base64,... URLs, or null/undefined.
+  attachments?: string | null;
+}
+
+const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024; // matches lib/channels/channex-attachments.ts
+
+function parseAttachments(json: string | null | undefined): string[] {
+  if (!json) return [];
+  try {
+    const parsed = JSON.parse(json);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+// One attachment thumbnail/link. Guests can in principle send any file type
+// through Channex's attachments API, not only images - falls back to a
+// download chip for anything that isn't image/*.
+function AttachmentPreview({ dataUrl }: { dataUrl: string }) {
+  if (dataUrl.startsWith("data:image/")) {
+    return (
+      <a href={dataUrl} target="_blank" rel="noopener noreferrer">
+        {/* eslint-disable-next-line @next/next/no-img-element -- data: URL, not a static asset next/image can optimise */}
+        <img src={dataUrl} alt="Attachment" className="max-w-full rounded-lg mt-1.5 block" />
+      </a>
+    );
+  }
+  return (
+    <a
+      href={dataUrl}
+      download
+      className="mt-1.5 flex items-center gap-1.5 text-xs underline decoration-current/40 underline-offset-2"
+    >
+      <FileText className="w-3.5 h-3.5 shrink-0" />
+      Download attachment
+    </a>
+  );
 }
 
 function isNonEnglish(language?: string | null): boolean {
@@ -58,7 +96,12 @@ export function MessageThread({
   // A translation already fetched is shown by default; this only tracks the
   // ones the host explicitly collapsed back to the original.
   const [hiddenTranslations, setHiddenTranslations] = useState<Set<string>>(new Set());
+  // A single pending attachment (data URL) staged for the next send - Channex
+  // takes at most one per message, see lib/channels/relay.ts.
+  const [pendingAttachment, setPendingAttachment] = useState<string | null>(null);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   function startReply(msg: Message) {
     setReplyTo(msg);
@@ -173,8 +216,20 @@ export function MessageThread({
     });
   }
 
+  function pickAttachment(file: File) {
+    setAttachmentError(null);
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      setAttachmentError(`That file is ${(file.size / 1024 / 1024).toFixed(1)}MB - the limit is 5MB.`);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => setPendingAttachment(reader.result as string);
+    reader.onerror = () => setAttachmentError("Couldn't read that file - try again.");
+    reader.readAsDataURL(file);
+  }
+
   async function sendMessage() {
-    if (!newMessage.trim() || sending) return;
+    if ((!newMessage.trim() && !pendingAttachment) || sending) return;
     setSending(true);
 
     const res = await fetch("/api/messages", {
@@ -183,6 +238,7 @@ export function MessageThread({
       body: JSON.stringify({
         reservationId,
         messageBody: newMessage,
+        attachment: pendingAttachment ?? undefined,
         internal: internalNote,
         replyToId: internalNote ? undefined : replyTo?.id,
         saveToKnowledge: internalNote ? false : saveToKb,
@@ -197,6 +253,8 @@ export function MessageThread({
         msg,
       ]);
       setNewMessage("");
+      setPendingAttachment(null);
+      setAttachmentError(null);
       setReplyTo(null);
       setSaveToKb(false);
       setInternalNote(false);
@@ -208,6 +266,11 @@ export function MessageThread({
         alert(
           "Message saved, but it didn't reach the guest on Booking.com/Airbnb. " +
           "Use the Retry button on the message to try again."
+        );
+      } else if (msg.attachmentSkipped) {
+        alert(
+          "Message sent, but this guest's channel doesn't support photo attachments - " +
+          "only your text reached them there. The photo is kept in this thread for your own records."
         );
       }
     }
@@ -382,6 +445,9 @@ export function MessageThread({
                   ) : (
                     <p className="whitespace-pre-wrap break-words">{msg.body}</p>
                   )}
+                  {parseAttachments(msg.attachments).map((dataUrl, i) => (
+                    <AttachmentPreview key={i} dataUrl={dataUrl} />
+                  ))}
                 </div>
                 {canTranslate && (
                   <button
@@ -523,7 +589,42 @@ export function MessageThread({
             Internal note (not visible to the guest)
           </label>
         </div>
+        {pendingAttachment && (
+          <div className="mb-2 flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+            {/* eslint-disable-next-line @next/next/no-img-element -- data: URL preview */}
+            <img src={pendingAttachment} alt="" className="w-10 h-10 rounded object-cover shrink-0" />
+            <span className="text-xs text-slate-500 flex-1">Photo attached</span>
+            <button
+              onClick={() => setPendingAttachment(null)}
+              className="p-1 text-slate-400 hover:text-slate-600 flex-shrink-0"
+              title="Remove attachment"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+        {attachmentError && (
+          <p className="mb-2 text-xs text-rose-700 bg-rose-50 rounded-lg px-3 py-2">{attachmentError}</p>
+        )}
         <div className="flex gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*,application/pdf"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) pickAttachment(file);
+              e.target.value = ""; // lets the same file be picked again after removal
+            }}
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            title="Attach a photo"
+            className="shrink-0 border border-slate-200 hover:bg-slate-50 text-slate-500 hover:text-indigo-600 rounded-xl px-3 transition"
+          >
+            <Paperclip className="w-4 h-4" />
+          </button>
           <textarea
             value={newMessage}
             onChange={(e) => setNewMessage(e.target.value)}
@@ -543,7 +644,7 @@ export function MessageThread({
           />
           <button
             onClick={sendMessage}
-            disabled={sending || !newMessage.trim()}
+            disabled={sending || (!newMessage.trim() && !pendingAttachment)}
             className={`disabled:opacity-50 text-white rounded-xl px-4 py-2.5 transition flex items-center gap-2 ${
               internalNote ? "bg-amber-500 hover:bg-amber-600" : "bg-indigo-600 hover:bg-indigo-700"
             }`}
