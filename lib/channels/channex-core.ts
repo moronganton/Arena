@@ -22,6 +22,15 @@ export function channexConfigured(): boolean {
   return !!process.env.CHANNEX_API_KEY;
 }
 
+// The Channex WEB app's origin, as opposed to its API base. Everything else
+// here talks to `${origin}/api/v1`, but the embeddable mapping UI is served
+// from the app root (`${origin}/auth/exchange?...`), so the `/api/v1` suffix
+// has to come back off. Derived from the same env var rather than a second
+// one, so staging vs production can never drift apart between the two.
+export function channexAppOrigin(): string {
+  return channexBaseUrl().replace(/\/api\/v\d+$/, "");
+}
+
 // Errors carry the HTTP status and Channex's own error object so callers can
 // distinguish "retry this" (429/5xx) from "this request is wrong" (422),
 // the same distinction sendSmoobuGuestMessage relies on for its retries.

@@ -1,8 +1,9 @@
 "use client";
 import { useState, useEffect } from "react";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, SlidersHorizontal } from "lucide-react";
 import SmoobuSection from "@/components/channels/SmoobuSection";
 import CalendarFeedsSection from "@/components/channels/CalendarFeedsSection";
+import ChannexMappingFrame from "@/components/channels/ChannexMappingFrame";
 
 // One page for everything that connects a property to the outside world.
 //
@@ -46,6 +47,8 @@ export default function ChannelsPage() {
   // Per-property state for the "Force full resync" action - keyed by
   // propertyId so triggering one property's sync doesn't disturb another's.
   const [syncState, setSyncState] = useState<Record<string, { busy: boolean; result: string | null; error: string | null }>>({});
+  // Which property's channel-mapping overlay is open, if any.
+  const [mapping, setMapping] = useState<{ id: string; name: string } | null>(null);
 
   const load = () => {
     fetch("/api/channels/state")
@@ -116,16 +119,17 @@ export default function ChannelsPage() {
         )}
       </div>
 
-      {/* Rooms and rates are mapped in the Channex dashboard, not here, so
-          this reports the connection rather than offering controls that would
-          not do anything. */}
+      {/* Channel connection and room/rate mapping are embedded here (see
+          ChannexMappingFrame) rather than sending the host to log in
+          elsewhere - so this offers the real controls, not just a status
+          readout. */}
       {channexProperties.length > 0 && (
         <div className="bg-white rounded-2xl border border-slate-100 p-5 mb-6">
           <div className="mb-4">
-            <h2 className="text-lg font-semibold text-slate-900">Channex</h2>
+            <h2 className="text-lg font-semibold text-slate-900">Connected channels</h2>
             <p className="text-slate-500 text-sm mt-0.5">
-              Rooms and rates are mapped in the Channex dashboard. Availability and prices push
-              automatically whenever they change here.
+              Connect an OTA and map its rooms and rates to a property. Availability and prices then
+              push automatically whenever they change here.
             </p>
           </div>
           <div className="divide-y divide-slate-100">
@@ -147,6 +151,16 @@ export default function ChannelsPage() {
                           <span className="text-red-600"> {"\u00b7"} {p.channex.failedUpdates} failed</span>
                         )}
                       </span>
+                      {p.channex && (
+                        <button
+                          onClick={() => setMapping({ id: p.id, name: p.name })}
+                          title="Connect an OTA and map its rooms and rates, without leaving StayHQ"
+                          className="flex items-center gap-1.5 text-xs font-medium text-slate-600 hover:text-indigo-600 border border-slate-200 hover:border-indigo-200 px-2.5 py-1.5 rounded-lg transition"
+                        >
+                          <SlidersHorizontal className="w-3.5 h-3.5" />
+                          Manage channels
+                        </button>
+                      )}
                       {p.channex && (
                         <button
                           onClick={() => forceFullSync(p.id)}
@@ -187,6 +201,19 @@ export default function ChannelsPage() {
         </div>
         <CalendarFeedsSection />
       </div>
+
+      {/* Closing reloads the overview: a channel connected or unmapped in
+          there changes what the rows above should say. */}
+      {mapping && (
+        <ChannexMappingFrame
+          propertyId={mapping.id}
+          propertyName={mapping.name}
+          onClose={() => {
+            setMapping(null);
+            load();
+          }}
+        />
+      )}
     </div>
   );
 }
