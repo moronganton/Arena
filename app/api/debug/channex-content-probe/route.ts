@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireDebugAccess } from "@/lib/debug-auth";
 import { prisma } from "@/lib/prisma";
-import { getHotelPolicyForProperty } from "@/lib/channels/channex-hotel-policy";
+import { getHotelPolicyForProperty, upsertHotelPolicy } from "@/lib/channels/channex-hotel-policy";
 import { getPropertyFacilityIds, listFacilityOptions } from "@/lib/channels/channex-facilities";
 
 // One-off verification for the two assumptions in this batch that weren't
@@ -26,9 +26,35 @@ export async function GET(req: NextRequest) {
   const channexPropertyId = property.channexListing.channexPropertyId;
 
   const results: Record<string, unknown> = { property: property.name, channexPropertyId };
+  const applyPolicy = new URL(req.url).searchParams.get("applyPolicy") === "true";
 
   try {
-    results.hotelPolicy = await getHotelPolicyForProperty(channexPropertyId);
+    const existing = await getHotelPolicyForProperty(channexPropertyId);
+    if (existing || !applyPolicy) {
+      results.hotelPolicy = existing;
+    } else {
+      // Real write-path verification: creates one genuine, sensible policy
+      // rather than throwaway test data, since Sinteu doesn't have one yet.
+      results.hotelPolicy = await upsertHotelPolicy(channexPropertyId, {
+        title: "Sinteu 3 bedroom apartment - 2PAX",
+        currency: "EUR",
+        is_adults_only: false,
+        max_count_of_guests: 6,
+        checkin_time: "15:00",
+        checkout_time: "11:00",
+        internet_access_type: "wifi",
+        internet_access_coverage: "entire_property",
+        internet_access_cost: null,
+        parking_type: "none",
+        parking_reservation: "not_available",
+        parking_is_private: false,
+        pets_policy: "not_allowed",
+        pets_non_refundable_fee: "0.00",
+        pets_refundable_deposit: "0.00",
+        smoking_policy: "no_smoking",
+      });
+      results.hotelPolicyCreated = true;
+    }
   } catch (err) {
     results.hotelPolicyError = err instanceof Error ? err.message : String(err);
   }
