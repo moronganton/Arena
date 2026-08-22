@@ -7,14 +7,18 @@ import { channexPost, ChannexError } from "@/lib/channels/channex-core";
 // rejects, and a channel that cannot be reached, are reported as
 // success: false in the response body rather than as an error."
 //
-// Worth having separately from the embedded UI because of one specific
-// failure it catches cheaply: "Channels that identify a property by a single
-// code also require that code to be free: the test fails when another
-// channel connection already uses it." Channex's shared Booking.com test
-// hotels are used by every integrator on staging, so "Channel Already Exists"
-// is the normal outcome, not an exception - finding that out here beats a
-// host hitting it mid-mapping and not knowing whether they did something
-// wrong.
+// NOT usable for Booking.com, confirmed by running it: BDC returns
+// {"success": false, "errors": "implementation_not_defined"}. That adapter
+// implements no credential probe, which fits how the channel works - a
+// Booking.com connection is authorised by the property in their extranet,
+// so there are no credentials to test in the first place. For BDC the only
+// way to find out is to create the connection.
+//
+// Still useful for adapters that DO take credentials (an access token, an
+// account login), where it catches a bad value before a connection exists,
+// and for the shared-code case Channex documents: "Channels that identify a
+// property by a single code also require that code to be free: the test
+// fails when another channel connection already uses it."
 //
 //   GET /api/debug/channex-test-channel?channel=BDC&hotel_id=4372137
 export async function GET(req: NextRequest) {
