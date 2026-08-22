@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireChannexProperty } from "@/lib/channels/channex-property-guard";
 import { ensurePaymentAppInstalled, initiateStripeConnect, listPaymentProviders } from "@/lib/channels/channex-payments";
 import { ChannexError } from "@/lib/channels/channex-core";
+import { resolveAppOrigin } from "@/lib/app-url";
 
 // One-time setup: install the Payment app, then connect the property's own
 // Stripe account via OAuth. GET reports current status; POST starts (or
@@ -50,8 +51,7 @@ export async function POST(req: NextRequest) {
   const guard = await requireChannexProperty(propertyId, session.user.id);
   if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: guard.status });
 
-  const appUrl = process.env.NEXTAUTH_URL || process.env.APP_URL;
-  if (!appUrl) return NextResponse.json({ error: "NEXTAUTH_URL is not set - needed to build the Stripe redirect URL" }, { status: 500 });
+  const appUrl = resolveAppOrigin(req);
 
   try {
     const installationId = await ensurePaymentAppInstalled(guard.channexPropertyId);
