@@ -18,6 +18,7 @@ const ICONS: Record<string, typeof Bell> = {
   ai_paused: AlertTriangle,
   delivery_failed: PackageX,
   checkout: LogOut,
+  mapping_issue: AlertTriangle,
   info: Info,
 };
 
@@ -262,7 +263,7 @@ export function NotificationBell() {
                   >
                     <span
                       className={`flex items-center justify-center w-8 h-8 rounded-lg flex-shrink-0 ${
-                        n.type === "ai_paused" || n.type === "delivery_failed"
+                        n.type === "ai_paused" || n.type === "delivery_failed" || n.type === "mapping_issue"
                           ? "bg-rose-100 text-rose-600"
                           : "bg-indigo-100 text-indigo-600"
                       }`}

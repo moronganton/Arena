@@ -26,6 +26,7 @@ export type NotificationType =
   | "ai_paused"
   | "delivery_failed"
   | "checkout"
+  | "mapping_issue"
   | "info";
 
 interface NotifyInput {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { upsertReservationsFromChannexRevision } from "@/lib/channels/channex-bookings";
+import { upsertReservationsFromChannexRevision, notifyUnmappedBooking } from "@/lib/channels/channex-bookings";
 import { acknowledgeRevision } from "@/lib/channels/channex-revisions";
 import { importGuestMessagesForBooking } from "@/lib/channels/channex-messages";
 
@@ -85,8 +85,16 @@ export async function POST(req: NextRequest) {
     // what gets read and acknowledged: a booking is only ever the latest of
     // its revisions, so a modification or cancellation arrives as a new
     // revision of the same booking.
-    const payload = (parsed as { payload?: { booking_id?: string; revision_id?: string } } | null)?.payload;
+    const body = parsed as {
+      payload?: { booking_id?: string; revision_id?: string; booking_revision_id?: string };
+      property_id?: string;
+    } | null;
+    const payload = body?.payload;
     const revisionId = payload?.revision_id;
+    // Unlike "booking", Channex's real payload for these two puts
+    // property_id at the ROOT of the delivery, not inside payload - confirmed
+    // against the documented example, not assumed from the "booking" shape.
+    const rootPropertyId = body?.property_id;
 
     if (event === "booking" && revisionId) {
       const { reservationIds, skipped } = await upsertReservationsFromChannexRevision(revisionId);
@@ -119,6 +127,16 @@ export async function POST(req: NextRequest) {
       // the real inbound route rather than a backstop.
       const { imported } = await importGuestMessagesForBooking(payload.booking_id);
       console.log(`[channex-webhook] message event for booking ${payload.booking_id}: ${imported} guest message(s) imported`);
+      await prisma.channexWebhookLog.update({ where: { id: logId }, data: { processedOk: true } });
+    } else if ((event === "booking_unmapped_room" || event === "booking_unmapped_rate") && rootPropertyId && payload?.booking_id) {
+      // Channex fires these specifically to warn a PMS that a real booking
+      // arrived it could not map to a room type or rate plan - its own docs
+      // call this "high priority... to prevent any potential problems with
+      // overbookings". Left unhandled, an event built to be urgent was
+      // silently swallowed by the generic branch below with nothing shown
+      // to the host - discovered during a full audit of this route, not
+      // from a delivery ever actually being missed.
+      await notifyUnmappedBooking(rootPropertyId, payload.booking_id, event === "booking_unmapped_room" ? "room" : "rate");
       await prisma.channexWebhookLog.update({ where: { id: logId }, data: { processedOk: true } });
     } else {
       // Unrecognized or non-booking event - stored for visibility, nothing

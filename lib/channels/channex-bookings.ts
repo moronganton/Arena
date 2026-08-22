@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { channexGet } from "@/lib/channels/channex-core";
+import { notifyUser } from "@/lib/notify";
 import {
   autoGenerateCodesForReservation,
   revokeAccessCodesForReservation,
@@ -81,6 +82,38 @@ export async function fetchChannexRevision(revisionId: string): Promise<ChannexB
   // "channex-undefined-<listingId>" three call frames away.
   if (!attrs.booking_id) throw new Error(`Channex booking revision ${revisionId} returned no booking_id`);
   return attrs;
+}
+
+// Channex's own words on why this is worth a real alert, not a log line:
+// "to prevent any potential problems with overbookings, Mapping Issues
+// should be solved in short time-frame and should have high priority."
+// A booking exists on the OTA either way - if the mapping isn't fixed, it
+// never closes the corresponding availability, and the property risks
+// double-selling those nights.
+export async function notifyUnmappedBooking(
+  channexPropertyId: string,
+  bookingId: string,
+  kind: "room" | "rate"
+): Promise<void> {
+  const listing = await prisma.channexListing.findFirst({
+    where: { channexPropertyId },
+    include: { property: { select: { name: true, ownerId: true } } },
+  });
+  if (!listing) {
+    console.warn(`[channex-bookings] unmapped-${kind} event for unrecognised Channex property ${channexPropertyId}`);
+    return;
+  }
+
+  await notifyUser(listing.property.ownerId, {
+    type: "mapping_issue",
+    title: `Booking couldn't be mapped — ${listing.property.name}`,
+    body:
+      kind === "room"
+        ? "A new booking arrived that Channex can't match to a room type. Fix the mapping now - until then, this booking won't close out availability, which risks a double booking."
+        : "A new booking arrived that Channex can't match to a rate plan. Fix the mapping now - until then, this booking won't close out availability, which risks a double booking.",
+    link: "/settings/channels",
+  });
+  console.warn(`[channex-bookings] unmapped-${kind}: notified owner of ${listing.property.name} (booking ${bookingId})`);
 }
 
 function mapOtaNameToSource(otaName: string | null | undefined): string {
