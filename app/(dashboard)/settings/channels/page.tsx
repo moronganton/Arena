@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
+import { RefreshCw } from "lucide-react";
 import SmoobuSection from "@/components/channels/SmoobuSection";
 import CalendarFeedsSection from "@/components/channels/CalendarFeedsSection";
 
@@ -42,14 +43,38 @@ function ManagerBadge({ manager }: { manager: string }) {
 export default function ChannelsPage() {
   const [properties, setProperties] = useState<PropertyChannelRow[]>([]);
   const [loading, setLoading] = useState(true);
+  // Per-property state for the "Force full resync" action - keyed by
+  // propertyId so triggering one property's sync doesn't disturb another's.
+  const [syncState, setSyncState] = useState<Record<string, { busy: boolean; result: string | null; error: string | null }>>({});
 
-  useEffect(() => {
+  const load = () => {
     fetch("/api/channels/state")
       .then((r) => (r.ok ? r.json() : { properties: [] }))
       .then((d) => setProperties(d.properties ?? []))
       .catch(() => setProperties([]))
       .finally(() => setLoading(false));
-  }, []);
+  };
+  useEffect(load, []);
+
+  async function forceFullSync(propertyId: string) {
+    setSyncState((s) => ({ ...s, [propertyId]: { busy: true, result: null, error: null } }));
+    try {
+      const res = await fetch("/api/channex/full-sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ propertyId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      setSyncState((s) => ({
+        ...s,
+        [propertyId]: { busy: false, result: `Pushed ${data.horizonDays} days · ${data.taskIds.length} update(s) accepted`, error: null },
+      }));
+      load(); // refresh "last push" / queue counts
+    } catch (err) {
+      setSyncState((s) => ({ ...s, [propertyId]: { busy: false, result: null, error: err instanceof Error ? err.message : "Sync failed" } }));
+    }
+  }
 
   const channexProperties = properties.filter((p) => p.manager === "CHANNEX");
 
@@ -104,22 +129,46 @@ export default function ChannelsPage() {
             </p>
           </div>
           <div className="divide-y divide-slate-100">
-            {channexProperties.map((p) => (
-              <div key={p.id} className="py-3 first:pt-0 last:pb-0 flex items-center justify-between gap-3">
-                <span className="text-sm text-slate-800 min-w-0 truncate">{p.name}</span>
-                <span className="text-xs text-slate-500 shrink-0 text-right">
-                  {!p.channex
-                    ? "Not provisioned"
-                    : p.channex.lastPushAt
-                    ? `Last push ${new Date(p.channex.lastPushAt).toLocaleDateString()}`
-                    : "Not pushed yet"}
-                  {p.channex && p.channex.pendingUpdates > 0 && ` \u00b7 ${p.channex.pendingUpdates} queued`}
-                  {p.channex && p.channex.failedUpdates > 0 && (
-                    <span className="text-red-600"> {"\u00b7"} {p.channex.failedUpdates} failed</span>
+            {channexProperties.map((p) => {
+              const sync = syncState[p.id];
+              return (
+                <div key={p.id} className="py-3 first:pt-0 last:pb-0">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm text-slate-800 min-w-0 truncate">{p.name}</span>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <span className="text-xs text-slate-500 text-right">
+                        {!p.channex
+                          ? "Not provisioned"
+                          : p.channex.lastPushAt
+                          ? `Last push ${new Date(p.channex.lastPushAt).toLocaleDateString()}`
+                          : "Not pushed yet"}
+                        {p.channex && p.channex.pendingUpdates > 0 && ` \u00b7 ${p.channex.pendingUpdates} queued`}
+                        {p.channex && p.channex.failedUpdates > 0 && (
+                          <span className="text-red-600"> {"\u00b7"} {p.channex.failedUpdates} failed</span>
+                        )}
+                      </span>
+                      {p.channex && (
+                        <button
+                          onClick={() => forceFullSync(p.id)}
+                          disabled={sync?.busy}
+                          title="Push 500 days of availability, rates and restrictions - recovers from any gap without waiting for the next change"
+                          className="flex items-center gap-1.5 text-xs font-medium text-slate-600 hover:text-indigo-600 border border-slate-200 hover:border-indigo-200 disabled:opacity-50 px-2.5 py-1.5 rounded-lg transition"
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 ${sync?.busy ? "animate-spin" : ""}`} />
+                          {sync?.busy ? "Syncing\u2026" : "Force full resync"}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {sync?.result && (
+                    <p className="mt-1.5 text-xs text-teal-700 bg-teal-50 border border-teal-200 rounded-lg px-2.5 py-1.5">{sync.result}</p>
                   )}
-                </span>
-              </div>
-            ))}
+                  {sync?.error && (
+                    <p className="mt-1.5 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-2.5 py-1.5">{sync.error}</p>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

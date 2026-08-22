@@ -20,6 +20,13 @@ import { ChannexError } from "./channex-core";
 // worth the added complexity of a per-property throttle unless real volume
 // ever needs it.
 //
+// pushAriForDateRange now makes TWO HTTP calls per invocation (restrictions,
+// then availability - see channex-ari.ts), so "one call" below means one
+// invocation, i.e. two real requests. MIN_MS_BETWEEN_CALLS is set so that
+// even the worst case - every eligible row landing on the SAME property in
+// one run - cannot push either endpoint's own 10/minute bucket over its
+// limit: 60_000 / 10 = 6000ms between invocations, not 3500ms.
+//
 // Backoff: a failed range's contributing rows get attempts+1 and a
 // nextAttemptAt pushed out exponentially, so a persistent failure is not
 // hammered every drain cycle. After MAX_ATTEMPTS they flip to FAILED - a
@@ -42,7 +49,7 @@ import { ChannexError } from "./channex-core";
 // have succeeded on retry.
 
 const MAX_CALLS_PER_RUN = 15; // stays under ~20/min even if the cron fires every minute
-const MIN_MS_BETWEEN_CALLS = 3500; // 60_000 / 20 ≈ 3000ms; padded for safety
+const MIN_MS_BETWEEN_CALLS = 6500; // 60_000 / 10 = 6000ms (the smaller of the two per-endpoint buckets); padded for safety
 const MAX_ATTEMPTS = 5;
 const BACKOFF_BASE_MS = 60_000; // 1 min, 2 min, 4 min, 8 min, 16 min
 
