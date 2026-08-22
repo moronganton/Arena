@@ -119,8 +119,13 @@ const DEFAULT_POLICY = {
   currency: "EUR",
   is_adults_only: false,
   max_count_of_guests: 4,
-  checkin_time: "15:00",
-  checkout_time: "11:00",
+  // Channex's real required fields are an arrival/departure WINDOW, not a
+  // single time - confirmed live, the docs' example payload (checkin_time/
+  // checkout_time alone) was rejected as missing these.
+  checkin_from_time: "15:00",
+  checkin_to_time: "22:00",
+  checkout_from_time: "08:00",
+  checkout_to_time: "11:00",
   internet_access_type: "wifi" as const,
   internet_access_coverage: "entire_property" as const,
   internet_access_cost: null as number | null,
@@ -184,11 +189,17 @@ function HotelPolicyPanel({ propertyId }: { propertyId: string }) {
         <Field label="Currency">
           <input value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value.toUpperCase().slice(0, 3) })} className={inputCls} />
         </Field>
-        <Field label="Check-in time">
-          <input type="time" value={form.checkin_time} onChange={(e) => setForm({ ...form, checkin_time: e.target.value })} className={inputCls} />
+        <Field label="Check-in from">
+          <input type="time" value={form.checkin_from_time} onChange={(e) => setForm({ ...form, checkin_from_time: e.target.value })} className={inputCls} />
         </Field>
-        <Field label="Check-out time">
-          <input type="time" value={form.checkout_time} onChange={(e) => setForm({ ...form, checkout_time: e.target.value })} className={inputCls} />
+        <Field label="Check-in until">
+          <input type="time" value={form.checkin_to_time} onChange={(e) => setForm({ ...form, checkin_to_time: e.target.value })} className={inputCls} />
+        </Field>
+        <Field label="Check-out from">
+          <input type="time" value={form.checkout_from_time} onChange={(e) => setForm({ ...form, checkout_from_time: e.target.value })} className={inputCls} />
+        </Field>
+        <Field label="Check-out until">
+          <input type="time" value={form.checkout_to_time} onChange={(e) => setForm({ ...form, checkout_to_time: e.target.value })} className={inputCls} />
         </Field>
         <Field label="Max guests">
           <input type="number" min={1} value={form.max_count_of_guests} onChange={(e) => setForm({ ...form, max_count_of_guests: Number(e.target.value) })} className={inputCls} />

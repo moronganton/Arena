@@ -10,8 +10,20 @@ export interface HotelPolicyFields {
   currency: string;
   is_adults_only: boolean;
   max_count_of_guests: number;
-  checkin_time: string; // "HH:MM"
-  checkout_time: string; // "HH:MM"
+  // The docs' own example payload shows only checkin_time/checkout_time
+  // (single values), but a live create against the real API rejected that
+  // with "checkin_from_time/checkin_to_time/checkout_from_time/
+  // checkout_to_time can't be blank" - the real required fields are an
+  // arrival/departure WINDOW, not a single instant. checkin_time/
+  // checkout_time still come back on read (likely derived from the window's
+  // start), so both are kept - the four *_time fields are what's actually
+  // required on write.
+  checkin_time?: string; // "HH:MM" - read-only/derived, sent for completeness only
+  checkout_time?: string;
+  checkin_from_time: string; // "HH:MM"
+  checkin_to_time: string;
+  checkout_from_time: string;
+  checkout_to_time: string;
   internet_access_type: "none" | "wifi" | "wired";
   internet_access_coverage: "entire_property" | "public_areas" | "all_rooms" | "some_rooms" | "business_centre";
   internet_access_cost: number | null;
