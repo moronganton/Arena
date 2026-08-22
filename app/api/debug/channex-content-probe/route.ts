@@ -3,6 +3,7 @@ import { requireDebugAccess } from "@/lib/debug-auth";
 import { prisma } from "@/lib/prisma";
 import { getHotelPolicyForProperty, upsertHotelPolicy } from "@/lib/channels/channex-hotel-policy";
 import { getPropertyFacilityIds, listFacilityOptions } from "@/lib/channels/channex-facilities";
+import { ChannexError } from "@/lib/channels/channex-core";
 
 // One-off verification for the two assumptions in this batch that weren't
 // backed by a concrete doc example: whether hotel_policies list attributes
@@ -56,7 +57,8 @@ export async function GET(req: NextRequest) {
       results.hotelPolicyCreated = true;
     }
   } catch (err) {
-    results.hotelPolicyError = err instanceof Error ? err.message : String(err);
+    const e = err as ChannexError;
+    results.hotelPolicyError = { message: e.message, details: e.details };
   }
 
   try {
