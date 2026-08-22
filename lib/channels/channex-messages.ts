@@ -15,10 +15,13 @@ import { processIncomingMessage } from "@/lib/ai";
 const CHANNEX_PREFIX = "channex-";
 const UUID_LENGTH = 36; // e.g. "2f2315dd-429a-4a54-bb9d-55bc9b44046b"
 
-// upsertReservationsFromChannexBooking (channex-bookings.ts) sets externalId
-// to `channex-${booking.id}-${listing.id}` - booking.id is a fixed-width
-// UUID and listing.id (a cuid) never contains a dash, so a straight slice
-// recovers it reliably without a schema change to store it separately.
+// upsertReservationsFromBookingData (channex-bookings.ts) sets externalId to
+// `channex-${booking.booking_id}-${listing.id}` - booking.booking_id (the
+// STABLE id across every revision of a booking, not the revision's own
+// unstable `id` - see the comment on ChannexBookingAttributes for why that
+// distinction matters) is a fixed-width UUID, and listing.id (a cuid) never
+// contains a dash, so a straight slice recovers it reliably without a
+// schema change to store it separately.
 export function channexBookingIdFromExternalId(externalId: string): string | null {
   if (!externalId.startsWith(CHANNEX_PREFIX)) return null;
   return externalId.slice(CHANNEX_PREFIX.length, CHANNEX_PREFIX.length + UUID_LENGTH);
