@@ -84,6 +84,40 @@ export async function startCronRun(
   });
 }
 
+// The standalone-script counterpart to startCronRun, for jobs that run as
+// their own process (a Railway Cron Job) rather than as a background promise
+// on the persistent web server. There is no HTTP response to smuggle the
+// previous run's outcome through here - the whole reason that trick exists
+// is a pinger's 30s request timeout, and a cron job's own process has no
+// such limit; it is awaited to completion by whatever scheduled it, and its
+// exit code IS the success/failure signal. So this awaits `work` directly
+// and rethrows on failure, for the caller to turn into `process.exitCode = 1`.
+//
+// Still writes the same CronRun rows as startCronRun, under the same `job`
+// name, so /api/debug/cron-health keeps working unchanged regardless of
+// which of the two ever actually calls a given job.
+export async function runCronJobToCompletion(
+  job: string,
+  work: () => Promise<Record<string, unknown> | void>
+): Promise<Record<string, unknown> | void> {
+  const run = await prisma.cronRun.create({ data: { job } });
+  try {
+    const summary = await work();
+    const text = summary ? JSON.stringify(summary) : null;
+    await prisma.cronRun.update({
+      where: { id: run.id },
+      data: { ok: true, finishedAt: new Date(), summary: text?.slice(0, 2000), error: null },
+    });
+    return summary;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await prisma.cronRun
+      .update({ where: { id: run.id }, data: { ok: false, finishedAt: new Date(), error: message.slice(0, 1000) } })
+      .catch(() => {});
+    throw err;
+  }
+}
+
 // Anything still marked running well past any plausible runtime was almost
 // certainly killed mid-flight by a deploy or restart. Closing those out keeps
 // them from sitting in the table forever looking like work in progress.

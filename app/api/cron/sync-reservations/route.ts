@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { smoobuProvider } from "@/lib/channels/smoobu-provider";
+import { syncAllSmoobuReservations } from "@/lib/channels/smoobu-provider";
 import { startCronRun, closeStaleCronRuns } from "@/lib/cron-run";
 
 // Runs syncSmoobuBookings for every connected account on a schedule, instead
@@ -17,6 +16,13 @@ import { startCronRun, closeStaleCronRuns } from "@/lib/cron-run";
 // reservation checked within hours of a sync showed a 4-hour delay while
 // ones left unchecked for over a week showed 150-200+ "hours" that were
 // mostly just unattended time. Regular runs close that gap.
+//
+// The account-looping work itself lives in syncAllSmoobuReservations
+// (lib/channels/smoobu-provider.ts) - shared with
+// scripts/cron/sync-reservations.ts, the Railway-cron-job equivalent of this
+// route. Keep this file as the HTTP-triggered path for as long as an
+// external pinger is still in use; once fully cut over to Railway's native
+// cron jobs this route can be retired.
 //
 // Fires the sync in the BACKGROUND and responds immediately, rather than
 // awaiting the full run before replying. Free cron pingers commonly cap the
@@ -45,37 +51,18 @@ export async function GET(req: NextRequest) {
 
 async function runSync() {
   const started = Date.now();
-  const accounts = await prisma.smoobuAccount.findMany({ select: { userId: true } });
-
-  let imported = 0;
-  let updated = 0;
-  let cancelled = 0;
-  const errors: string[] = [];
-
-  for (const account of accounts) {
-    try {
-      const r = await smoobuProvider.syncBookings(account.userId);
-      imported += r.imported;
-      updated += r.updated;
-      cancelled += r.cancelled;
-      if (r.errors.length) errors.push(...r.errors.map((e) => `${account.userId}: ${e}`));
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[cron/sync-reservations] account ${account.userId} failed:`, err);
-      errors.push(`${account.userId}: ${msg}`);
-    }
-  }
+  const r = await syncAllSmoobuReservations();
 
   console.log(
-    `[cron/sync-reservations] done in ${Date.now() - started}ms - accounts=${accounts.length} ` +
-    `imported=${imported} updated=${updated} cancelled=${cancelled} errors=${errors.length}` +
-    (errors.length ? ` (${errors.join("; ")})` : "")
+    `[cron/sync-reservations] done in ${Date.now() - started}ms - accounts=${r.accounts} ` +
+    `imported=${r.imported} updated=${r.updated} cancelled=${r.cancelled} errors=${r.errors.length}` +
+    (r.errors.length ? ` (${r.errors.join("; ")})` : "")
   );
 
   // Every connected account failing is an outage worth reporting; one account
   // erroring among several is not, and is already logged above.
-  if (accounts.length > 0 && errors.length >= accounts.length) {
-    throw new Error(errors.join("; "));
+  if (r.accounts > 0 && r.errors.length >= r.accounts) {
+    throw new Error(r.errors.join("; "));
   }
-  return { accounts: accounts.length, imported, updated, cancelled, errors: errors.length };
+  return { accounts: r.accounts, imported: r.imported, updated: r.updated, cancelled: r.cancelled, errors: r.errors.length };
 }

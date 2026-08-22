@@ -23,6 +23,12 @@ const EXPECTED_INTERVAL_MINUTES: Record<string, number> = {
   // Records runs since it moved to startCronRun; without an entry here its
   // outcomes are stored but never surfaced anywhere.
   "sync-messages": 15,
+  // Both already wrote CronRun rows (channex-full-sync via startCronRun,
+  // scheduled-messages once its scripts/cron/ equivalent runs via
+  // runCronJobToCompletion) but were missing here, so a stall in either
+  // never surfaced.
+  "channex-full-sync": 1440,
+  "scheduled-messages": 60,
 };
 
 // Allow a wide margin before calling a job stale - a pinger firing a little

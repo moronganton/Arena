@@ -9,7 +9,14 @@
     "lint": "next lint",
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
-    "db:seed": "tsx prisma/seed.ts"
+    "db:seed": "tsx prisma/seed.ts",
+    "cron:drain-ari": "tsx scripts/cron/drain-ari.ts",
+    "cron:channex-full-sync": "tsx scripts/cron/channex-full-sync.ts",
+    "cron:channex-revisions": "tsx scripts/cron/channex-revisions.ts",
+    "cron:channex-messages": "tsx scripts/cron/channex-messages.ts",
+    "cron:sync-reservations": "tsx scripts/cron/sync-reservations.ts",
+    "cron:sync-messages": "tsx scripts/cron/sync-messages.ts",
+    "cron:scheduled-messages": "tsx scripts/cron/scheduled-messages.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
@@ -43,6 +50,7 @@
     "resend": "^6.16.0",
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7",
+    "tsx": "^4.19.2",
     "uuid": "^11.0.5",
     "web-push": "^3.6.7",
     "zod": "^3.24.1"
@@ -63,7 +71,6 @@
     "postcss": "^8",
     "prisma": "^6.2.1",
     "tailwindcss": "^3.4.1",
-    "tsx": "^4.19.2",
     "typescript": "^5"
   }
 }

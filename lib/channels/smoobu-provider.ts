@@ -43,3 +43,67 @@ export async function getProvidersForUser(userId: string): Promise<ChannelProvid
   const account = await prisma.smoobuAccount.findUnique({ where: { userId }, select: { userId: true } });
   return account ? [smoobuProvider] : [];
 }
+
+// The account-looping body behind both GET /api/cron/sync-reservations and
+// its Railway-cron script equivalent (scripts/cron/sync-reservations.ts) -
+// pulled out here so there is exactly one implementation calling
+// smoobuProvider.syncBookings for every connected account, not two that can
+// drift apart.
+export async function syncAllSmoobuReservations(): Promise<{
+  accounts: number;
+  imported: number;
+  updated: number;
+  cancelled: number;
+  errors: string[];
+}> {
+  const accounts = await prisma.smoobuAccount.findMany({ select: { userId: true } });
+
+  let imported = 0;
+  let updated = 0;
+  let cancelled = 0;
+  const errors: string[] = [];
+
+  for (const account of accounts) {
+    try {
+      const r = await smoobuProvider.syncBookings(account.userId);
+      imported += r.imported;
+      updated += r.updated;
+      cancelled += r.cancelled;
+      if (r.errors.length) errors.push(...r.errors.map((e) => `${account.userId}: ${e}`));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[smoobu-sync-all] account ${account.userId} failed:`, err);
+      errors.push(`${account.userId}: ${msg}`);
+    }
+  }
+
+  return { accounts: accounts.length, imported, updated, cancelled, errors };
+}
+
+// Same idea for GET /api/cron/sync-messages.
+export async function syncAllSmoobuMessages(): Promise<{
+  accounts: number;
+  reservationsChecked: number;
+  newMessages: number;
+  errors: string[];
+}> {
+  const accounts = await prisma.smoobuAccount.findMany({ select: { userId: true } });
+
+  let reservationsChecked = 0;
+  let newMessages = 0;
+  const errors: string[] = [];
+
+  for (const account of accounts) {
+    try {
+      const r = await smoobuProvider.syncMessages(account.userId);
+      reservationsChecked += r.checked;
+      newMessages += r.newMessages;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[smoobu-sync-all] account ${account.userId} failed:`, err);
+      errors.push(`${account.userId}: ${msg}`);
+    }
+  }
+
+  return { accounts: accounts.length, reservationsChecked, newMessages, errors };
+}

@@ -1,11 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { smoobuProvider } from "@/lib/channels/smoobu-provider";
+import { syncAllSmoobuMessages } from "@/lib/channels/smoobu-provider";
 import { startCronRun, closeStaleCronRuns } from "@/lib/cron-run";
 
 // Continuously pulls new guest messages from Smoobu for all accounts and runs
 // each through the AI — so replies happen 24/7 without waiting for the host to
 // open a thread or for a reservation webhook to fire.
+//
+// The account-looping work itself lives in syncAllSmoobuMessages
+// (lib/channels/smoobu-provider.ts) - shared with
+// scripts/cron/sync-messages.ts, the Railway-cron-job equivalent of this
+// route. Keep this file as the HTTP-triggered path for as long as an
+// external pinger is still in use; once fully cut over to Railway's native
+// cron jobs this route can be retired.
 //
 // Runs in the BACKGROUND and answers immediately, for the same reason
 // sync-reservations does: free cron pingers cap the request at 30 seconds
@@ -36,33 +42,18 @@ export async function GET(req: NextRequest) {
 
 async function runSync() {
   const started = Date.now();
-  const accounts = await prisma.smoobuAccount.findMany({ select: { userId: true } });
-
-  let reservationsChecked = 0;
-  let newMessages = 0;
-  const errors: string[] = [];
-  for (const account of accounts) {
-    try {
-      const r = await smoobuProvider.syncMessages(account.userId);
-      reservationsChecked += r.checked;
-      newMessages += r.newMessages;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[cron/sync-messages] account ${account.userId} failed:`, err);
-      errors.push(`${account.userId}: ${msg}`);
-    }
-  }
+  const r = await syncAllSmoobuMessages();
 
   console.log(
-    `[cron/sync-messages] done in ${Date.now() - started}ms - accounts=${accounts.length} ` +
-      `checked=${reservationsChecked} new=${newMessages} errors=${errors.length}`
+    `[cron/sync-messages] done in ${Date.now() - started}ms - accounts=${r.accounts} ` +
+      `checked=${r.reservationsChecked} new=${r.newMessages} errors=${r.errors.length}`
   );
 
   // Every connected account failing is an outage worth surfacing; one among
   // several erroring is already logged above. Same rule sync-reservations uses.
-  if (accounts.length > 0 && errors.length >= accounts.length) {
-    throw new Error(errors.join("; "));
+  if (r.accounts > 0 && r.errors.length >= r.accounts) {
+    throw new Error(r.errors.join("; "));
   }
 
-  return { accounts: accounts.length, reservationsChecked, newMessages, errors: errors.length };
+  return { accounts: r.accounts, reservationsChecked: r.reservationsChecked, newMessages: r.newMessages, errors: r.errors.length };
 }
