@@ -10,17 +10,14 @@ export interface HotelPolicyFields {
   currency: string;
   is_adults_only: boolean;
   max_count_of_guests: number;
-  // The docs' own example payload shows only checkin_time/checkout_time
-  // (single values), but a live create against the real API rejected that
-  // with "checkin_from_time/checkin_to_time/checkout_from_time/
-  // checkout_to_time can't be blank" - the real required fields are an
-  // arrival/departure WINDOW, not a single instant. checkin_time/
-  // checkout_time still come back on read (likely derived from the window's
-  // start), so both are kept - the four *_time fields are what's actually
-  // required on write.
-  checkin_time?: string; // "HH:MM" - read-only/derived, sent for completeness only
-  checkout_time?: string;
-  checkin_from_time: string; // "HH:MM"
+  // The docs' own example payload shows checkin_time/checkout_time (single
+  // values), but a live create against the real API rejected that with
+  // "checkin_from_time/checkin_to_time/checkout_from_time/checkout_to_time
+  // can't be blank" - confirmed via a real create-and-read-back that the
+  // actual object has only these four (an arrival/departure window, not a
+  // single instant) and no checkin_time/checkout_time field at all. Returned
+  // with seconds ("15:00:00") - <input type="time"> accepts that format.
+  checkin_from_time: string; // "HH:MM" or "HH:MM:SS"
   checkin_to_time: string;
   checkout_from_time: string;
   checkout_to_time: string;
