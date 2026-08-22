@@ -8,6 +8,7 @@ import { MessageThread } from "@/components/messages/MessageThread";
 import ReservationActions from "./ReservationActions";
 import { AccessCodeGenerator } from "@/components/reservations/AccessCodeGenerator";
 import { AccessCodeActions } from "@/components/reservations/AccessCodeActions";
+import PaymentsCard from "@/components/reservations/PaymentsCard";
 import { toCetInputValue, formatCet } from "@/lib/cet";
 
 export default async function ReservationDetailPage({
@@ -179,6 +180,12 @@ export default async function ReservationDetailPage({
               </div>
             )}
           </div>
+
+          <PaymentsCard
+            reservationId={reservation.id}
+            channexEligible={reservation.property.channelProvider === "CHANNEX" && !!reservation.externalId?.startsWith("channex-")}
+            currency={reservation.currency}
+          />
         </div>
 
         {/* Message Thread */}
