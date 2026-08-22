@@ -15,14 +15,16 @@ import { importGuestMessagesForBooking } from "@/lib/channels/channex-messages";
 // The only case that returns non-200 is a failed shared-secret check, which
 // is a rejected request rather than a failed delivery - see below.
 //
-// Auth: the registered webhook currently has headers: null, meaning Channex
-// sends no shared secret and anything on the internet could POST here. That
-// is acceptable only because processing is presently limited to storing the
-// payload, and because a booking's authoritative data is re-fetched from the
-// Channex API by ID rather than trusted from the request body. Before this
-// endpoint creates real reservations for a live property, set a header in
-// the Channex webhook UI (Headers: {"x-webhook-secret": "..."}) and the
-// matching CHANNEX_WEBHOOK_SECRET env var, and this will start enforcing it.
+// Auth: there is no separate "Channex webhook UI" for this - headers is a
+// field on the webhook object itself, settable only via POST/PUT /webhooks
+// (confirmed against the real API docs). Set CHANNEX_WEBHOOK_SECRET on this
+// server, then run /api/debug/channex-set-webhook-secret?confirm=true to PUT
+// a matching x-webhook-secret header onto every registered webhook - that
+// closes the gap where Channex sends no shared secret and anything on the
+// internet could POST here. Until that's done, this is acceptable only
+// because processing is presently limited to storing the payload, and
+// because a booking's authoritative data is re-fetched from the Channex API
+// by ID rather than trusted from the request body.
 export async function POST(req: NextRequest) {
   const rawBody = await req.text();
 
