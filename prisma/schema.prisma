@@ -220,6 +220,13 @@ model Property {
   // time instead of all at once. Every existing property defaults to
   // SMOOBU, matching how they're actually connected today.
   channelProvider String @default("SMOOBU") // SMOOBU | CHANNEX | NONE
+  // Local guest city tax, e.g. Bratislava's 3.5 EUR/guest/night. Null means
+  // not applicable - most properties have no such tax. Deliberately NOT a
+  // Channex concept: the Channex Payment API only charges against a Channex
+  // booking_id, which Smoobu-sourced reservations never have (see
+  // lib/city-tax.ts), so this is a plain Stripe flow that works for any
+  // property regardless of which channel manager owns it.
+  cityTaxPerNight Float?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -254,6 +261,12 @@ model ChannexListing {
   channexRoomTypeId String
   channexRatePlanId String
   createdAt         DateTime @default(now())
+  // Set once, the first time the Channex Payment App is installed and its
+  // Stripe OAuth connection completes for this property (see
+  // lib/channels/channex-payments.ts). Null means the app isn't set up yet -
+  // every payment call needs both.
+  paymentInstallationId String?
+  paymentProviderId     String?
 
   propertyId String   @unique
   property   Property @relation(fields: [propertyId], references: [id])
@@ -541,10 +554,38 @@ model Reservation {
   messages     Message[]
   accessCodes  AccessCode[]
   cleaningTasks CleaningTask[]
+  cityTaxCharges CityTaxCharge[]
 
   @@index([propertyId])
   @@index([guestId])
   @@index([checkIn, checkOut])
+}
+
+// A guest-facing city tax charge (e.g. Bratislava's 3.5 EUR/guest/night),
+// collected by card via a Stripe Checkout link instead of the current manual
+// bank transfer nobody can verify without asking the guest. See
+// lib/city-tax.ts for why this is plain Stripe rather than routed through
+// Channex's Payment API - that API only charges against a Channex booking_id,
+// which a Smoobu-sourced reservation never has.
+model CityTaxCharge {
+  id            String   @id @default(cuid())
+  amountCents   Int      // total due, minor currency units
+  currency      String
+  guests        Int      // occupancy the amount was computed from, for the record
+  nights        Int
+  perNightCents Int
+  status        String   @default("PENDING") // PENDING, PAID, CANCELED
+  stripeSessionId        String?  @unique
+  stripePaymentIntentId  String?
+  paidAt        DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  reservationId String
+  reservation   Reservation @relation(fields: [reservationId], references: [id])
+
+  @@index([reservationId])
+  @@index([status])
 }
 
 model Message {
