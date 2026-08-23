@@ -1,6 +1,10 @@
 import { prisma } from "@/lib/prisma";
 import { channexGet, channexPost, ChannexError } from "@/lib/channels/channex-core";
-import { upsertReservationsFromBookingData, type ChannexBookingAttributes } from "@/lib/channels/channex-bookings";
+import {
+  upsertReservationsFromBookingData,
+  fetchChannexRevisionResolved,
+  type ChannexBookingAttributes,
+} from "@/lib/channels/channex-bookings";
 
 // Reads bookings from the unacknowledged revision feed and acknowledges each
 // one once it is safely stored.
@@ -90,7 +94,12 @@ export async function pollChannexRevisions(): Promise<ChannexRevisionsPollResult
       result.fetched++;
 
       try {
-        const { reservationIds, skipped } = await upsertReservationsFromBookingData(rev.attributes);
+        // The feed's own attributes can be the same "webhook fired before
+        // Channex finished resolving the room/rate mapping" snapshot the
+        // webhook path guards against - re-resolving here closes that same
+        // race for whichever of the two paths sees the revision first.
+        const resolved = await fetchChannexRevisionResolved(rev.id);
+        const { reservationIds, skipped } = await upsertReservationsFromBookingData(resolved);
         result.reservationsTouched += reservationIds.length;
 
         if (reservationIds.length > 0) {

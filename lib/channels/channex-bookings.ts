@@ -125,10 +125,47 @@ function mapOtaNameToSource(otaName: string | null | undefined): string {
   return "DIRECT";
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Channex fires the webhook the instant a booking lands, but its own
+// room/rate-code -> room_type_id/rate_plan_id mapping resolution finishes
+// slightly AFTER that - confirmed live: a revision fetched immediately on
+// webhook receipt returned room_type_id/rate_plan_id: null for a room whose
+// mapping was correct and, re-fetching the same revision minutes later,
+// resolved fine. ~17s of retries turns that race into a little latency
+// instead of a silently dropped booking. Only retries for a room on a
+// property we actually manage - a room that will never resolve (another
+// tester's slot on the shared sandbox hotel) shouldn't cost every webhook
+// call ~17s for nothing.
+const UNRESOLVED_ROOM_RETRY_DELAYS_MS = [2000, 5000, 10000];
+
+async function hasUnresolvedOwnPropertyRoom(booking: ChannexBookingAttributes): Promise<boolean> {
+  const stillUnmapped = booking.rooms.some((r) => !r.is_cancelled && (!r.room_type_id || !r.rate_plan_id));
+  if (!stillUnmapped) return false;
+  const ownProperty = await prisma.channexListing.findFirst({ where: { channexPropertyId: booking.property_id } });
+  return ownProperty !== null;
+}
+
+// Re-fetches the same revision by id until its room/rate mapping has
+// resolved (or the retry budget runs out) - the one thing that changes
+// between two fetches of the same revisionId is Channex finishing that
+// resolution server-side, so a fresh GET is the only way to see it happen.
+export async function fetchChannexRevisionResolved(revisionId: string): Promise<ChannexBookingAttributes> {
+  let booking = await fetchChannexRevision(revisionId);
+  for (const delayMs of UNRESOLVED_ROOM_RETRY_DELAYS_MS) {
+    if (!(await hasUnresolvedOwnPropertyRoom(booking))) break;
+    await sleep(delayMs);
+    booking = await fetchChannexRevision(revisionId);
+  }
+  return booking;
+}
+
 export async function upsertReservationsFromChannexRevision(
   revisionId: string
 ): Promise<{ reservationIds: string[]; skipped: string[] }> {
-  return upsertReservationsFromBookingData(await fetchChannexRevision(revisionId));
+  return upsertReservationsFromBookingData(await fetchChannexRevisionResolved(revisionId));
 }
 
 // Everything that has to stop happening once a stay is off. Shared by the
@@ -173,10 +210,20 @@ export async function upsertReservationsFromBookingData(
   // yet. Kept apart from "not present" so the orphan sweep below can't read
   // a provider flag as a guest cancelling.
   const offChannexListingIds = new Set<string>();
+  // Only true once fetchChannexRevisionResolved has already given this
+  // revision every retry it's going to get - by the time this function is
+  // called, a still-null room/rate on one of OUR properties is no longer a
+  // timing race, it is a real mapping gap Channex's own docs call worth
+  // alerting on. A booking on another tester's slot of the shared sandbox
+  // hotel never matches ownProperty below, so it stays silent as before.
+  const ownProperty = listings.find((l) => l.channexPropertyId === booking.property_id);
 
   for (const room of booking.rooms) {
     if (!room.room_type_id || !room.rate_plan_id) {
       skipped.push(`room ${room.booking_room_id}: not mapped to a StayHQ room/rate on Channex`);
+      if (ownProperty && !room.is_cancelled) {
+        await notifyUnmappedBooking(booking.property_id, booking.booking_id, room.room_type_id ? "rate" : "room");
+      }
       continue;
     }
     const listing = listings.find(
