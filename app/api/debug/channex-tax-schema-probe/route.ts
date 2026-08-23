@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireDebugAccess } from "@/lib/debug-auth";
 import { prisma } from "@/lib/prisma";
-import { channexPost, ChannexError } from "@/lib/channels/channex-core";
+import { channexPost, channexDelete, ChannexError } from "@/lib/channels/channex-core";
 
 // One-off schema discovery for Channex's Taxes/Tax Sets collections -
 // docs.channex.io is blocked by this sandbox's egress policy (same as every
@@ -71,6 +71,40 @@ export async function GET(req: NextRequest) {
     });
   } catch (err) {
     results.invalidTypeError = describeError(err);
+  }
+
+  // Confirms the wire values behind Channex's "Type" and "Logic" dropdowns
+  // (Tax/City tax/Fee, and Percent/Per booking/Per room/Per night/Per
+  // person/Per room per night/Per person per night) - guessed as lowercase
+  // snake_case by analogy with every other Channex enum in this codebase,
+  // but not worth shipping on analogy alone. Creates one throwaway tax with
+  // the two least-obvious guesses (type "fee", logic "per_booking"),
+  // confirms it round-trips, then deletes it - type "fee" can never collide
+  // with the real city_tax lookup other code uses, so this is safe to run
+  // against the live account.
+  if (searchParams.get("verifyEnums") === "true") {
+    try {
+      const createRes = await channexPost<{ id: string; attributes: Record<string, unknown> }>("/taxes", {
+        tax: {
+          property_id: channexPropertyId,
+          title: "StayHQ enum probe - safe to delete",
+          currency: "EUR",
+          type: "fee",
+          logic: "per_booking",
+          is_inclusive: false,
+          rate: "1.00",
+        },
+      });
+      results.enumProbeCreated = createRes.data?.attributes;
+      const probeId = createRes.data?.id;
+      if (probeId) {
+        await channexDelete(`/taxes/${probeId}`);
+        results.enumProbeDeleted = true;
+      }
+    } catch (err) {
+      results.enumProbeError = describeError(err);
+    }
+    return NextResponse.json(results);
   }
 
   if (create) {
