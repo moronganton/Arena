@@ -183,7 +183,7 @@ export async function getGuestCardOnFile(reservationId: string): Promise<GuestCa
 export async function createOrReuseCardSetupLink(reservationId: string, appUrl: string): Promise<{ url: string }> {
   const reservation = await prisma.reservation.findUniqueOrThrow({
     where: { id: reservationId },
-    include: { guest: true },
+    include: { guest: true, property: true },
   });
 
   const existing = await prisma.guestCardOnFile.findUnique({ where: { reservationId } });
@@ -198,6 +198,10 @@ export async function createOrReuseCardSetupLink(reservationId: string, appUrl: 
 
   const session = await stripe().checkout.sessions.create({
     mode: "setup",
+    // "setup" mode has no line items to infer eligible payment methods
+    // from, so Stripe requires currency explicitly - confirmed live, this
+    // call 400'd with "Missing required param: currency" without it.
+    currency: reservation.property.currency.toLowerCase(),
     customer_email: reservation.guest.email || undefined,
     success_url: `${appUrl}/reservations/${reservationId}?cardSaved=1`,
     cancel_url: `${appUrl}/reservations/${reservationId}?cardSaved=cancelled`,
