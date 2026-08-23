@@ -68,15 +68,22 @@ export async function relayMessageToChannel(
         await sendBookingMessage(bookingId, body);
       } else {
         // Channex's message-create call takes at most one attachment_id per
-        // call, not an array - N photos become N consecutive messages, the
-        // caption riding with the first. Matches how Booking.com's own
-        // Pulse app renders them anyway: one image per bubble. If a later
+        // call, not an array - N photos become N consecutive messages. The
+        // caption is sent as its own message, never combined with an
+        // attachment_id in the same call - confirmed live, twice, that the
+        // combined call reliably gets a 200 back but silently drops the
+        // attachment, while an attachment-only call (empty text) reliably
+        // keeps it. Matches how Booking.com's own Pulse app renders them
+        // anyway: one image per bubble, separate from the text. If a later
         // photo in the batch fails, the earlier ones have already reached
         // the guest and a retry will resend them too - an acceptable
         // duplicate over losing the rest of the batch silently.
-        for (let i = 0; i < attachmentDataUrls.length; i++) {
-          const attachmentId = await uploadChannexAttachment(attachmentDataUrls[i]);
-          await sendBookingMessage(bookingId, i === 0 ? body : "", attachmentId);
+        if (body.trim()) {
+          await sendBookingMessage(bookingId, body);
+        }
+        for (const dataUrl of attachmentDataUrls) {
+          const attachmentId = await uploadChannexAttachment(dataUrl);
+          await sendBookingMessage(bookingId, "", attachmentId);
         }
       }
       return { status: "sent", provider: "channex" };
