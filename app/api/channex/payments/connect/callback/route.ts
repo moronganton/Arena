@@ -18,8 +18,8 @@ export async function GET(req: NextRequest) {
   // (http://localhost:8080), which is exactly what leaked into a real
   // redirect here before this fix.
   //
-  // Redirects to the property's own listing settings page (payments now
-  // live there, not a standalone settings page) with tab=payments so the
+  // Redirects to the property's own page (the Payments tab lives inline
+  // there now, not a standalone settings page) with tab=payments so the
   // host lands straight back on the panel they were just connecting.
   if (!propertyId) {
     // No propertyId to build a property-scoped redirect to - /properties is
@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
     fallbackUrl.searchParams.set("paymentSetup", "error");
     return NextResponse.redirect(fallbackUrl);
   }
-  const settingsUrl = new URL(`/properties/${propertyId}/listing`, resolveAppOrigin(req));
+  const settingsUrl = new URL(`/properties/${propertyId}`, resolveAppOrigin(req));
   settingsUrl.searchParams.set("tab", "payments");
 
   const listing = await prisma.channexListing.findUnique({
