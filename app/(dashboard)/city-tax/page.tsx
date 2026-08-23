@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { Landmark, Check, Clock, X, AlertTriangle, Settings, Save, RefreshCw } from "lucide-react";
+import { Landmark, Check, Clock, X, AlertTriangle, Settings, Save, RefreshCw, Info } from "lucide-react";
 
 interface PropertyLite {
   id: string;
@@ -43,6 +43,10 @@ const STATUS_STYLE: Record<string, { label: string; cls: string; icon: typeof Ch
   // means "a link is out, still waiting on the guest." This means "needs a
   // host to look at it," not "still in progress."
   FAILED: { label: "Needs attention", cls: "bg-rose-100 text-rose-700", icon: AlertTriangle },
+  // Auto-charge deliberately held back because a Channex payment already
+  // exists on this booking - not a failure, a "please check this by hand"
+  // flag so the guest is never charged city tax twice.
+  SKIPPED: { label: "Check Channex charges", cls: "bg-blue-100 text-blue-700", icon: Info },
 };
 
 // The "always see who paid or not, so I can follow up" view the manual bank
