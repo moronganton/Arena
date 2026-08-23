@@ -25,6 +25,22 @@ const ONE_PX_PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 
 export async function GET(req: NextRequest) {
+  try {
+    return await handle(req);
+  } catch (err) {
+    // Top-level guard: every specific step below already has its own
+    // try/catch, so landing here means something outside those (auth,
+    // lookup, or an error thrown while serializing a response) - report it
+    // instead of a bare empty 500.
+    console.error("[channex-attachment-probe] unhandled:", err);
+    return NextResponse.json(
+      { unhandledError: describeError(err), stack: err instanceof Error ? err.stack : undefined },
+      { status: 500 }
+    );
+  }
+}
+
+async function handle(req: NextRequest) {
   const access = await requireDebugAccess(req);
   if (!access.ok) return access.response;
   const userId = access.userId;
