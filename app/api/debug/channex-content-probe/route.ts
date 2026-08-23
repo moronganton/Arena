@@ -45,16 +45,23 @@ export async function GET(req: NextRequest) {
         checkin_to_time: "22:00",
         checkout_from_time: "08:00",
         checkout_to_time: "11:00",
+        self_checkin_checkout: false,
+        infant_max_age: null,
+        children_max_age: null,
         internet_access_type: "wifi",
         internet_access_coverage: "entire_property",
         internet_access_cost: null,
         parking_type: "none",
         parking_reservation: "not_available",
         parking_is_private: false,
+        parking_cost: null,
         pets_policy: "not_allowed",
         pets_non_refundable_fee: "0.00",
         pets_refundable_deposit: "0.00",
         smoking_policy: "no_smoking",
+        enhanced_cleaning_practices: false,
+        cleaning_practices_description: null,
+        partner_hygiene_link: null,
       });
       results.hotelPolicyCreated = true;
     }

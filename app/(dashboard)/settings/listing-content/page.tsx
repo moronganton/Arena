@@ -126,16 +126,23 @@ const DEFAULT_POLICY = {
   checkin_to_time: "22:00",
   checkout_from_time: "08:00",
   checkout_to_time: "11:00",
+  self_checkin_checkout: false,
+  infant_max_age: null as number | null,
+  children_max_age: null as number | null,
   internet_access_type: "wifi" as const,
   internet_access_coverage: "entire_property" as const,
   internet_access_cost: null as number | null,
   parking_type: "none" as const,
   parking_reservation: "not_available" as const,
   parking_is_private: false,
+  parking_cost: null as number | null,
   pets_policy: "not_allowed" as const,
   pets_non_refundable_fee: "0.00",
   pets_refundable_deposit: "0.00",
   smoking_policy: "no_smoking" as const,
+  enhanced_cleaning_practices: false,
+  cleaning_practices_description: "" as string | null,
+  partner_hygiene_link: "" as string | null,
 };
 
 function HotelPolicyPanel({ propertyId }: { propertyId: string }) {
@@ -201,6 +208,12 @@ function HotelPolicyPanel({ propertyId }: { propertyId: string }) {
         <Field label="Check-out until">
           <input type="time" value={form.checkout_to_time} onChange={(e) => setForm({ ...form, checkout_to_time: e.target.value })} className={inputCls} />
         </Field>
+        <Field label="Self check-in & checkout">
+          <select value={String(form.self_checkin_checkout)} onChange={(e) => setForm({ ...form, self_checkin_checkout: e.target.value === "true" })} className={inputCls}>
+            <option value="false">No</option>
+            <option value="true">Yes</option>
+          </select>
+        </Field>
         <Field label="Max guests">
           <input type="number" min={1} value={form.max_count_of_guests} onChange={(e) => setForm({ ...form, max_count_of_guests: Number(e.target.value) })} className={inputCls} />
         </Field>
@@ -210,6 +223,16 @@ function HotelPolicyPanel({ propertyId }: { propertyId: string }) {
             <option value="true">Yes - adults only</option>
           </select>
         </Field>
+        <Field label="Infant max age">
+          <input type="number" min={0} placeholder="Not set" value={form.infant_max_age ?? ""} onChange={(e) => setForm({ ...form, infant_max_age: e.target.value === "" ? null : Number(e.target.value) })} className={inputCls} />
+        </Field>
+        <Field label="Children max age">
+          <input type="number" min={0} placeholder="Not set" value={form.children_max_age ?? ""} onChange={(e) => setForm({ ...form, children_max_age: e.target.value === "" ? null : Number(e.target.value) })} className={inputCls} />
+        </Field>
+      </div>
+
+      <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-400 mt-5 mb-3">Internet access</h4>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Field label="Internet">
           <select value={form.internet_access_type} onChange={(e) => setForm({ ...form, internet_access_type: e.target.value as typeof form.internet_access_type })} className={inputCls}>
             <option value="wifi">WiFi</option>
@@ -226,6 +249,13 @@ function HotelPolicyPanel({ propertyId }: { propertyId: string }) {
             <option value="business_centre">Business centre</option>
           </select>
         </Field>
+        <Field label="Internet cost">
+          <input type="number" min={0} step="0.01" placeholder="Free" value={form.internet_access_cost ?? ""} onChange={(e) => setForm({ ...form, internet_access_cost: e.target.value === "" ? null : Number(e.target.value) })} className={inputCls} />
+        </Field>
+      </div>
+
+      <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-400 mt-5 mb-3">Parking</h4>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Field label="Parking">
           <select value={form.parking_type} onChange={(e) => setForm({ ...form, parking_type: e.target.value as typeof form.parking_type })} className={inputCls}>
             <option value="none">None</option>
@@ -240,6 +270,19 @@ function HotelPolicyPanel({ propertyId }: { propertyId: string }) {
             <option value="needed">Needed</option>
           </select>
         </Field>
+        <Field label="Private parking">
+          <select value={String(form.parking_is_private)} onChange={(e) => setForm({ ...form, parking_is_private: e.target.value === "true" })} className={inputCls}>
+            <option value="false">No</option>
+            <option value="true">Yes</option>
+          </select>
+        </Field>
+        <Field label="Parking cost">
+          <input type="number" min={0} step="0.01" placeholder="Free" value={form.parking_cost ?? ""} onChange={(e) => setForm({ ...form, parking_cost: e.target.value === "" ? null : Number(e.target.value) })} className={inputCls} />
+        </Field>
+      </div>
+
+      <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-400 mt-5 mb-3">Other</h4>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Field label="Pets">
           <select value={form.pets_policy} onChange={(e) => setForm({ ...form, pets_policy: e.target.value as typeof form.pets_policy })} className={inputCls}>
             <option value="not_allowed">Not allowed</option>
@@ -255,6 +298,24 @@ function HotelPolicyPanel({ propertyId }: { propertyId: string }) {
             <option value="allowed">Allowed</option>
           </select>
         </Field>
+        <Field label="Pet non-refundable fee">
+          <input value={form.pets_non_refundable_fee} onChange={(e) => setForm({ ...form, pets_non_refundable_fee: e.target.value })} className={inputCls} />
+        </Field>
+        <Field label="Pet refundable deposit">
+          <input value={form.pets_refundable_deposit} onChange={(e) => setForm({ ...form, pets_refundable_deposit: e.target.value })} className={inputCls} />
+        </Field>
+        <Field label="Enhanced cleaning practices">
+          <select value={String(form.enhanced_cleaning_practices)} onChange={(e) => setForm({ ...form, enhanced_cleaning_practices: e.target.value === "true" })} className={inputCls}>
+            <option value="false">No</option>
+            <option value="true">Yes</option>
+          </select>
+        </Field>
+        <Field label="Partner hygiene link">
+          <input placeholder="https://…" value={form.partner_hygiene_link ?? ""} onChange={(e) => setForm({ ...form, partner_hygiene_link: e.target.value })} className={inputCls} />
+        </Field>
+        <Field label="Cleaning practices description" full>
+          <textarea rows={3} value={form.cleaning_practices_description ?? ""} onChange={(e) => setForm({ ...form, cleaning_practices_description: e.target.value })} className={inputCls} />
+        </Field>
       </div>
 
       <div className="flex items-center gap-3 mt-5">
@@ -268,9 +329,9 @@ function HotelPolicyPanel({ propertyId }: { propertyId: string }) {
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, children, full }: { label: string; children: React.ReactNode; full?: boolean }) {
   return (
-    <label className="block">
+    <label className={`block ${full ? "sm:col-span-2" : ""}`}>
       <span className="block text-xs font-medium text-slate-600 mb-1">{label}</span>
       {children}
     </label>

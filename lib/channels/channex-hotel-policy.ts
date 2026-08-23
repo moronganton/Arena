@@ -5,6 +5,9 @@ import { channexGet, channexPost, channexPut } from "./channex-core";
 // "get by property_id" filter documented - the list endpoint is scoped to
 // the API key's own properties already, so listing and finding the one
 // matching property_id is the correct approach, not a workaround.
+// Every field below is confirmed against a real object read back from the
+// API (GET /hotel_policies), field for field - not just the docs' example
+// payload, which under-lists what the real object actually carries.
 export interface HotelPolicyFields {
   title: string;
   currency: string;
@@ -21,16 +24,23 @@ export interface HotelPolicyFields {
   checkin_to_time: string;
   checkout_from_time: string;
   checkout_to_time: string;
+  self_checkin_checkout: boolean;
+  infant_max_age: number | null;
+  children_max_age: number | null;
   internet_access_type: "none" | "wifi" | "wired";
   internet_access_coverage: "entire_property" | "public_areas" | "all_rooms" | "some_rooms" | "business_centre";
   internet_access_cost: number | null;
   parking_type: "on_site" | "nearby" | "none";
   parking_reservation: "not_available" | "not_needed" | "needed";
   parking_is_private: boolean;
+  parking_cost: number | null;
   pets_policy: "allowed" | "not_allowed" | "by_arrangements" | "assistive_only";
   pets_non_refundable_fee: string;
   pets_refundable_deposit: string;
   smoking_policy: "no_smoking" | "permitted_areas_only" | "allowed";
+  enhanced_cleaning_practices: boolean;
+  cleaning_practices_description: string | null;
+  partner_hygiene_link: string | null;
 }
 
 export interface HotelPolicy extends HotelPolicyFields {
