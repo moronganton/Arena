@@ -202,6 +202,12 @@ export async function createOrReuseCardSetupLink(reservationId: string, appUrl: 
     // from, so Stripe requires currency explicitly - confirmed live, this
     // call 400'd with "Missing required param: currency" without it.
     currency: reservation.property.currency.toLowerCase(),
+    // Without this, a "setup" mode session does not necessarily create a
+    // Customer object - confirmed live: the resulting PaymentMethod saved
+    // fine, but session.customer came back null, and an off-session charge
+    // requires BOTH customer and payment_method. "always" is required here,
+    // not optional, for chargeSavedCard() to ever be able to charge this.
+    customer_creation: "always",
     customer_email: reservation.guest.email || undefined,
     success_url: `${appUrl}/reservations/${reservationId}?cardSaved=1`,
     cancel_url: `${appUrl}/reservations/${reservationId}?cardSaved=cancelled`,
