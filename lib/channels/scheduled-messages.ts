@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { deliverAiMessage } from "@/lib/ai";
 import { valuesFromReservation, renderTemplate, type TemplateReservation } from "@/lib/templates";
 import { cetHour, cetDayStartUtc, cetDayStartInstant } from "@/lib/cet";
+import { resolveCityTaxCardLinkForTemplate } from "@/lib/city-tax";
 
 // Sends every template whose trigger is due for a reservation today. Pulled
 // out of app/api/cron/scheduled-messages/route.ts so both that HTTP route and
@@ -88,7 +89,7 @@ export async function runScheduledMessages(now: Date = new Date()): Promise<{
       },
       include: {
         guest: { select: { name: true } },
-        property: { select: { name: true, address: true } },
+        property: { select: { name: true, address: true, cityTaxAutoChargeEnabled: true, cityTaxPerNight: true } },
         accessCodes: { where: { isActive: true }, orderBy: { createdAt: "desc" }, take: 1, select: { code: true } },
       },
       take: 100,
@@ -107,6 +108,16 @@ export async function runScheduledMessages(now: Date = new Date()): Promise<{
       if (doneIds.has(r.id)) continue;
 
       const values = valuesFromReservation(r as unknown as TemplateReservation, t.user.name);
+      if (t.body.includes("[City Tax Card Link]")) {
+        // NEXTAUTH_URL directly, not resolveAppOrigin - there is no request
+        // here (this runs from a cron route and from a standalone script
+        // with no HTTP request at all), and NEXTAUTH_URL is exactly what
+        // resolveAppOrigin prefers first anyway.
+        const appUrl = process.env.NEXTAUTH_URL?.replace(/\/$/, "");
+        if (appUrl) {
+          values["[City Tax Card Link]"] = await resolveCityTaxCardLinkForTemplate(r.id, r.property, appUrl);
+        }
+      }
       const bodyText = renderTemplate(t.body, values).trim();
       if (!bodyText) continue;
 

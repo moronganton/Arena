@@ -28,6 +28,7 @@ export const MERGE_FIELDS: MergeField[] = [
   { token: "[Channel]", key: "channel", label: "Booking channel", description: "Where the booking came from (Booking.com, Airbnb, Direct…).", example: "Booking.com" },
   { token: "[Host Name]", key: "hostName", label: "Your (host) name", description: "Your name, to sign off the message.", example: "Anton" },
   { token: "[Total]", key: "total", label: "Total amount", description: "The booking total with its currency.", example: "€649" },
+  { token: "[City Tax Card Link]", key: "cityTaxCardLink", label: "City tax card-save link", description: "A link for the guest to save their card - the exact city tax amount is then charged automatically once saved. Only resolves to a real link when auto-charge is turned on for this property (Settings → City tax) and a rate is set; otherwise it's blank.", example: "https://stayhq.app/reservations/abc123?cardSaved=1" },
 ];
 
 export interface TriggerDef {
@@ -115,5 +116,10 @@ export function valuesFromReservation(res: TemplateReservation, hostName?: strin
     "[Channel]": CHANNEL_LABELS[res.source] ?? res.source,
     "[Host Name]": hostName ?? "",
     "[Total]": total,
+    // Filled in by the caller (see resolveCityTaxCardLinkForTemplate in
+    // lib/city-tax.ts) when relevant - this is a pure, synchronous function
+    // and generating a real link is an async Stripe call, so it can't
+    // happen here. Left blank by default, matching "auto-charge is off."
+    "[City Tax Card Link]": "",
   };
 }

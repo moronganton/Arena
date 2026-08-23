@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { runScheduledMessages } from "@/lib/channels/scheduled-messages";
+import { runCityTaxAutoCharge } from "@/lib/city-tax-automation";
 import { runCronJobToCompletion, closeStaleCronRuns } from "@/lib/cron-run";
 
 // One-shot equivalent of GET /api/cron/scheduled-messages. Hourly is ideal.
@@ -10,7 +11,16 @@ async function main() {
   await closeStaleCronRuns();
   const summary = await runCronJobToCompletion("scheduled-messages", async () => {
     const r = await runScheduledMessages();
-    return { templatesChecked: r.templatesChecked, sent: r.sent, cetHour: r.cetHour, cetDate: r.cetDate };
+    const c = await runCityTaxAutoCharge();
+    return {
+      templatesChecked: r.templatesChecked,
+      sent: r.sent,
+      cetHour: r.cetHour,
+      cetDate: r.cetDate,
+      cityTaxChecked: c.checked,
+      cityTaxCharged: c.charged,
+      cityTaxFailed: c.failed,
+    };
   });
   console.log(`[cron/scheduled-messages] ${JSON.stringify(summary)}`);
 }

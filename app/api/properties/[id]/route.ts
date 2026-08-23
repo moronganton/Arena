@@ -50,6 +50,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       imageUrl: body.imageUrl,
       active: body.active,
       aiEnabled: body.aiEnabled,
+      cityTaxPerNight: body.cityTaxPerNight,
+      cityTaxAutoChargeEnabled: body.cityTaxAutoChargeEnabled,
     },
   });
 

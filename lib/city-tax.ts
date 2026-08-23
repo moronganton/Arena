@@ -187,6 +187,14 @@ export async function createOrReuseCardSetupLink(reservationId: string, appUrl: 
   });
 
   const existing = await prisma.guestCardOnFile.findUnique({ where: { reservationId } });
+  // The comment above promises a SAVED card is never touched - this is what
+  // actually enforces that. Without it, falling through to create a new
+  // session would upsert over the SAVED row below and wipe a card that
+  // already works, which is exactly the failure mode auto-charge makes
+  // dangerous instead of just awkward.
+  if (existing?.status === "SAVED") {
+    throw new Error("A card is already saved for this reservation - nothing to send.");
+  }
   if (
     existing?.status === "PENDING" &&
     existing.stripeSessionId &&
@@ -318,6 +326,28 @@ export async function chargeSavedCard(
   });
 
   return { charge: { id: charge.id, amountCents: charge.amountCents, currency: charge.currency, status: charge.status } };
+}
+
+// Resolves the [City Tax Card Link] merge field for a template send - real
+// link when the host has turned auto-charge on for this property and set a
+// rate, empty otherwise. A host can still write that token into a template
+// before flipping the toggle on; this is what makes it render as nothing
+// rather than a broken link until they do. Errors (e.g. a card already
+// saved, Stripe hiccup) are swallowed to "" rather than thrown, so one bad
+// link can never take down an entire template send.
+export async function resolveCityTaxCardLinkForTemplate(
+  reservationId: string,
+  property: { cityTaxAutoChargeEnabled: boolean; cityTaxPerNight: number | null },
+  appUrl: string
+): Promise<string> {
+  if (!property.cityTaxAutoChargeEnabled || property.cityTaxPerNight == null) return "";
+  try {
+    const { url } = await createOrReuseCardSetupLink(reservationId, appUrl);
+    return url;
+  } catch (err) {
+    console.error(`[city-tax] couldn't resolve the auto-send card link for reservation ${reservationId}:`, err);
+    return "";
+  }
 }
 
 export function verifyStripeWebhookSignature(rawBody: string, signature: string): Stripe.Event {

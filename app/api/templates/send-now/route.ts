@@ -3,6 +3,8 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { deliverAiMessage } from "@/lib/ai";
 import { renderTemplate, valuesFromReservation, type TemplateReservation } from "@/lib/templates";
+import { resolveCityTaxCardLinkForTemplate } from "@/lib/city-tax";
+import { resolveAppOrigin } from "@/lib/app-url";
 
 // POST /api/templates/send-now { templateId?, body, attachments?, reservationId }
 // Sends the rendered template to the GUEST for real — relays via the booking
@@ -27,13 +29,16 @@ export async function POST(req: NextRequest) {
     where: { id: reservationId, property: { ownerId: session.user.id } },
     include: {
       guest: { select: { name: true } },
-      property: { select: { name: true, address: true } },
+      property: { select: { name: true, address: true, cityTaxAutoChargeEnabled: true, cityTaxPerNight: true } },
       accessCodes: { where: { isActive: true }, orderBy: { createdAt: "desc" }, take: 1, select: { code: true } },
     },
   });
   if (!reservation) return NextResponse.json({ error: "Reservation not found" }, { status: 404 });
 
   const values = valuesFromReservation(reservation as unknown as TemplateReservation, user?.name);
+  if (body.includes("[City Tax Card Link]")) {
+    values["[City Tax Card Link]"] = await resolveCityTaxCardLinkForTemplate(reservationId, reservation.property, resolveAppOrigin(req));
+  }
   const rendered = renderTemplate(body, values).trim();
   if (!rendered) return NextResponse.json({ error: "Message is empty after filling in the fields." }, { status: 400 });
 

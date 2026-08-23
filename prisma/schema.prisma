@@ -232,6 +232,14 @@ model Property {
   // lib/city-tax.ts), so this is a plain Stripe flow that works for any
   // property regardless of which channel manager owns it.
   cityTaxPerNight Float?
+  // Off by default, deliberately - a host turns this on only once they trust
+  // the flow: with it on, a template containing [City Tax Card Link] sends a
+  // real save-card link, and any reservation with a saved card and no paid
+  // charge yet gets auto-charged the quoted amount on the next cron cycle.
+  // With it off, the merge field resolves to nothing and no auto-charge ever
+  // runs - every existing manual "Send card link" / "Charge" button keeps
+  // working exactly as before regardless of this flag.
+  cityTaxAutoChargeEnabled Boolean @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

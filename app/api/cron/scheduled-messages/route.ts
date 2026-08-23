@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runScheduledMessages } from "@/lib/channels/scheduled-messages";
+import { runCityTaxAutoCharge } from "@/lib/city-tax-automation";
 
 // Scheduler: call this on a schedule (hourly is ideal) to send any template
 // whose trigger is due for a reservation today. Protect it with the same
@@ -22,5 +23,10 @@ export async function GET(req: NextRequest) {
   }
 
   const result = await runScheduledMessages();
-  return NextResponse.json(result);
+  // Same cycle, not a separate cron job - a card saved by a template sent
+  // in this same run only becomes chargeable next cycle anyway (the webhook
+  // fires after this request returns), so there's no reason to run more
+  // often than the template scheduler already does.
+  const cityTaxAutoCharge = await runCityTaxAutoCharge();
+  return NextResponse.json({ ...result, cityTaxAutoCharge });
 }
