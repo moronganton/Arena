@@ -60,23 +60,25 @@ export async function POST(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json();
-  const { reservationId, messageBody, internal, channel, replyToId, saveToKnowledge, attachment } = body;
+  const { reservationId, messageBody, internal, channel, replyToId, saveToKnowledge, attachments } = body;
   // Internal notes are private: saved to the thread, never emailed or relayed
   const isInternal = internal === true || channel === "INTERNAL";
+  const attachmentList: string[] = Array.isArray(attachments) ? attachments : [];
 
-  if (!messageBody?.trim() && !attachment) {
-    return NextResponse.json({ error: "messageBody or attachment is required" }, { status: 400 });
+  if (!messageBody?.trim() && attachmentList.length === 0) {
+    return NextResponse.json({ error: "messageBody or attachments is required" }, { status: 400 });
   }
-  // The real caption, which may legitimately be empty when a photo is sent
+  // The real caption, which may legitimately be empty when photos are sent
   // with no text - Channex's own docs: message "can be empty, if attachments
-  // is present". This is what actually gets stored and relayed, so a photo
-  // sent to Booking.com/Airbnb shows only the photo, not a fabricated
-  // "Sent a photo" text bubble alongside it.
+  // is present". This is what actually gets stored and relayed, so photos
+  // sent to Booking.com/Airbnb show only the photos, not a fabricated
+  // "Sent a photo" text bubble alongside them.
   const captionText: string = messageBody?.trim() || "";
-  // Only for contexts that can't carry the image at all and so need some
-  // text regardless - the guest's email (the photo isn't attached to it,
-  // see below) and the property knowledge base entry.
-  const textFallback: string = captionText || "Sent a photo";
+  // Only for contexts that can't carry the images at all and so need some
+  // text regardless - the guest's email (photos aren't attached to it, see
+  // below) and the property knowledge base entry.
+  const textFallback: string =
+    captionText || (attachmentList.length > 1 ? `Sent ${attachmentList.length} photos` : "Sent a photo");
 
   const reservation = await prisma.reservation.findFirst({
     where: { id: reservationId, property: { ownerId: session!.user!.id } },
@@ -91,7 +93,7 @@ export async function POST(req: NextRequest) {
       channel: isInternal ? "INTERNAL" : "PLATFORM",
       reservationId,
       senderId: session!.user!.id,
-      attachments: attachment ? JSON.stringify([attachment]) : null,
+      attachments: attachmentList.length > 0 ? JSON.stringify(attachmentList) : null,
     },
     include: { reservation: { include: { guest: true, property: true } } },
   });
@@ -182,7 +184,7 @@ export async function POST(req: NextRequest) {
   const relay = await relayMessageToChannel(
     { externalId: reservation.externalId, ownerId: session!.user!.id! },
     captionText,
-    attachment
+    attachmentList
   );
   if (relay.status === "sent") {
     channelRelay = "sent";

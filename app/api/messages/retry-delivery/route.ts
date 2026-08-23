@@ -19,15 +19,14 @@ export async function POST(req: NextRequest) {
   });
   if (!message) return NextResponse.json({ error: "Message not found" }, { status: 404 });
 
-  // Re-attempt with the same attachment (if any) it was sent with the first
-  // time - only the first, matching the one-attachment-per-call shape
-  // relayMessageToChannel already enforces.
-  const attachment: string | undefined = message.attachments ? (JSON.parse(message.attachments) as string[])[0] : undefined;
+  // Re-attempt with the same attachments (if any) it was sent with the first
+  // time.
+  const attachments: string[] = message.attachments ? (JSON.parse(message.attachments) as string[]) : [];
 
   const relay = await relayMessageToChannel(
     { externalId: message.reservation.externalId, ownerId: session.user.id },
     message.body,
-    attachment
+    attachments
   );
 
   if (relay.status === "sent") {

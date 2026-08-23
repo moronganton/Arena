@@ -20,11 +20,11 @@ import { uploadChannexAttachment } from "@/lib/channels/channex-attachments";
 export type RelayOutcome =
   // attachmentSkipped is only ever true on the Smoobu path - their message
   // API has no attachment support at all (confirmed against their docs), so
-  // a photo attached to a Smoobu-routed reply still sends its text but never
-  // reaches the guest on that channel. Omitted (not false) when no
-  // attachment was requested, or when the channel is Channex - Channex sends
-  // text and attachment together in the one call, so if that call
-  // succeeded, the attachment was part of it.
+  // photos attached to a Smoobu-routed reply still send the text but never
+  // reach the guest on that channel. Omitted (not false) when no attachment
+  // was requested, or when the channel is Channex - Channex sends each
+  // attachment in its own message, so if the call as a whole succeeded,
+  // every attachment was part of it.
   | { status: "sent"; provider: "smoobu" | "channex"; attachmentSkipped?: boolean }
   | { status: "skipped"; reason: string }
   | { status: "failed"; provider: "smoobu" | "channex"; error: string };
@@ -34,26 +34,27 @@ export interface RelayTarget {
   ownerId: string;
 }
 
-// attachmentDataUrl: a single data:<mime>;base64,... string, as produced by
-// a browser FileReader. Channex's send-message call takes at most one
-// attachment id per call - matched here rather than inventing multi-
-// attachment support their API doesn't have.
+// attachmentDataUrls: data:<mime>;base64,... strings, as produced by a
+// browser FileReader.
 export async function relayMessageToChannel(
   target: RelayTarget,
   body: string,
-  attachmentDataUrl?: string
+  attachmentDataUrls: string[] = []
 ): Promise<RelayOutcome> {
   const externalId = target.externalId;
   if (!externalId) return { status: "skipped", reason: "Direct booking - no channel to relay to" };
 
   if (externalId.startsWith("smoobu-")) {
-    // Smoobu can't carry the attachment itself (see attachmentSkipped above),
-    // so an empty caption would reach the guest as nothing at all - unlike
-    // Channex, where the image itself is the message and no text is needed.
-    const textToSend = body.trim() || (attachmentDataUrl ? "Sent a photo" : body);
+    // Smoobu can't carry the attachments themselves (see attachmentSkipped
+    // above), so an empty caption would reach the guest as nothing at all -
+    // unlike Channex, where the images themselves are the message and no
+    // text is needed.
+    const photoFallback =
+      attachmentDataUrls.length > 1 ? `Sent ${attachmentDataUrls.length} photos` : attachmentDataUrls.length === 1 ? "Sent a photo" : "";
+    const textToSend = body.trim() || photoFallback || body;
     try {
       await smoobuProvider.sendGuestMessage(target.ownerId, externalId, textToSend);
-      return { status: "sent", provider: "smoobu", attachmentSkipped: !!attachmentDataUrl };
+      return { status: "sent", provider: "smoobu", attachmentSkipped: attachmentDataUrls.length > 0 };
     } catch (err) {
       return { status: "failed", provider: "smoobu", error: err instanceof Error ? err.message : String(err) };
     }
@@ -63,8 +64,21 @@ export async function relayMessageToChannel(
     const bookingId = channexBookingIdFromExternalId(externalId);
     if (!bookingId) return { status: "skipped", reason: "Channex reservation with no recoverable booking id" };
     try {
-      const attachmentId = attachmentDataUrl ? await uploadChannexAttachment(attachmentDataUrl) : undefined;
-      await sendBookingMessage(bookingId, body, attachmentId);
+      if (attachmentDataUrls.length === 0) {
+        await sendBookingMessage(bookingId, body);
+      } else {
+        // Channex's message-create call takes at most one attachment_id per
+        // call, not an array - N photos become N consecutive messages, the
+        // caption riding with the first. Matches how Booking.com's own
+        // Pulse app renders them anyway: one image per bubble. If a later
+        // photo in the batch fails, the earlier ones have already reached
+        // the guest and a retry will resend them too - an acceptable
+        // duplicate over losing the rest of the batch silently.
+        for (let i = 0; i < attachmentDataUrls.length; i++) {
+          const attachmentId = await uploadChannexAttachment(attachmentDataUrls[i]);
+          await sendBookingMessage(bookingId, i === 0 ? body : "", attachmentId);
+        }
+      }
       return { status: "sent", provider: "channex" };
     } catch (err) {
       // 422 not_supported means this booking's OTA has no message API at all,

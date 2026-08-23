@@ -22,6 +22,7 @@ interface Message {
 }
 
 const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024; // matches lib/channels/channex-attachments.ts
+const MAX_ATTACHMENTS_PER_MESSAGE = 10; // sanity bound - Channex sends each as its own message
 
 function parseAttachments(json: string | null | undefined): string[] {
   if (!json) return [];
@@ -96,9 +97,9 @@ export function MessageThread({
   // A translation already fetched is shown by default; this only tracks the
   // ones the host explicitly collapsed back to the original.
   const [hiddenTranslations, setHiddenTranslations] = useState<Set<string>>(new Set());
-  // A single pending attachment (data URL) staged for the next send - Channex
-  // takes at most one per message, see lib/channels/relay.ts.
-  const [pendingAttachment, setPendingAttachment] = useState<string | null>(null);
+  // Pending attachments (data URLs) staged for the next send - Channex sends
+  // each as its own message under the hood, see lib/channels/relay.ts.
+  const [pendingAttachments, setPendingAttachments] = useState<string[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -216,20 +217,31 @@ export function MessageThread({
     });
   }
 
-  function pickAttachment(file: File) {
+  function pickAttachments(files: FileList | File[]) {
     setAttachmentError(null);
-    if (file.size > MAX_ATTACHMENT_BYTES) {
-      setAttachmentError(`That file is ${(file.size / 1024 / 1024).toFixed(1)}MB - the limit is 5MB.`);
+    const list = Array.from(files);
+    if (pendingAttachments.length + list.length > MAX_ATTACHMENTS_PER_MESSAGE) {
+      setAttachmentError(`You can attach at most ${MAX_ATTACHMENTS_PER_MESSAGE} photos to one message.`);
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => setPendingAttachment(reader.result as string);
-    reader.onerror = () => setAttachmentError("Couldn't read that file - try again.");
-    reader.readAsDataURL(file);
+    for (const file of list) {
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        setAttachmentError(`"${file.name}" is ${(file.size / 1024 / 1024).toFixed(1)}MB - the limit is 5MB.`);
+        continue;
+      }
+      const reader = new FileReader();
+      reader.onload = () => setPendingAttachments((prev) => [...prev, reader.result as string]);
+      reader.onerror = () => setAttachmentError(`Couldn't read "${file.name}" - try again.`);
+      reader.readAsDataURL(file);
+    }
+  }
+
+  function removeAttachment(index: number) {
+    setPendingAttachments((prev) => prev.filter((_, i) => i !== index));
   }
 
   async function sendMessage() {
-    if ((!newMessage.trim() && !pendingAttachment) || sending) return;
+    if ((!newMessage.trim() && pendingAttachments.length === 0) || sending) return;
     setSending(true);
 
     const res = await fetch("/api/messages", {
@@ -238,7 +250,7 @@ export function MessageThread({
       body: JSON.stringify({
         reservationId,
         messageBody: newMessage,
-        attachment: pendingAttachment ?? undefined,
+        attachments: pendingAttachments.length > 0 ? pendingAttachments : undefined,
         internal: internalNote,
         replyToId: internalNote ? undefined : replyTo?.id,
         saveToKnowledge: internalNote ? false : saveToKb,
@@ -253,7 +265,7 @@ export function MessageThread({
         msg,
       ]);
       setNewMessage("");
-      setPendingAttachment(null);
+      setPendingAttachments([]);
       setAttachmentError(null);
       setReplyTo(null);
       setSaveToKb(false);
@@ -601,18 +613,21 @@ export function MessageThread({
             Internal note (not visible to the guest)
           </label>
         </div>
-        {pendingAttachment && (
-          <div className="mb-2 flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
-            {/* eslint-disable-next-line @next/next/no-img-element -- data: URL preview */}
-            <img src={pendingAttachment} alt="" className="w-10 h-10 rounded object-cover shrink-0" />
-            <span className="text-xs text-slate-500 flex-1">Photo attached</span>
-            <button
-              onClick={() => setPendingAttachment(null)}
-              className="p-1 text-slate-400 hover:text-slate-600 flex-shrink-0"
-              title="Remove attachment"
-            >
-              <X className="w-4 h-4" />
-            </button>
+        {pendingAttachments.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-2">
+            {pendingAttachments.map((dataUrl, i) => (
+              <div key={i} className="relative shrink-0">
+                {/* eslint-disable-next-line @next/next/no-img-element -- data: URL preview */}
+                <img src={dataUrl} alt="" className="w-14 h-14 rounded-lg object-cover border border-slate-200" />
+                <button
+                  onClick={() => removeAttachment(i)}
+                  className="absolute -top-1.5 -right-1.5 bg-slate-700 text-white rounded-full p-0.5 hover:bg-slate-900"
+                  title="Remove this photo"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
           </div>
         )}
         {attachmentError && (
@@ -623,16 +638,16 @@ export function MessageThread({
             ref={fileInputRef}
             type="file"
             accept="image/*,application/pdf"
+            multiple
             className="hidden"
             onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) pickAttachment(file);
+              if (e.target.files?.length) pickAttachments(e.target.files);
               e.target.value = ""; // lets the same file be picked again after removal
             }}
           />
           <button
             onClick={() => fileInputRef.current?.click()}
-            title="Attach a photo"
+            title="Attach photos"
             className="shrink-0 border border-slate-200 hover:bg-slate-50 text-slate-500 hover:text-indigo-600 rounded-xl px-3 transition"
           >
             <Paperclip className="w-4 h-4" />
@@ -656,7 +671,7 @@ export function MessageThread({
           />
           <button
             onClick={sendMessage}
-            disabled={sending || (!newMessage.trim() && !pendingAttachment)}
+            disabled={sending || (!newMessage.trim() && pendingAttachments.length === 0)}
             className={`disabled:opacity-50 text-white rounded-xl px-4 py-2.5 transition flex items-center gap-2 ${
               internalNote ? "bg-amber-500 hover:bg-amber-600" : "bg-indigo-600 hover:bg-indigo-700"
             }`}
