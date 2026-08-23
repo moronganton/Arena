@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
-import { CreditCard, Copy, Check, RefreshCw, Landmark } from "lucide-react";
+import { CreditCard, Copy, Check, RefreshCw, Landmark, Wallet } from "lucide-react";
 
 interface CityTaxCharge {
   id: string;
@@ -11,6 +11,12 @@ interface CityTaxCharge {
   status: string;
   paidAt: string | null;
   createdAt: string;
+}
+
+interface GuestCard {
+  status: string; // PENDING | SAVED | FAILED
+  cardBrand: string | null;
+  cardLast4: string | null;
 }
 
 interface ChannexTransaction {
@@ -38,11 +44,20 @@ export default function PaymentsCard({
   channexEligible: boolean;
   currency: string;
 }) {
-  const [cityTax, setCityTax] = useState<{ configured: boolean; quote: { amountCents: number; nights: number; guests: number; currency: string } | null; charges: CityTaxCharge[] } | null>(null);
+  const [cityTax, setCityTax] = useState<{ configured: boolean; quote: { amountCents: number; nights: number; guests: number; currency: string } | null; charges: CityTaxCharge[]; card: GuestCard | null } | null>(null);
   const [cityTaxBusy, setCityTaxBusy] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const [lastLink, setLastLink] = useState<string | null>(null);
   const [cityTaxError, setCityTaxError] = useState<string | null>(null);
+
+  const [cardBusy, setCardBusy] = useState(false);
+  const [cardLink, setCardLink] = useState<string | null>(null);
+  const [cardLinkCopied, setCardLinkCopied] = useState(false);
+  const [cardError, setCardError] = useState<string | null>(null);
+  const [chargeCardAmount, setChargeCardAmount] = useState("");
+  const [chargeCardDesc, setChargeCardDesc] = useState("");
+  const [chargingCard, setChargingCard] = useState(false);
+  const [cardChargeMsg, setCardChargeMsg] = useState("");
 
   const [channexTx, setChannexTx] = useState<ChannexTransaction[] | null>(null);
   const [channexBusy, setChannexBusy] = useState(false);
@@ -96,6 +111,61 @@ export default function PaymentsCard({
       setLinkCopied(true);
       setTimeout(() => setLinkCopied(false), 2000);
     });
+  }
+
+  // Save-a-card-now, charge-it-later - independent of Channex, works for
+  // any property regardless of channel manager. See lib/city-tax.ts.
+  async function sendCardLink() {
+    setCardBusy(true);
+    setCardError(null);
+    try {
+      const res = await fetch("/api/city-tax/card", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reservationId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Failed to create card link");
+      setCardLink(data.url);
+      loadCityTax();
+    } catch (err) {
+      setCardError(err instanceof Error ? err.message : "Failed to create card link");
+    } finally {
+      setCardBusy(false);
+    }
+  }
+
+  function copyCardLink() {
+    if (!cardLink) return;
+    navigator.clipboard.writeText(cardLink).then(() => {
+      setCardLinkCopied(true);
+      setTimeout(() => setCardLinkCopied(false), 2000);
+    });
+  }
+
+  async function chargeSavedCard() {
+    const amountCents = Math.round(parseFloat(chargeCardAmount) * 100);
+    if (!chargeCardAmount || !Number.isFinite(amountCents) || amountCents <= 0) return;
+    setChargingCard(true);
+    setCardError(null);
+    setCardChargeMsg("");
+    try {
+      const res = await fetch("/api/city-tax/card", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reservationId, amountCents, description: chargeCardDesc || undefined }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Charge failed");
+      setChargeCardAmount("");
+      setChargeCardDesc("");
+      setCardChargeMsg(`Charged ${money(data.charge.amountCents, data.charge.currency)} ✓`);
+      loadCityTax();
+    } catch (err) {
+      setCardError(err instanceof Error ? err.message : "Charge failed");
+    } finally {
+      setChargingCard(false);
+    }
   }
 
   async function chargeCard() {
@@ -184,6 +254,79 @@ export default function PaymentsCard({
           </>
         )}
       </div>
+
+      {/* Save a card, charge later - works regardless of channel manager or
+          whether a per-night city tax rate is even set, since the amount is
+          decided at charge time, not at save time. */}
+      {cityTax && (
+        <div className="mb-4 pt-4 border-t border-slate-100">
+          <div className="flex items-center gap-1.5 text-sm font-medium text-slate-700 mb-2">
+            <Wallet className="w-3.5 h-3.5 text-slate-400" />
+            Card on file
+          </div>
+          {cityTax.card?.status === "SAVED" ? (
+            <>
+              <p className="text-xs text-slate-500 mb-2">
+                {cityTax.card.cardBrand ? `${cityTax.card.cardBrand} ` : ""}•••• {cityTax.card.cardLast4 || "····"} — ready to charge, guest not needed.
+              </p>
+              <div className="flex gap-2">
+                <input
+                  value={chargeCardAmount}
+                  onChange={(e) => setChargeCardAmount(e.target.value)}
+                  placeholder={`Amount (${currency})`}
+                  inputMode="decimal"
+                  className="flex-1 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+                <button
+                  onClick={chargeSavedCard}
+                  disabled={chargingCard || !chargeCardAmount}
+                  className="text-xs font-medium bg-slate-800 hover:bg-slate-900 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg transition"
+                >
+                  {chargingCard ? "Charging…" : "Charge"}
+                </button>
+              </div>
+              <input
+                value={chargeCardDesc}
+                onChange={(e) => setChargeCardDesc(e.target.value)}
+                placeholder="Description (optional)"
+                className="mt-1.5 w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+              {cardChargeMsg && <p className="mt-1.5 text-xs text-emerald-600">{cardChargeMsg}</p>}
+            </>
+          ) : (
+            <>
+              {cityTax.card?.status === "PENDING" && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 mb-2">
+                  Link sent, guest hasn&apos;t saved a card yet.
+                </p>
+              )}
+              <p className="text-xs text-slate-400 mb-2">
+                Send a link to save the guest&apos;s card now - charge the exact amount later, no need to reach them again.
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={sendCardLink}
+                  disabled={cardBusy}
+                  className="flex items-center gap-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg transition"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${cardBusy ? "animate-spin" : ""}`} />
+                  {cityTax.card ? "Resend card link" : "Send card link"}
+                </button>
+                {cardLink && (
+                  <button
+                    onClick={copyCardLink}
+                    className="flex items-center gap-1.5 text-xs font-medium text-slate-600 hover:text-indigo-600 border border-slate-200 hover:border-indigo-200 px-3 py-1.5 rounded-lg transition"
+                  >
+                    {cardLinkCopied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                    {cardLinkCopied ? "Copied" : "Copy link"}
+                  </button>
+                )}
+              </div>
+            </>
+          )}
+          {cardError && <p className="mt-1.5 text-xs text-red-600">{cardError}</p>}
+        </div>
+      )}
 
       {/* Channex card charge */}
       {channexEligible && (

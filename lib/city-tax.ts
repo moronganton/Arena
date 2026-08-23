@@ -142,6 +142,174 @@ export async function markCityTaxPaid(stripeSessionId: string, paymentIntentId: 
   });
 }
 
+// ---------------------------------------------------------------------------
+// Save a card now, charge it later - the "eventual future charge" pattern
+// from Channex's Payment Application API docs (pre_auth_payment then
+// settle_payment), rebuilt directly on Stripe since every endpoint in that
+// API is scoped to a Channex booking_id, which a Smoobu-sourced reservation
+// (Bratislava, today) will never have. Once Bratislava's properties migrate
+// to Channex, they can use the native flow too - this one keeps working
+// exactly the same for any property regardless of channel manager.
+//
+// Two Stripe calls apart from the Checkout Session itself: retrieving the
+// completed session with setup_intent.payment_method expanded (the webhook
+// payload alone doesn't carry the resulting card's brand/last4), and later
+// a server-side PaymentIntent confirmed off_session against that saved
+// payment method.
+// ---------------------------------------------------------------------------
+
+const CARD_SETUP_REUSE_WINDOW_MS = 23 * 60 * 60 * 1000; // mirrors SESSION_REUSE_WINDOW_MS above
+
+export interface GuestCardOnFileInfo {
+  status: string;
+  cardBrand: string | null;
+  cardLast4: string | null;
+}
+
+export async function getGuestCardOnFile(reservationId: string): Promise<GuestCardOnFileInfo | null> {
+  const card = await prisma.guestCardOnFile.findUnique({
+    where: { reservationId },
+    select: { status: true, cardBrand: true, cardLast4: true },
+  });
+  return card;
+}
+
+// Creates (or reuses an open) Checkout Session in "setup" mode: the guest
+// enters their card once, nothing is charged, and Stripe hands back a
+// reusable PaymentMethod attached to a Customer. Deliberately does NOT
+// reuse or touch an existing SAVED card - only a still-open PENDING link -
+// so a stray resend can never silently invalidate a card that already
+// works.
+export async function createOrReuseCardSetupLink(reservationId: string, appUrl: string): Promise<{ url: string }> {
+  const reservation = await prisma.reservation.findUniqueOrThrow({
+    where: { id: reservationId },
+    include: { guest: true },
+  });
+
+  const existing = await prisma.guestCardOnFile.findUnique({ where: { reservationId } });
+  if (
+    existing?.status === "PENDING" &&
+    existing.stripeSessionId &&
+    existing.updatedAt.getTime() > Date.now() - CARD_SETUP_REUSE_WINDOW_MS
+  ) {
+    const session = await stripe().checkout.sessions.retrieve(existing.stripeSessionId);
+    if (session.status === "open" && session.url) return { url: session.url };
+  }
+
+  const session = await stripe().checkout.sessions.create({
+    mode: "setup",
+    customer_email: reservation.guest.email || undefined,
+    success_url: `${appUrl}/reservations/${reservationId}?cardSaved=1`,
+    cancel_url: `${appUrl}/reservations/${reservationId}?cardSaved=cancelled`,
+    metadata: { reservationId },
+  });
+  if (!session.url) throw new Error("Stripe did not return a Checkout URL");
+
+  await prisma.guestCardOnFile.upsert({
+    where: { reservationId },
+    create: { reservationId, status: "PENDING", stripeSessionId: session.id },
+    update: {
+      status: "PENDING",
+      stripeSessionId: session.id,
+      stripeCustomerId: null,
+      stripePaymentMethodId: null,
+      cardBrand: null,
+      cardLast4: null,
+    },
+  });
+
+  return { url: session.url };
+}
+
+// Stripe webhook counterpart to markCityTaxPaid, for a "setup" mode session.
+export async function markCardSaved(stripeSessionId: string): Promise<void> {
+  const session = await stripe().checkout.sessions.retrieve(stripeSessionId, {
+    expand: ["setup_intent.payment_method"],
+  });
+  const setupIntent = session.setup_intent;
+  if (!setupIntent || typeof setupIntent === "string") {
+    throw new Error(`Checkout session ${stripeSessionId} has no expanded setup_intent`);
+  }
+  const pm = setupIntent.payment_method && typeof setupIntent.payment_method !== "string" ? setupIntent.payment_method : null;
+  const customerId = typeof session.customer === "string" ? session.customer : session.customer?.id ?? null;
+
+  await prisma.guestCardOnFile.updateMany({
+    where: { stripeSessionId },
+    data: {
+      status: "SAVED",
+      stripeCustomerId: customerId,
+      stripePaymentMethodId: pm?.id ?? null,
+      cardBrand: pm?.card?.brand ?? null,
+      cardLast4: pm?.card?.last4 ?? null,
+    },
+  });
+}
+
+export interface SavedCardChargeResult {
+  charge: { id: string; amountCents: number; currency: string; status: string };
+}
+
+// Charges the card saved above, with the guest not present. A card that
+// requires interactive authentication (3D Secure) for this specific amount
+// cannot complete off-session - Stripe returns "authentication_required",
+// surfaced here as a clear instruction rather than a bare Stripe error, so
+// the host knows to fall back to sendCityTaxLink instead of wondering why a
+// "saved" card just failed to charge.
+export async function chargeSavedCard(
+  reservationId: string,
+  amountCents: number,
+  description?: string
+): Promise<SavedCardChargeResult> {
+  if (amountCents <= 0) throw new Error("Amount must be greater than zero");
+
+  const card = await prisma.guestCardOnFile.findUnique({ where: { reservationId } });
+  if (!card || card.status !== "SAVED" || !card.stripeCustomerId || !card.stripePaymentMethodId) {
+    throw new Error("No saved card on file for this reservation yet");
+  }
+
+  const reservation = await prisma.reservation.findUniqueOrThrow({
+    where: { id: reservationId },
+    include: { property: true },
+  });
+  const nights = nightsBetween(reservation.checkIn, reservation.checkOut);
+
+  let paymentIntent: Stripe.PaymentIntent;
+  try {
+    paymentIntent = await stripe().paymentIntents.create({
+      amount: amountCents,
+      currency: reservation.property.currency.toLowerCase(),
+      customer: card.stripeCustomerId,
+      payment_method: card.stripePaymentMethodId,
+      off_session: true,
+      confirm: true,
+      description: description || `City tax — ${reservation.property.name}`,
+      metadata: { reservationId, propertyId: reservation.propertyId },
+    });
+  } catch (err) {
+    const stripeErr = err as { code?: string; message?: string };
+    if (stripeErr.code === "authentication_required") {
+      throw new Error("The saved card needs the guest to re-authenticate for this charge - send a new payment link instead.");
+    }
+    throw err instanceof Error ? err : new Error(stripeErr.message || "Charge failed");
+  }
+
+  const charge = await prisma.cityTaxCharge.create({
+    data: {
+      reservationId,
+      amountCents,
+      currency: reservation.property.currency,
+      guests: reservation.adults,
+      nights,
+      perNightCents: Math.round(amountCents / Math.max(1, nights)),
+      stripePaymentIntentId: paymentIntent.id,
+      status: paymentIntent.status === "succeeded" ? "PAID" : "PENDING",
+      paidAt: paymentIntent.status === "succeeded" ? new Date() : null,
+    },
+  });
+
+  return { charge: { id: charge.id, amountCents: charge.amountCents, currency: charge.currency, status: charge.status } };
+}
+
 export function verifyStripeWebhookSignature(rawBody: string, signature: string): Stripe.Event {
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
   if (!secret) throw new Error("STRIPE_WEBHOOK_SECRET is not set");

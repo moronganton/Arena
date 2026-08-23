@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyStripeWebhookSignature, markCityTaxPaid } from "@/lib/city-tax";
+import { verifyStripeWebhookSignature, markCityTaxPaid, markCardSaved } from "@/lib/city-tax";
 import type Stripe from "stripe";
 
 // Stripe's own recommended pattern (unlike the Channex webhook elsewhere in
@@ -30,9 +30,14 @@ export async function POST(req: NextRequest) {
   try {
     if (event.type === "checkout.session.completed") {
       const session = event.data.object as Stripe.Checkout.Session;
-      const paymentIntentId = typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent?.id ?? null;
-      await markCityTaxPaid(session.id, paymentIntentId);
-      console.log(`[stripe-webhook] city tax paid: session ${session.id}`);
+      if (session.mode === "setup") {
+        await markCardSaved(session.id);
+        console.log(`[stripe-webhook] card saved: session ${session.id}`);
+      } else {
+        const paymentIntentId = typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent?.id ?? null;
+        await markCityTaxPaid(session.id, paymentIntentId);
+        console.log(`[stripe-webhook] city tax paid: session ${session.id}`);
+      }
     }
     return NextResponse.json({ received: true });
   } catch (err) {

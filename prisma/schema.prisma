@@ -560,10 +560,33 @@ model Reservation {
   accessCodes  AccessCode[]
   cleaningTasks CleaningTask[]
   cityTaxCharges CityTaxCharge[]
+  guestCardOnFile GuestCardOnFile?
 
   @@index([propertyId])
   @@index([guestId])
   @@index([checkIn, checkOut])
+}
+
+// A card saved via Stripe (SetupIntent, through a Checkout Session in
+// "setup" mode) without charging it - the "eventual future charge" pattern:
+// send this link at booking time, then charge the exact city tax amount
+// later from chargeSavedCard() once nights/guests are final, with no second
+// trip back to the guest. One per reservation - a new link simply updates
+// this same row, matching how the guest only ever has one card on file at a
+// time for a given stay.
+model GuestCardOnFile {
+  id                    String   @id @default(cuid())
+  status                String   @default("PENDING") // PENDING (link sent, not completed), SAVED, FAILED
+  stripeCustomerId      String?
+  stripePaymentMethodId String?
+  stripeSessionId       String?  @unique // the setup-mode Checkout Session - null once superseded by a resend
+  cardBrand             String?
+  cardLast4             String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  reservationId String      @unique
+  reservation   Reservation @relation(fields: [reservationId], references: [id])
 }
 
 // A guest-facing city tax charge (e.g. Bratislava's 3.5 EUR/guest/night),

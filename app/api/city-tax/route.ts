@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { createOrReuseCityTaxCharge, quoteCityTax, stripeConfigured } from "@/lib/city-tax";
+import { createOrReuseCityTaxCharge, quoteCityTax, stripeConfigured, getGuestCardOnFile } from "@/lib/city-tax";
 import { resolveAppOrigin } from "@/lib/app-url";
 
 //   GET  /api/city-tax?reservationId=...   -> quote + charge history for one stay
@@ -23,6 +23,7 @@ export async function GET(req: NextRequest) {
       configured: !!reservation.property.cityTaxPerNight,
       quote: quoteCityTax(reservation.property, reservation),
       charges: reservation.cityTaxCharges,
+      card: await getGuestCardOnFile(reservationId),
     });
   }
 
