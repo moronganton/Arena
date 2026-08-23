@@ -56,6 +56,23 @@ export async function GET(req: NextRequest) {
     results.emptyTaxWithPropertyError = describeError(err);
   }
 
+  // Invalid enum values often make a validator list every value it does
+  // accept - cheaper than guessing from a closed UI dropdown screenshot.
+  try {
+    await channexPost("/taxes", {
+      tax: { title: "probe", currency: "EUR", property_id: channexPropertyId, rate: "1", logic: "not_a_real_logic_value" },
+    });
+  } catch (err) {
+    results.invalidLogicError = describeError(err);
+  }
+  try {
+    await channexPost("/taxes", {
+      tax: { title: "probe", currency: "EUR", property_id: channexPropertyId, rate: "1", logic: "per_person_per_night", type: "not_a_real_type_value" },
+    });
+  } catch (err) {
+    results.invalidTypeError = describeError(err);
+  }
+
   if (create) {
     // Real data: Bratislava's actual city tax, 3.5 EUR per person per
     // night, exclusive of the room rate - the same figure already live in
