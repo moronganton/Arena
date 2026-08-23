@@ -7,6 +7,7 @@ interface PropertyLite {
   id: string;
   name: string;
   currency: string;
+  channelProvider: string;
   cityTaxPerNight: number | null;
   cityTaxAutoChargeEnabled: boolean;
 }
@@ -143,6 +144,7 @@ function PropertySettingsPanel() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
 
   const load = useCallback(async () => {
@@ -176,16 +178,22 @@ function PropertySettingsPanel() {
   async function save() {
     if (!propertyId) return;
     setSaving(true);
+    setSyncError(null);
     try {
       const parsedRate = rate.trim() === "" ? null : Number(rate);
-      await fetch(`/api/properties/${propertyId}`, {
+      const res = await fetch(`/api/properties/${propertyId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cityTaxPerNight: parsedRate, cityTaxAutoChargeEnabled: autoCharge }),
       });
+      const data = await res.json();
       await load();
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2500);
+      if (data?.channexTaxSyncError) {
+        setSyncError(data.channexTaxSyncError);
+      } else {
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2500);
+      }
     } finally {
       setSaving(false);
     }
@@ -234,7 +242,11 @@ function PropertySettingsPanel() {
                 placeholder="e.g. 3.50"
                 className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
-              <p className="text-[11px] text-slate-400 mt-1">Blank = no city tax for this property.</p>
+              <p className="text-[11px] text-slate-400 mt-1">
+                {selected?.channelProvider === "CHANNEX"
+                  ? "Blank = no city tax. Also pushed to Channex, so Booking.com/Airbnb disclose it to the guest."
+                  : "Blank = no city tax for this property. Smoobu-managed - StayHQ's own charge only, nothing pushed to a channel."}
+              </p>
             </div>
 
             <div>
@@ -264,6 +276,12 @@ function PropertySettingsPanel() {
             </button>
             {saved && <span className="text-emerald-600 text-sm flex items-center gap-1"><Check className="w-4 h-4" /> Saved</span>}
           </div>
+          {syncError && (
+            <p className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 flex items-start gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              Saved in StayHQ, but couldn&apos;t reach Channex to update it there: {syncError}
+            </p>
+          )}
         </div>
       )}
     </div>

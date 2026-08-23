@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { enqueueAriUpdate, defaultHorizon } from "@/lib/channels/ari-outbox";
+import { upsertCityTax, deleteCityTaxForProperty } from "@/lib/channels/channex-taxes";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
@@ -29,6 +30,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const { id } = await params;
   const existing = await prisma.property.findFirst({
     where: { id, ownerId: session!.user!.id },
+    include: { channexListing: { select: { channexPropertyId: true } } },
   });
   if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
@@ -62,7 +64,34 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     await enqueueAriUpdate(id, from, to, "RATE");
   }
 
-  return NextResponse.json(updated);
+  // StayHQ is the single place to configure the rate; Channex's Tax object
+  // is what actually makes Booking.com/Airbnb disclose it to the guest -
+  // push it here so the two never have to be edited separately again. Only
+  // for Channex-managed properties (nothing to push to otherwise), and only
+  // when this request actually touched the rate - every other property save
+  // (name, description, ...) must not re-hit Channex's API for no reason.
+  //
+  // Awaited, and its failure reported back rather than only logged: a rate
+  // change that silently failed to reach Channex would leave StayHQ's own
+  // records and what Booking.com discloses to the guest quietly out of
+  // sync, which is the exact problem this sync exists to prevent - the
+  // property save itself still succeeds either way, this just says so.
+  let channexTaxSyncError: string | null = null;
+  if (existing.channexListing && body.cityTaxPerNight !== undefined) {
+    const channexPropertyId = existing.channexListing.channexPropertyId;
+    try {
+      if (body.cityTaxPerNight == null) {
+        await deleteCityTaxForProperty(channexPropertyId);
+      } else {
+        await upsertCityTax(channexPropertyId, updated.currency, Number(body.cityTaxPerNight));
+      }
+    } catch (err) {
+      channexTaxSyncError = err instanceof Error ? err.message : "Failed to sync the rate to Channex";
+      console.error(`[properties] failed to sync city tax to Channex for ${id}:`, err);
+    }
+  }
+
+  return NextResponse.json({ ...updated, channexTaxSyncError });
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
