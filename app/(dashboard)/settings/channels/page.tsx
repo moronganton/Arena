@@ -46,7 +46,13 @@ export default function ChannelsPage() {
   const [loading, setLoading] = useState(true);
   // Per-property state for the "Force full resync" action - keyed by
   // propertyId so triggering one property's sync doesn't disturb another's.
-  const [syncState, setSyncState] = useState<Record<string, { busy: boolean; result: string | null; error: string | null }>>({});
+  // taskIds is kept alongside the summary line because Channex's PMS
+  // certification asks for the ids it returned as the evidence a push really
+  // happened ("Provide IDs received from Channex. One ID per line."). The
+  // count alone can't be pasted into that form, and reading them out of the
+  // network tab is not something to be doing on a live screenshare.
+  const [syncState, setSyncState] = useState<Record<string, { busy: boolean; result: string | null; taskIds: string[]; error: string | null }>>({});
+  const [copiedFor, setCopiedFor] = useState<string | null>(null);
   // Which property's channel-mapping overlay is open, if any.
   const [mapping, setMapping] = useState<{ id: string; name: string } | null>(null);
 
@@ -60,7 +66,7 @@ export default function ChannelsPage() {
   useEffect(load, []);
 
   async function forceFullSync(propertyId: string) {
-    setSyncState((s) => ({ ...s, [propertyId]: { busy: true, result: null, error: null } }));
+    setSyncState((s) => ({ ...s, [propertyId]: { busy: true, result: null, taskIds: [], error: null } }));
     try {
       const res = await fetch("/api/channex/full-sync", {
         method: "POST",
@@ -71,12 +77,26 @@ export default function ChannelsPage() {
       if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
       setSyncState((s) => ({
         ...s,
-        [propertyId]: { busy: false, result: `Pushed ${data.horizonDays} days · ${data.taskIds.length} update(s) accepted`, error: null },
+        [propertyId]: {
+          busy: false,
+          result: `Pushed ${data.horizonDays} days · ${data.taskIds.length} update(s) accepted`,
+          taskIds: data.taskIds ?? [],
+          error: null,
+        },
       }));
       load(); // refresh "last push" / queue counts
     } catch (err) {
-      setSyncState((s) => ({ ...s, [propertyId]: { busy: false, result: null, error: err instanceof Error ? err.message : "Sync failed" } }));
+      setSyncState((s) => ({ ...s, [propertyId]: { busy: false, result: null, taskIds: [], error: err instanceof Error ? err.message : "Sync failed" } }));
     }
+  }
+
+  function copyTaskIds(propertyId: string, ids: string[]) {
+    // Newline-separated because that is the exact shape the certification
+    // form asks to be pasted in - "One ID per line".
+    navigator.clipboard.writeText(ids.join("\n")).then(() => {
+      setCopiedFor(propertyId);
+      setTimeout(() => setCopiedFor((c) => (c === propertyId ? null : c)), 2000);
+    });
   }
 
   const channexProperties = properties.filter((p) => p.manager === "CHANNEX");
@@ -175,7 +195,27 @@ export default function ChannelsPage() {
                     </div>
                   </div>
                   {sync?.result && (
-                    <p className="mt-1.5 text-xs text-teal-700 bg-teal-50 border border-teal-200 rounded-lg px-2.5 py-1.5">{sync.result}</p>
+                    <div className="mt-1.5 text-xs text-teal-700 bg-teal-50 border border-teal-200 rounded-lg px-2.5 py-1.5">
+                      <p>{sync.result}</p>
+                      {sync.taskIds.length > 0 && (
+                        <>
+                          <div className="mt-1.5 flex items-center justify-between gap-2">
+                            <span className="text-[10px] font-semibold uppercase tracking-wide text-teal-600">
+                              Channex task IDs
+                            </span>
+                            <button
+                              onClick={() => copyTaskIds(p.id, sync.taskIds)}
+                              className="text-[11px] font-medium text-teal-700 hover:text-teal-900 underline underline-offset-2"
+                            >
+                              {copiedFor === p.id ? "Copied" : "Copy"}
+                            </button>
+                          </div>
+                          <pre className="mt-1 font-mono text-[11px] leading-relaxed text-teal-800 whitespace-pre-wrap break-all">
+                            {sync.taskIds.join("\n")}
+                          </pre>
+                        </>
+                      )}
+                    </div>
                   )}
                   {sync?.error && (
                     <p className="mt-1.5 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-2.5 py-1.5">{sync.error}</p>
