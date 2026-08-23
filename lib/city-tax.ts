@@ -29,13 +29,49 @@ function stripe(): Stripe {
 export interface CityTaxQuote {
   nights: number;
   guests: number;
+  // Kept for CityTaxCharge's existing perNightCents column (a record-keeping
+  // field, not itself the calculation) - derived from the total under every
+  // logic, not just per_person_per_night. Charge amountCents / description
+  // are the actual result of the logic chosen.
   perNightCents: number;
   amountCents: number;
   currency: string;
+  description: string;
 }
 
 function nightsBetween(checkIn: Date, checkOut: Date): number {
   return Math.max(1, Math.round((checkOut.getTime() - checkIn.getTime()) / 86400000));
+}
+
+// Mirrors Channex's Logic enum exactly (percent | per_booking | per_room |
+// per_night | per_person | per_room_per_night | per_person_per_night) - the
+// same rule now drives both what StayHQ actually charges via Stripe and
+// what Channex discloses to the OTA, so the two can never describe two
+// different taxes. "per_room"/"per_room_per_night" treat every StayHQ
+// property as the one bookable unit it is (no per-room split like a
+// multi-room hotel), so they equal "per_booking"/"per_night".
+function computeCityTaxAmount(
+  logic: string,
+  rate: number,
+  nights: number,
+  guests: number,
+  totalAmount: number | null | undefined
+): { amount: number; description: string } {
+  switch (logic) {
+    case "percent":
+      return { amount: ((totalAmount ?? 0) * rate) / 100, description: `${rate}% of the booking total` };
+    case "per_booking":
+    case "per_room":
+      return { amount: rate, description: "flat, per booking" };
+    case "per_night":
+    case "per_room_per_night":
+      return { amount: rate * nights, description: `${nights} night(s) × ${rate}/night` };
+    case "per_person":
+      return { amount: rate * guests, description: `${guests} guest(s) × ${rate}/guest` };
+    case "per_person_per_night":
+    default:
+      return { amount: rate * nights * guests, description: `${nights} night(s) × ${guests} guest(s) × ${rate}/guest/night` };
+  }
 }
 
 // Adults only by default - many municipalities (Bratislava included, in
@@ -44,16 +80,28 @@ function nightsBetween(checkIn: Date, checkOut: Date): number {
 // not a legal calculation - the host can adjust guest count or the total
 // before sending, so this never silently over- or under-charges based on an
 // assumption this code can't verify.
-export function quoteCityTax(property: { cityTaxPerNight: number | null; currency: string }, reservation: { checkIn: Date; checkOut: Date; adults: number }): CityTaxQuote | null {
+export function quoteCityTax(
+  property: { cityTaxPerNight: number | null; currency: string; cityTaxLogic?: string | null },
+  reservation: { checkIn: Date; checkOut: Date; adults: number; totalAmount?: number | null }
+): CityTaxQuote | null {
   if (!property.cityTaxPerNight) return null;
   const nights = nightsBetween(reservation.checkIn, reservation.checkOut);
-  const perNightCents = Math.round(property.cityTaxPerNight * 100);
+  const guests = reservation.adults;
+  const { amount, description } = computeCityTaxAmount(
+    property.cityTaxLogic || "per_person_per_night",
+    property.cityTaxPerNight,
+    nights,
+    guests,
+    reservation.totalAmount
+  );
+  const amountCents = Math.round(amount * 100);
   return {
     nights,
-    guests: reservation.adults,
-    perNightCents,
-    amountCents: perNightCents * nights * reservation.adults,
+    guests,
+    perNightCents: Math.round(amountCents / nights),
+    amountCents,
     currency: property.currency,
+    description,
   };
 }
 
@@ -102,10 +150,8 @@ export async function createOrReuseCityTaxCharge(
           currency: reservation.property.currency.toLowerCase(),
           unit_amount: amountCents,
           product_data: {
-            name: `City tax — ${reservation.property.name}`,
-            description: quote
-              ? `${quote.nights} night(s) × ${quote.guests} guest(s) × ${(quote.perNightCents / 100).toFixed(2)} ${quote.currency}/guest/night`
-              : undefined,
+            name: `${reservation.property.cityTaxTitle} — ${reservation.property.name}`,
+            description: quote?.description,
           },
         },
         quantity: 1,
@@ -300,7 +346,7 @@ export async function chargeSavedCard(
       payment_method: card.stripePaymentMethodId,
       off_session: true,
       confirm: true,
-      description: description || `City tax — ${reservation.property.name}`,
+      description: description || `${reservation.property.cityTaxTitle} — ${reservation.property.name}`,
       metadata: { reservationId, propertyId: reservation.propertyId },
     });
   } catch (err) {

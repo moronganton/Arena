@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireDebugAccess } from "@/lib/debug-auth";
 import { prisma } from "@/lib/prisma";
-import { getCityTaxForProperty, upsertCityTax } from "@/lib/channels/channex-taxes";
+import { findExistingCityTax, upsertCityTax } from "@/lib/channels/channex-taxes";
 
 // Verifies upsertCityTax's UPDATE path (PUT /taxes/:id) against the real
 // city tax this account already created manually on Sinteu, before wiring
@@ -21,15 +21,24 @@ export async function GET(req: NextRequest) {
   if (!property?.channexListing) return NextResponse.json({ error: "No Channex property found" }, { status: 404 });
   const channexPropertyId = property.channexListing.channexPropertyId;
 
-  const before = await getCityTaxForProperty(channexPropertyId);
+  const before = await findExistingCityTax(channexPropertyId, "city_tax");
   const apply = new URL(req.url).searchParams.get("apply") === "true";
 
   if (!apply) {
     return NextResponse.json({ property: property.name, before, note: "Dry run - add &apply=true to actually PUT." });
   }
 
-  const updated = await upsertCityTax(channexPropertyId, property.currency, 3.5);
-  const after = await getCityTaxForProperty(channexPropertyId);
+  const updated = await upsertCityTax(channexPropertyId, before?.id ?? null, {
+    title: "City tax",
+    currency: property.currency,
+    type: "city_tax",
+    logic: "per_person_per_night",
+    isInclusive: false,
+    rate: 3.5,
+    maxNights: null,
+    skipNights: null,
+  });
+  const after = await findExistingCityTax(channexPropertyId, "city_tax");
 
   return NextResponse.json({ property: property.name, before, updated, after });
 }

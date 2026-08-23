@@ -44,7 +44,7 @@ export default function PaymentsCard({
   channexEligible: boolean;
   currency: string;
 }) {
-  const [cityTax, setCityTax] = useState<{ configured: boolean; quote: { amountCents: number; nights: number; guests: number; currency: string } | null; charges: CityTaxCharge[]; card: GuestCard | null } | null>(null);
+  const [cityTax, setCityTax] = useState<{ configured: boolean; quote: { amountCents: number; nights: number; guests: number; currency: string; description: string } | null; charges: CityTaxCharge[]; card: GuestCard | null } | null>(null);
   const [cityTaxBusy, setCityTaxBusy] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const [lastLink, setLastLink] = useState<string | null>(null);
@@ -214,8 +214,7 @@ export default function PaymentsCard({
           <>
             {cityTax.quote && (
               <p className="text-xs text-slate-500 mb-2">
-                Suggested: {money(cityTax.quote.amountCents, cityTax.quote.currency)} ({cityTax.quote.nights} night(s) &times;{" "}
-                {cityTax.quote.guests} guest(s))
+                Suggested: {money(cityTax.quote.amountCents, cityTax.quote.currency)} ({cityTax.quote.description})
               </p>
             )}
             {latestCharge && (

@@ -10,7 +10,33 @@ interface PropertyLite {
   channelProvider: string;
   cityTaxPerNight: number | null;
   cityTaxAutoChargeEnabled: boolean;
+  cityTaxTitle: string;
+  cityTaxIsInclusive: boolean;
+  cityTaxLogic: string;
+  cityTaxType: string;
+  cityTaxMaxNights: number | null;
+  cityTaxSkipNights: number | null;
 }
+
+// Mirrors Channex's own "Logic" and "Type" dropdowns on the Edit tax form -
+// wire values confirmed live (see lib/channels/channex-taxes.ts), labels
+// copied from the screenshots of that form so the two stay recognizable as
+// the same setting.
+const LOGIC_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "percent", label: "Percent" },
+  { value: "per_booking", label: "Per booking" },
+  { value: "per_room", label: "Per room" },
+  { value: "per_night", label: "Per night" },
+  { value: "per_person", label: "Per person" },
+  { value: "per_room_per_night", label: "Per room per night" },
+  { value: "per_person_per_night", label: "Per person per night" },
+];
+
+const TYPE_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "tax", label: "Tax" },
+  { value: "city_tax", label: "City tax" },
+  { value: "fee", label: "Fee" },
+];
 
 interface Charge {
   id: string;
@@ -145,6 +171,12 @@ function PropertySettingsPanel() {
   const [propertyId, setPropertyId] = useState("");
   const [rate, setRate] = useState("");
   const [autoCharge, setAutoCharge] = useState(false);
+  const [title, setTitle] = useState("City tax");
+  const [isInclusive, setIsInclusive] = useState(false);
+  const [logic, setLogic] = useState("per_person_per_night");
+  const [type, setType] = useState("city_tax");
+  const [maxNights, setMaxNights] = useState("");
+  const [skipNights, setSkipNights] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -170,6 +202,12 @@ function PropertySettingsPanel() {
     setPropertyId(p.id);
     setRate(p.cityTaxPerNight != null ? String(p.cityTaxPerNight) : "");
     setAutoCharge(p.cityTaxAutoChargeEnabled);
+    setTitle(p.cityTaxTitle ?? "City tax");
+    setIsInclusive(p.cityTaxIsInclusive ?? false);
+    setLogic(p.cityTaxLogic ?? "per_person_per_night");
+    setType(p.cityTaxType ?? "city_tax");
+    setMaxNights(p.cityTaxMaxNights != null ? String(p.cityTaxMaxNights) : "");
+    setSkipNights(p.cityTaxSkipNights != null ? String(p.cityTaxSkipNights) : "");
   }
 
   function onPick(id: string) {
@@ -188,7 +226,16 @@ function PropertySettingsPanel() {
       const res = await fetch(`/api/properties/${propertyId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cityTaxPerNight: parsedRate, cityTaxAutoChargeEnabled: autoCharge }),
+        body: JSON.stringify({
+          cityTaxPerNight: parsedRate,
+          cityTaxAutoChargeEnabled: autoCharge,
+          cityTaxTitle: title.trim() === "" ? "City tax" : title.trim(),
+          cityTaxIsInclusive: isInclusive,
+          cityTaxLogic: logic,
+          cityTaxType: type,
+          cityTaxMaxNights: maxNights.trim() === "" ? null : Number(maxNights),
+          cityTaxSkipNights: skipNights.trim() === "" ? null : Number(skipNights),
+        }),
       });
       const data = await res.json();
       await load();
@@ -236,8 +283,21 @@ function PropertySettingsPanel() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Title</label>
+              <input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="City tax"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+              <p className="text-[11px] text-slate-400 mt-1">
+                Shown to the guest on the payment link and, for Channex properties, on the listing itself.
+              </p>
+            </div>
+
+            <div>
               <label className="block text-xs font-medium text-slate-600 mb-1">
-                City tax rate ({selected?.currency || "EUR"} / guest / night)
+                Rate ({selected?.currency || "EUR"})
               </label>
               <input
                 value={rate}
@@ -248,8 +308,73 @@ function PropertySettingsPanel() {
               />
               <p className="text-[11px] text-slate-400 mt-1">
                 {selected?.channelProvider === "CHANNEX"
-                  ? "Blank = no city tax. Also pushed to Channex, so Booking.com/Airbnb disclose it to the guest."
-                  : "Blank = no city tax for this property. Smoobu-managed - StayHQ's own charge only, nothing pushed to a channel."}
+                  ? "Blank = no tax. Also pushed to Channex, so Booking.com/Airbnb disclose it to the guest."
+                  : "Blank = no tax for this property. Smoobu-managed - StayHQ's own charge only, nothing pushed to a channel."}
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Logic</label>
+              <select
+                value={logic}
+                onChange={(e) => setLogic(e.target.value)}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                {LOGIC_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+              <p className="text-[11px] text-slate-400 mt-1">How the rate above is multiplied out.</p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Type</label>
+              <select
+                value={type}
+                onChange={(e) => setType(e.target.value)}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                {TYPE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+              <p className="text-[11px] text-slate-400 mt-1">How Channex categorizes it to OTAs. Also the key used to adopt an existing Channex tax on first sync.</p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Max nights</label>
+              <input
+                value={maxNights}
+                onChange={(e) => setMaxNights(e.target.value)}
+                inputMode="numeric"
+                placeholder="No limit"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+              <p className="text-[11px] text-slate-400 mt-1">Stop accruing after this many nights of a stay.</p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Skip nights</label>
+              <input
+                value={skipNights}
+                onChange={(e) => setSkipNights(e.target.value)}
+                inputMode="numeric"
+                placeholder="0"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+              <p className="text-[11px] text-slate-400 mt-1">Don&apos;t charge for this many nights at the start of a stay.</p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Inclusive of room rate</label>
+              <button
+                onClick={() => setIsInclusive((v) => !v)}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${isInclusive ? "bg-indigo-600" : "bg-slate-300"}`}
+              >
+                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${isInclusive ? "translate-x-6" : "translate-x-1"}`} />
+              </button>
+              <p className="text-[11px] text-slate-400 mt-1">
+                {isInclusive ? "On - already baked into the room rate shown to the guest." : "Off - added on top of the room rate."}
               </p>
             </div>
 

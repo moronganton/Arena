@@ -100,7 +100,7 @@ export async function runCityTaxAutoCharge(): Promise<CityTaxAutoChargeResult> {
     }
 
     try {
-      await chargeSavedCard(r.id, quote.amountCents, `City tax — ${r.property.name} (auto)`);
+      await chargeSavedCard(r.id, quote.amountCents, `${r.property.cityTaxTitle} — ${r.property.name} (auto)`);
       result.charged++;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

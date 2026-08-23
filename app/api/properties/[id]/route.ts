@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { enqueueAriUpdate, defaultHorizon } from "@/lib/channels/ari-outbox";
-import { upsertCityTax, deleteCityTaxForProperty } from "@/lib/channels/channex-taxes";
+import { upsertCityTax, deleteChannexTax } from "@/lib/channels/channex-taxes";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
@@ -54,6 +54,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       aiEnabled: body.aiEnabled,
       cityTaxPerNight: body.cityTaxPerNight,
       cityTaxAutoChargeEnabled: body.cityTaxAutoChargeEnabled,
+      cityTaxTitle: body.cityTaxTitle,
+      cityTaxIsInclusive: body.cityTaxIsInclusive,
+      cityTaxLogic: body.cityTaxLogic,
+      cityTaxType: body.cityTaxType,
+      cityTaxMaxNights: body.cityTaxMaxNights,
+      cityTaxSkipNights: body.cityTaxSkipNights,
     },
   });
 
@@ -77,13 +83,31 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // sync, which is the exact problem this sync exists to prevent - the
   // property save itself still succeeds either way, this just says so.
   let channexTaxSyncError: string | null = null;
+  let cityTaxChannexId = updated.cityTaxChannexId;
   if (existing.channexListing && body.cityTaxPerNight !== undefined) {
     const channexPropertyId = existing.channexListing.channexPropertyId;
     try {
       if (body.cityTaxPerNight == null) {
-        await deleteCityTaxForProperty(channexPropertyId);
+        if (existing.cityTaxChannexId) {
+          await deleteChannexTax(existing.cityTaxChannexId);
+          cityTaxChannexId = null;
+          await prisma.property.update({ where: { id }, data: { cityTaxChannexId: null } });
+        }
       } else {
-        await upsertCityTax(channexPropertyId, updated.currency, Number(body.cityTaxPerNight));
+        const tax = await upsertCityTax(channexPropertyId, existing.cityTaxChannexId, {
+          title: updated.cityTaxTitle,
+          currency: updated.currency,
+          type: updated.cityTaxType,
+          logic: updated.cityTaxLogic,
+          isInclusive: updated.cityTaxIsInclusive,
+          rate: Number(updated.cityTaxPerNight),
+          maxNights: updated.cityTaxMaxNights,
+          skipNights: updated.cityTaxSkipNights,
+        });
+        if (tax.id !== existing.cityTaxChannexId) {
+          cityTaxChannexId = tax.id;
+          await prisma.property.update({ where: { id }, data: { cityTaxChannexId: tax.id } });
+        }
       }
     } catch (err) {
       channexTaxSyncError = err instanceof Error ? err.message : "Failed to sync the rate to Channex";
@@ -91,7 +115,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
   }
 
-  return NextResponse.json({ ...updated, channexTaxSyncError });
+  return NextResponse.json({ ...updated, cityTaxChannexId, channexTaxSyncError });
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

@@ -232,6 +232,28 @@ model Property {
   // lib/city-tax.ts), so this is a plain Stripe flow that works for any
   // property regardless of which channel manager owns it.
   cityTaxPerNight Float?
+  // The rest of this block mirrors Channex's real Tax object field for
+  // field (confirmed live, including the two least-obvious enum values -
+  // type "fee" and logic "per_booking" - via a real create/read-back/delete
+  // round trip, not guessed from the UI labels alone) - so StayHQ is the
+  // one place to configure this, pushed to Channex from here rather than
+  // edited separately in both places. See lib/channels/channex-taxes.ts.
+  cityTaxTitle       String  @default("City tax")
+  cityTaxIsInclusive Boolean @default(false)
+  // percent | per_booking | per_room | per_night | per_person |
+  // per_room_per_night | per_person_per_night
+  cityTaxLogic       String  @default("per_person_per_night")
+  // tax | city_tax | fee
+  cityTaxType        String  @default("city_tax")
+  cityTaxMaxNights   Int?
+  cityTaxSkipNights  Int?
+  // The Channex tax's own id, once synced - looked up by id from here on,
+  // not by (property_id, type), since type is now something a host can
+  // change on either side. Null until the first successful sync; for a
+  // property where a tax already existed in Channex before this sync did
+  // (Sinteu's real one), the first sync finds and adopts it by matching
+  // property_id + type once, then remembers its id from then on.
+  cityTaxChannexId  String?
   // Off by default, deliberately - a host turns this on only once they trust
   // the flow: with it on, a template containing [City Tax Card Link] sends a
   // real save-card link, and any reservation with a saved card and no paid
