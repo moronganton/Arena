@@ -17,11 +17,19 @@ export async function GET(req: NextRequest) {
   // proxy req.url resolves to the app's internal bind address
   // (http://localhost:8080), which is exactly what leaked into a real
   // redirect here before this fix.
-  const settingsUrl = new URL("/settings/listing-content", resolveAppOrigin(req));
+  //
+  // Redirects to the property's own listing settings page (payments now
+  // live there, not a standalone settings page) with tab=payments so the
+  // host lands straight back on the panel they were just connecting.
   if (!propertyId) {
-    settingsUrl.searchParams.set("paymentSetup", "error");
-    return NextResponse.redirect(settingsUrl);
+    // No propertyId to build a property-scoped redirect to - /properties is
+    // the closest thing to a safe fallback.
+    const fallbackUrl = new URL("/properties", resolveAppOrigin(req));
+    fallbackUrl.searchParams.set("paymentSetup", "error");
+    return NextResponse.redirect(fallbackUrl);
   }
+  const settingsUrl = new URL(`/properties/${propertyId}/listing`, resolveAppOrigin(req));
+  settingsUrl.searchParams.set("tab", "payments");
 
   const listing = await prisma.channexListing.findUnique({
     where: { propertyId },

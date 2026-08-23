@@ -17,7 +17,6 @@ import {
   Wallet,
   Lightbulb,
   ShieldCheck,
-  Images,
   Landmark,
 } from "lucide-react";
 import { signOut } from "next-auth/react";
@@ -38,7 +37,6 @@ const navItems = [
 
 const settingsItems = [
   { href: "/settings/channels", label: "Channels", icon: RefreshCw },
-  { href: "/settings/listing-content", label: "Listing content", icon: Images },
   { href: "/settings/locks", label: "Smart Locks", icon: Key },
   { href: "/settings/ai", label: "AI Assistant", icon: Bot },
   { href: "/settings/account", label: "Account security", icon: ShieldCheck },

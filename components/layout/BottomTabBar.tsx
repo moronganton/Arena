@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, MessageSquare, MessageSquareText, BookOpen, CalendarDays, MoreHorizontal,
-  Home, Sparkles, Wallet, RefreshCw, Key, Bot, LogOut, X, Lightbulb, ShieldCheck, Images, Landmark,
+  Home, Sparkles, Wallet, RefreshCw, Key, Bot, LogOut, X, Lightbulb, ShieldCheck, Landmark,
 } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { cn } from "@/lib/utils";
@@ -22,7 +22,6 @@ const MORE_LINKS = [
   { href: "/finance", label: "Finance", icon: Wallet },
   { href: "/city-tax", label: "City Tax", icon: Landmark },
   { href: "/settings/channels", label: "Channels", icon: RefreshCw },
-  { href: "/settings/listing-content", label: "Listing content", icon: Images },
   { href: "/settings/locks", label: "Smart Locks", icon: Key },
   { href: "/settings/ai", label: "AI Assistant", icon: Bot },
   { href: "/settings/account", label: "Account security", icon: ShieldCheck },

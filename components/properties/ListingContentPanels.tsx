@@ -1,114 +1,21 @@
 "use client";
-import { useState, useEffect, useCallback, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
-import { ClipboardList, Sparkles, Images, Star, CreditCard, Trash2, Upload, Send, Check } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Trash2, Upload, Send, Check } from "lucide-react";
 
-interface PropertyRow {
-  id: string;
-  name: string;
-  manager: string;
-}
+// Every panel here is Channex-only - each one calls a /api/channex/* route
+// that talks to Channex's own catalogue APIs, so none of it applies to a
+// Smoobu-managed property. Moved out of the old standalone
+// /settings/listing-content page so this lives at the property level
+// instead, alongside the property it actually configures.
 
-const TABS = [
-  { id: "policy", label: "Hotel Policy", icon: ClipboardList },
-  { id: "facilities", label: "Facilities", icon: Sparkles },
-  { id: "photos", label: "Photos", icon: Images },
-  { id: "reviews", label: "Reviews", icon: Star },
-  { id: "payments", label: "Payments", icon: CreditCard },
-] as const;
-type TabId = (typeof TABS)[number]["id"];
+export const inputCls = "w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500";
 
-const inputCls = "w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500";
-
-function PaymentSetupBanner() {
-  const params = useSearchParams();
-  const status = params.get("paymentSetup");
-  if (!status) return null;
-  const map: Record<string, { text: string; cls: string }> = {
-    connected: { text: "Stripe connected - you can now charge cards for this property.", cls: "bg-emerald-50 border-emerald-200 text-emerald-700" },
-    pending: { text: "Stripe connection didn't finish - try again below.", cls: "bg-amber-50 border-amber-200 text-amber-700" },
-    error: { text: "Something went wrong connecting Stripe - try again below.", cls: "bg-red-50 border-red-200 text-red-700" },
-  };
-  const m = map[status];
-  if (!m) return null;
-  return <div className={`mb-4 text-sm px-3 py-2 rounded-lg border ${m.cls}`}>{m.text}</div>;
-}
-
-export default function ListingContentPage() {
-  const [properties, setProperties] = useState<PropertyRow[]>([]);
-  const [propertyId, setPropertyId] = useState<string>("");
-  const [tab, setTab] = useState<TabId>("policy");
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetch("/api/channels/state")
-      .then((r) => (r.ok ? r.json() : { properties: [] }))
-      .then((d) => {
-        const channexOnly = (d.properties ?? []).filter((p: PropertyRow) => p.manager === "CHANNEX");
-        setProperties(channexOnly);
-        if (channexOnly.length > 0) setPropertyId(channexOnly[0].id);
-      })
-      .finally(() => setLoading(false));
-  }, []);
-
+export function Field({ label, children, full }: { label: string; children: React.ReactNode; full?: boolean }) {
   return (
-    <div className="p-4 md:p-8 max-w-4xl mx-auto">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-900">Listing content</h1>
-        <p className="text-slate-500 text-sm mt-0.5">
-          Hotel policy, facilities, photos, reviews, and card payments - synced through Channex, so it only applies to
-          Channex-managed properties.
-        </p>
-      </div>
-
-      <Suspense fallback={null}>
-        <PaymentSetupBanner />
-      </Suspense>
-
-      {loading ? (
-        <p className="text-sm text-slate-400">Loading&hellip;</p>
-      ) : properties.length === 0 ? (
-        <div className="bg-white rounded-2xl border border-slate-100 p-8 text-center">
-          <p className="text-sm text-slate-500">No properties are on Channex yet.</p>
-          <p className="text-xs text-slate-400 mt-1">This page only applies to Channex-managed listings.</p>
-        </div>
-      ) : (
-        <>
-          <div className="mb-4">
-            <select
-              value={propertyId}
-              onChange={(e) => setPropertyId(e.target.value)}
-              className="w-full sm:w-auto border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            >
-              {properties.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex gap-1 mb-4 overflow-x-auto">
-            {TABS.map(({ id, label, icon: Icon }) => (
-              <button
-                key={id}
-                onClick={() => setTab(id)}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition ${
-                  tab === id ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-100"
-                }`}
-              >
-                <Icon className="w-3.5 h-3.5" />
-                {label}
-              </button>
-            ))}
-          </div>
-
-          {tab === "policy" && <HotelPolicyPanel propertyId={propertyId} />}
-          {tab === "facilities" && <FacilitiesPanel propertyId={propertyId} />}
-          {tab === "photos" && <PhotosPanel propertyId={propertyId} />}
-          {tab === "reviews" && <ReviewsPanel propertyId={propertyId} />}
-          {tab === "payments" && <PaymentsSetupPanel propertyId={propertyId} />}
-        </>
-      )}
-    </div>
+    <label className={`block ${full ? "sm:col-span-2" : ""}`}>
+      <span className="block text-xs font-medium text-slate-600 mb-1">{label}</span>
+      {children}
+    </label>
   );
 }
 
@@ -145,7 +52,7 @@ const DEFAULT_POLICY = {
   partner_hygiene_link: "" as string | null,
 };
 
-function HotelPolicyPanel({ propertyId }: { propertyId: string }) {
+export function HotelPolicyPanel({ propertyId }: { propertyId: string }) {
   const [form, setForm] = useState(DEFAULT_POLICY);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -329,20 +236,11 @@ function HotelPolicyPanel({ propertyId }: { propertyId: string }) {
   );
 }
 
-function Field({ label, children, full }: { label: string; children: React.ReactNode; full?: boolean }) {
-  return (
-    <label className={`block ${full ? "sm:col-span-2" : ""}`}>
-      <span className="block text-xs font-medium text-slate-600 mb-1">{label}</span>
-      {children}
-    </label>
-  );
-}
-
 // ---------- Facilities ----------
 
 interface FacilityOption { id: string; category: string; title: string }
 
-function FacilitiesPanel({ propertyId }: { propertyId: string }) {
+export function FacilitiesPanel({ propertyId }: { propertyId: string }) {
   const [options, setOptions] = useState<FacilityOption[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -424,7 +322,7 @@ function FacilitiesPanel({ propertyId }: { propertyId: string }) {
 
 interface ChannexPhoto { id: string; url: string; position: number; description: string | null }
 
-function PhotosPanel({ propertyId }: { propertyId: string }) {
+export function PhotosPanel({ propertyId }: { propertyId: string }) {
   const [photos, setPhotos] = useState<ChannexPhoto[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -524,7 +422,7 @@ interface Review {
   reply: string | null;
 }
 
-function ReviewsPanel({ propertyId }: { propertyId: string }) {
+export function ReviewsPanel({ propertyId }: { propertyId: string }) {
   const [reviews, setReviews] = useState<Review[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -610,9 +508,9 @@ function ReviewsPanel({ propertyId }: { propertyId: string }) {
   );
 }
 
-// ---------- Payments setup ----------
+// ---------- Payments setup (Channex's own Stripe Connect) ----------
 
-function PaymentsSetupPanel({ propertyId }: { propertyId: string }) {
+export function PaymentsSetupPanel({ propertyId }: { propertyId: string }) {
   const [status, setStatus] = useState<{ installed: boolean; connected: boolean; providers: Array<{ id: string; title: string }> } | null>(null);
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState(false);

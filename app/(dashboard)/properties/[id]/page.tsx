@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getChannelState } from "@/lib/channels/channel-state";
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, MapPin, Bed, Bath, Users, DollarSign, Wifi, Key, BookOpen } from "lucide-react";
+import { ArrowLeft, MapPin, Bed, Bath, Users, DollarSign, Wifi, Key, BookOpen, Landmark } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import PropertyActions from "./PropertyActions";
 
@@ -131,6 +131,19 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
             </p>
             <Link href={`/properties/${property.id}/knowledge`} className="text-sm text-indigo-600 hover:underline">
               Manage knowledge →
+            </Link>
+          </div>
+          {/* Listing & tax settings */}
+          <div className="bg-white rounded-2xl border border-slate-100 p-5">
+            <h3 className="font-semibold text-slate-900 flex items-center gap-2 mb-2">
+              <Landmark className="w-4 h-4 text-slate-500" />
+              Listing &amp; Tax Settings
+            </h3>
+            <p className="text-xs text-slate-500 mb-3">
+              City tax rate &amp; auto-charge, plus hotel policy, facilities, photos, reviews, and card payments for Channex-managed listings.
+            </p>
+            <Link href={`/properties/${property.id}/listing`} className="text-sm text-indigo-600 hover:underline">
+              Manage settings →
             </Link>
           </div>
           {/* Pricing */}
