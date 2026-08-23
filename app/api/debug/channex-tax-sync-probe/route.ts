@@ -28,6 +28,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ property: property.name, before, note: "Dry run - add &apply=true to actually PUT." });
   }
 
+  const { searchParams } = new URL(req.url);
+  const maxNightsParam = searchParams.get("maxNights");
+  const skipNightsParam = searchParams.get("skipNights");
   const updated = await upsertCityTax(channexPropertyId, before?.id ?? null, {
     title: "City tax",
     currency: property.currency,
@@ -35,8 +38,8 @@ export async function GET(req: NextRequest) {
     logic: "per_person_per_night",
     isInclusive: false,
     rate: 3.5,
-    maxNights: null,
-    skipNights: null,
+    maxNights: maxNightsParam != null ? Number(maxNightsParam) : (before?.max_nights ?? null),
+    skipNights: skipNightsParam != null ? Number(skipNightsParam) : (before?.skip_nights ?? null),
   });
   const after = await findExistingCityTax(channexPropertyId, "city_tax");
 
