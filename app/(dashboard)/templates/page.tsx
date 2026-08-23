@@ -1,21 +1,24 @@
 "use client";
 import { useState, useEffect, useRef, useCallback } from "react";
-import { MessageSquarePlus, Save, Trash2, RefreshCw, ChevronLeft, Plus, Clock, Building2, Smile, Braces, Info, Send, Languages, Copy, X } from "lucide-react";
+import { MessageSquarePlus, Save, Trash2, RefreshCw, ChevronLeft, Plus, Clock, Building2, Smile, Braces, Info, Send, Languages, Copy, X, Paperclip } from "lucide-react";
 
 interface Field { token: string; key: string; label: string; description: string; example: string; }
 interface Trigger { value: string; label: string; description: string; usesOffset: boolean; offsetDir: "before" | "after" | null; anchor: string | null; }
 interface PropertyLite { id: string; name: string; }
 interface Template {
   id: string; name: string; trigger: string; offsetDays: number; sendHour: number;
-  subject: string; body: string; active: boolean; propertyId: string | null;
+  subject: string; body: string; attachments: string[]; active: boolean; propertyId: string | null;
   property?: { id: string; name: string } | null; _count?: { sends: number };
 }
 
 const EMOJIS = ["👋","🏠","🔑","📶","🚗","🅿️","🛎️","✅","😊","🙏","🌟","⭐","📍","🕐","☀️","🧳","🛏️","🚿","☕","🍽️","📞","💬","❤️","🎉"];
 
+const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024; // matches lib/channels/channex-attachments.ts
+const MAX_ATTACHMENTS_PER_TEMPLATE = 10;
+
 const BLANK: Omit<Template, "id"> = {
   name: "", trigger: "BEFORE_CHECKIN", offsetDays: 2, sendHour: 10,
-  subject: "Message from your host", body: "", active: true, propertyId: null,
+  subject: "Message from your host", body: "", attachments: [], active: true, propertyId: null,
 };
 
 export default function TemplatesPage() {
@@ -30,7 +33,9 @@ export default function TemplatesPage() {
   const [filterProp, setFilterProp] = useState(""); // "" = all, "GLOBAL" = all-properties, or a propertyId
   const [showFields, setShowFields] = useState(false);
   const [showEmojis, setShowEmojis] = useState(false);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Real-data preview + test send
   const [reservations, setReservations] = useState<{ id: string; label: string }[]>([]);
@@ -98,6 +103,29 @@ export default function TemplatesPage() {
     setTimeout(() => setCopyMsg(""), 7000);
   }
 
+  function pickAttachments(files: FileList | File[]) {
+    setAttachmentError(null);
+    const list = Array.from(files);
+    if (form.attachments.length + list.length > MAX_ATTACHMENTS_PER_TEMPLATE) {
+      setAttachmentError(`You can attach at most ${MAX_ATTACHMENTS_PER_TEMPLATE} photos to one template.`);
+      return;
+    }
+    for (const file of list) {
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        setAttachmentError(`"${file.name}" is ${(file.size / 1024 / 1024).toFixed(1)}MB - the limit is 5MB.`);
+        continue;
+      }
+      const reader = new FileReader();
+      reader.onload = () => setForm((prev) => ({ ...prev, attachments: [...prev.attachments, reader.result as string] }));
+      reader.onerror = () => setAttachmentError(`Couldn't read "${file.name}" - try again.`);
+      reader.readAsDataURL(file);
+    }
+  }
+
+  function removeAttachment(index: number) {
+    setForm((prev) => ({ ...prev, attachments: prev.attachments.filter((_, i) => i !== index) }));
+  }
+
   async function sendGuest() {
     if (!previewResId) return;
     const resv = reservations.find((r) => r.id === previewResId);
@@ -106,7 +134,12 @@ export default function TemplatesPage() {
     setGuestMsg("");
     const res = await fetch("/api/templates/send-now", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ templateId: "id" in form ? form.id : undefined, body: form.body, reservationId: previewResId }),
+      body: JSON.stringify({
+        templateId: "id" in form ? form.id : undefined,
+        body: form.body,
+        attachments: form.attachments,
+        reservationId: previewResId,
+      }),
     });
     const data = await res.json();
     setSendingGuest(false);
@@ -317,6 +350,9 @@ export default function TemplatesPage() {
                     <span className="inline-flex items-center gap-1"><Clock className="w-3.5 h-3.5" />{timingText(t)}</span>
                     <span className="inline-flex items-center gap-1"><Building2 className="w-3.5 h-3.5" />{t.property?.name || "All properties"}</span>
                     {t._count && <span>{t._count.sends} sent</span>}
+                    {t.attachments?.length > 0 && (
+                      <span className="inline-flex items-center gap-1"><Paperclip className="w-3.5 h-3.5" />{t.attachments.length}</span>
+                    )}
                   </div>
                   <p className="text-sm text-slate-600 mt-2 line-clamp-2">{t.body}</p>
                 </button>
@@ -569,6 +605,53 @@ export default function TemplatesPage() {
               className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-y font-mono leading-relaxed"
             />
             <p className="text-xs text-slate-400 mt-2">Type <span className="font-mono text-slate-500">{"[Field]"}</span> tags or use the Insert field button. They are replaced with each guest real details when sent.</p>
+
+            {/* Photos */}
+            <div className="mt-4 pt-4 border-t border-slate-100">
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm font-medium text-slate-800">Photos</label>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files?.length) pickAttachments(e.target.files);
+                    e.target.value = "";
+                  }}
+                />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex items-center gap-1.5 text-xs border border-slate-200 text-slate-600 px-2.5 py-1.5 rounded-lg hover:border-indigo-300 hover:text-indigo-600 transition"
+                >
+                  <Paperclip className="w-3.5 h-3.5" /> Add photos
+                </button>
+              </div>
+              {form.attachments.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {form.attachments.map((dataUrl, i) => (
+                    <div key={i} className="relative shrink-0">
+                      {/* eslint-disable-next-line @next/next/no-img-element -- data: URL preview */}
+                      <img src={dataUrl} alt="" className="w-16 h-16 rounded-lg object-cover border border-slate-200" />
+                      <button
+                        onClick={() => removeAttachment(i)}
+                        className="absolute -top-1.5 -right-1.5 bg-slate-700 text-white rounded-full p-0.5 hover:bg-slate-900"
+                        title="Remove this photo"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-slate-400">No photos attached — great for a door code plus a photo of the lock, or building access instructions.</p>
+              )}
+              {attachmentError && <p className="text-xs text-rose-700 bg-rose-50 rounded-lg px-3 py-2 mt-2">{attachmentError}</p>}
+              <p className="text-[11px] text-slate-400 mt-2">
+                Sent to Booking.com/Airbnb as separate image messages right after the text — Channex only allows one photo per message. Not included in the email copy.
+              </p>
+            </div>
           </div>
 
           {/* Live preview + test */}
