@@ -431,23 +431,35 @@ export function MessageThread({
                       : "bg-slate-100 text-slate-800 rounded-tl-sm"
                   }`}
                 >
-                  {showingTranslation ? (
-                    <>
-                      <p className="whitespace-pre-wrap break-words">{msg.body}</p>
-                      <div className="flex items-center gap-2 my-2">
-                        <span className={`text-[10px] font-semibold tracking-wide uppercase whitespace-nowrap ${onDarkBubble ? "text-indigo-200" : "text-slate-400"}`}>
-                          Translated from {msg.detectedLanguage}
-                        </span>
-                        <span className={`flex-1 h-px ${onDarkBubble ? "bg-indigo-400/50" : "bg-slate-200"}`} />
-                      </div>
-                      <p className="whitespace-pre-wrap break-words">{msg.translatedBody}</p>
-                    </>
-                  ) : (
-                    <p className="whitespace-pre-wrap break-words">{msg.body}</p>
-                  )}
-                  {parseAttachments(msg.attachments).map((dataUrl, i) => (
-                    <AttachmentPreview key={i} dataUrl={dataUrl} />
-                  ))}
+                  {(() => {
+                    const attachmentUrls = parseAttachments(msg.attachments);
+                    // A photo sent with no caption stores an empty body (so the
+                    // guest-facing channel gets only the photo, not a fabricated
+                    // "Sent a photo" text bubble alongside it) - shown here only,
+                    // as a label rather than actual message content.
+                    const bodyText = msg.body || (attachmentUrls.length > 0 ? "Sent a photo" : "");
+                    return (
+                      <>
+                        {showingTranslation ? (
+                          <>
+                            <p className="whitespace-pre-wrap break-words">{bodyText}</p>
+                            <div className="flex items-center gap-2 my-2">
+                              <span className={`text-[10px] font-semibold tracking-wide uppercase whitespace-nowrap ${onDarkBubble ? "text-indigo-200" : "text-slate-400"}`}>
+                                Translated from {msg.detectedLanguage}
+                              </span>
+                              <span className={`flex-1 h-px ${onDarkBubble ? "bg-indigo-400/50" : "bg-slate-200"}`} />
+                            </div>
+                            <p className="whitespace-pre-wrap break-words">{msg.translatedBody}</p>
+                          </>
+                        ) : (
+                          <p className="whitespace-pre-wrap break-words">{bodyText}</p>
+                        )}
+                        {attachmentUrls.map((dataUrl, i) => (
+                          <AttachmentPreview key={i} dataUrl={dataUrl} />
+                        ))}
+                      </>
+                    );
+                  })()}
                 </div>
                 {canTranslate && (
                   <button

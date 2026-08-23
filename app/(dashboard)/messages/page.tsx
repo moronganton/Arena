@@ -141,7 +141,7 @@ export default async function MessagesPage({
                   <p className="text-xs text-slate-500 mt-0.5 truncate">{conv.property.name}</p>
                   {lastMsg && (
                     <p className={`text-sm truncate mt-1 ${unreadCount > 0 && lastMsg.direction === "INBOUND" ? "font-medium text-slate-800" : "text-slate-500"}`}>
-                      {lastMsg.direction === "OUTBOUND" ? "You: " : ""}{lastMsg.body}
+                      {lastMsg.direction === "OUTBOUND" ? "You: " : ""}{lastMsg.body || (lastMsg.attachments ? "Sent a photo" : "")}
                     </p>
                   )}
                   <div className="flex items-center flex-wrap gap-1.5 mt-2">

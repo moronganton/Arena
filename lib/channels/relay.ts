@@ -47,8 +47,12 @@ export async function relayMessageToChannel(
   if (!externalId) return { status: "skipped", reason: "Direct booking - no channel to relay to" };
 
   if (externalId.startsWith("smoobu-")) {
+    // Smoobu can't carry the attachment itself (see attachmentSkipped above),
+    // so an empty caption would reach the guest as nothing at all - unlike
+    // Channex, where the image itself is the message and no text is needed.
+    const textToSend = body.trim() || (attachmentDataUrl ? "Sent a photo" : body);
     try {
-      await smoobuProvider.sendGuestMessage(target.ownerId, externalId, body);
+      await smoobuProvider.sendGuestMessage(target.ownerId, externalId, textToSend);
       return { status: "sent", provider: "smoobu", attachmentSkipped: !!attachmentDataUrl };
     } catch (err) {
       return { status: "failed", provider: "smoobu", error: err instanceof Error ? err.message : String(err) };

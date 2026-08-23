@@ -67,11 +67,16 @@ export async function POST(req: NextRequest) {
   if (!messageBody?.trim() && !attachment) {
     return NextResponse.json({ error: "messageBody or attachment is required" }, { status: 400 });
   }
-  // What actually gets stored, emailed, and relayed - an attachment sent with
-  // no caption still needs some text for the thread list, notifications, and
-  // the guest's inbox preview, the same reasoning importGuestMessagesForBooking
-  // applies to an inbound photo with no message.
-  const displayBody: string = messageBody?.trim() || "Sent a photo";
+  // The real caption, which may legitimately be empty when a photo is sent
+  // with no text - Channex's own docs: message "can be empty, if attachments
+  // is present". This is what actually gets stored and relayed, so a photo
+  // sent to Booking.com/Airbnb shows only the photo, not a fabricated
+  // "Sent a photo" text bubble alongside it.
+  const captionText: string = messageBody?.trim() || "";
+  // Only for contexts that can't carry the image at all and so need some
+  // text regardless - the guest's email (the photo isn't attached to it,
+  // see below) and the property knowledge base entry.
+  const textFallback: string = captionText || "Sent a photo";
 
   const reservation = await prisma.reservation.findFirst({
     where: { id: reservationId, property: { ownerId: session!.user!.id } },
@@ -81,7 +86,7 @@ export async function POST(req: NextRequest) {
 
   const message = await prisma.message.create({
     data: {
-      body: displayBody,
+      body: captionText,
       direction: "OUTBOUND",
       channel: isInternal ? "INTERNAL" : "PLATFORM",
       reservationId,
@@ -148,7 +153,7 @@ export async function POST(req: NextRequest) {
           propertyId: reservation.propertyId,
           category: "FAQ",
           title: questionText.replace(/\s+/g, " ").trim().slice(0, 100),
-          content: displayBody,
+          content: textFallback,
         },
       });
       knowledgeSaved = true;
@@ -163,7 +168,7 @@ export async function POST(req: NextRequest) {
       guestName: reservation.guest.name,
       guestEmail: reservation.guest.email,
       propertyName: reservation.property.name,
-      messageBody: displayBody,
+      messageBody: textFallback,
       reservationId,
     });
   }
@@ -176,7 +181,7 @@ export async function POST(req: NextRequest) {
   let channelFailed = false;
   const relay = await relayMessageToChannel(
     { externalId: reservation.externalId, ownerId: session!.user!.id! },
-    displayBody,
+    captionText,
     attachment
   );
   if (relay.status === "sent") {
