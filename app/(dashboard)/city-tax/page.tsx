@@ -16,6 +16,7 @@ interface PropertyLite {
   cityTaxType: string;
   cityTaxMaxNights: number | null;
   cityTaxSkipNights: number | null;
+  cityTaxChannexId: string | null;
 }
 
 // Mirrors Channex's own "Logic" and "Type" dropdowns on the Edit tax form -
@@ -37,6 +38,10 @@ const TYPE_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "city_tax", label: "City tax" },
   { value: "fee", label: "Fee" },
 ];
+
+function logicLabel(value: string): string {
+  return LOGIC_OPTIONS.find((o) => o.value === value)?.label.toLowerCase() ?? value;
+}
 
 interface Charge {
   id: string;
@@ -253,23 +258,66 @@ function PropertySettingsPanel() {
   if (loading) return null;
   if (properties.length === 0) return null;
 
+  function editProperty(p: PropertyLite) {
+    selectProperty(p);
+    setExpanded(true);
+  }
+
   return (
     <div className="bg-white rounded-2xl border border-slate-100 p-5 mb-6">
-      <button
-        onClick={() => setExpanded((v) => !v)}
-        className="flex items-center justify-between w-full text-left"
-      >
-        <span className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-          <Settings className="w-4 h-4 text-slate-400" />
-          Rate &amp; automation settings
-        </span>
-        <span className="text-xs text-slate-400">{expanded ? "Hide" : "Show"}</span>
-      </button>
+      <span className="flex items-center gap-2 text-sm font-semibold text-slate-900 mb-3">
+        <Settings className="w-4 h-4 text-slate-400" />
+        Rate &amp; automation settings
+      </span>
 
-      {expanded && (
+      {/* Always-visible record per property, so it's never ambiguous whether
+          something is configured - saving used to just update a form with no
+          persisted view of its own, which left "did that actually stick?"
+          unanswered until you re-opened the form and checked every field. */}
+      <div className="divide-y divide-slate-50 border-y border-slate-100 -mx-1">
+        {properties.map((p) => {
+          const configured = p.cityTaxPerNight != null;
+          const needsSync = configured && p.channelProvider === "CHANNEX" && !p.cityTaxChannexId;
+          return (
+            <button
+              key={p.id}
+              onClick={() => editProperty(p)}
+              className="w-full flex items-center justify-between gap-3 px-1 py-2.5 text-left hover:bg-slate-50 transition-colors"
+            >
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-slate-900 truncate">{p.name}</p>
+                {configured ? (
+                  <p className="text-xs text-slate-500 truncate">
+                    {p.cityTaxTitle || "City tax"} — {p.cityTaxPerNight} {p.currency} ({logicLabel(p.cityTaxLogic)})
+                    {p.cityTaxMaxNights ? ` · max ${p.cityTaxMaxNights} nights` : ""}
+                  </p>
+                ) : (
+                  <p className="text-xs text-slate-400">Not set up</p>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {configured && p.cityTaxAutoChargeEnabled && (
+                  <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">Auto-charge</span>
+                )}
+                {p.channelProvider === "CHANNEX" && (
+                  configured ? (
+                    <span
+                      className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${needsSync ? "bg-amber-50 text-amber-700" : "bg-emerald-50 text-emerald-700"}`}
+                    >
+                      {needsSync ? "Not yet synced" : "Synced to Channex"}
+                    </span>
+                  ) : null
+                )}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      {expanded && selected && (
         <div className="mt-4 space-y-4">
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">Property</label>
+            <label className="block text-xs font-medium text-slate-600 mb-1">Editing</label>
             <select
               value={propertyId}
               onChange={(e) => onPick(e.target.value)}
@@ -402,6 +450,12 @@ function PropertySettingsPanel() {
             >
               {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
               Save
+            </button>
+            <button
+              onClick={() => setExpanded(false)}
+              className="text-sm font-medium text-slate-500 hover:text-slate-700 px-3 py-2 rounded-xl transition"
+            >
+              Close
             </button>
             {saved && <span className="text-emerald-600 text-sm flex items-center gap-1"><Check className="w-4 h-4" /> Saved</span>}
           </div>
