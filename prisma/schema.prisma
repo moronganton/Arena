@@ -47,6 +47,11 @@ model MessageTemplate {
   sendHour   Int      @default(10) // hour of day (0-23) to send scheduled messages
   subject    String   @default("Message from your host") // used when delivered by email
   body       String   // template text with [merge fields] and emojis
+  // JSON array of data URLs (data:<mime>;base64,...) - same convention as
+  // Message.attachments. Not the old TemplateImage table below (URL-based,
+  // deliberately unused) - this reuses the storage approach already proven
+  // live through Channex's Messages API.
+  attachments String?
   active     Boolean  @default(true)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt

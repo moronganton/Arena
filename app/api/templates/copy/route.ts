@@ -65,6 +65,7 @@ export async function POST(req: NextRequest) {
         sendHour: source.sendHour,
         subject: source.subject,
         body: source.body,
+        attachments: source.attachments,
         active: false, // review the property specifics, then switch it on
         propertyId,
       },

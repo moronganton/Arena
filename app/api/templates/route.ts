@@ -21,7 +21,15 @@ export async function GET() {
     prisma.user.findUnique({ where: { id: session.user.id }, select: { email: true } }),
   ]);
 
-  return NextResponse.json({ templates, properties, userEmail: user?.email || "" });
+  // attachments is stored as a JSON string (same convention as
+  // Message.attachments) - parsed here so the client only ever deals with a
+  // plain array, never a raw JSON blob.
+  const templatesOut = templates.map((t) => ({
+    ...t,
+    attachments: t.attachments ? (JSON.parse(t.attachments) as string[]) : [],
+  }));
+
+  return NextResponse.json({ templates: templatesOut, properties, userEmail: user?.email || "" });
 }
 
 // POST /api/templates — create a template
@@ -43,6 +51,7 @@ export async function POST(req: NextRequest) {
       sendHour: Number.isFinite(b.sendHour) ? Math.max(0, Math.min(23, Math.trunc(b.sendHour))) : 10,
       subject: b.subject?.trim() || "Message from your host",
       body: b.body,
+      attachments: Array.isArray(b.attachments) && b.attachments.length > 0 ? JSON.stringify(b.attachments) : null,
       active: b.active !== false,
       propertyId: b.propertyId || null,
     },
@@ -71,6 +80,9 @@ export async function PATCH(req: NextRequest) {
       ...(b.sendHour !== undefined ? { sendHour: Math.max(0, Math.min(23, Math.trunc(b.sendHour))) } : {}),
       ...(b.subject !== undefined ? { subject: String(b.subject).trim() || "Message from your host" } : {}),
       ...(b.body !== undefined ? { body: b.body } : {}),
+      ...(b.attachments !== undefined
+        ? { attachments: Array.isArray(b.attachments) && b.attachments.length > 0 ? JSON.stringify(b.attachments) : null }
+        : {}),
       ...(b.active !== undefined ? { active: !!b.active } : {}),
       ...(b.propertyId !== undefined ? { propertyId: b.propertyId || null } : {}),
     },

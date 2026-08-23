@@ -125,6 +125,7 @@ export async function runScheduledMessages(now: Date = new Date()): Promise<{
             channel: "PLATFORM",
             isRead: true,
             reservationId: r.id,
+            attachments: t.attachments,
           },
         });
         await deliverAiMessage(msg.id); // relays via Smoobu + emails the guest

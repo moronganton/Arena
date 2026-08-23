@@ -46,6 +46,7 @@ export async function POST(req: NextRequest) {
         sendHour: original.sendHour,
         subject: translatedSubject,
         body: translatedBody,
+        attachments: original.attachments, // photos carry over as-is, nothing to translate
         active: false, // review before this can send to a real guest
         propertyId: original.propertyId,
       },

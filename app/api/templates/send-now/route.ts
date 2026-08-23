@@ -17,6 +17,18 @@ export async function POST(req: NextRequest) {
   if (typeof body !== "string" || !body.trim()) return NextResponse.json({ error: "body required" }, { status: 400 });
   if (!reservationId) return NextResponse.json({ error: "Pick a reservation to send to the guest." }, { status: 400 });
 
+  // The template's own photos ride along on a test send too - templateId is
+  // how the caller says "this body came from template X", so its attachments
+  // are what a real automated send of the same template would carry.
+  let attachments: string | null = null;
+  if (templateId) {
+    const template = await prisma.messageTemplate.findFirst({
+      where: { id: templateId, userId: session.user.id },
+      select: { attachments: true },
+    });
+    attachments = template?.attachments ?? null;
+  }
+
   const user = await prisma.user.findUnique({ where: { id: session.user.id }, select: { name: true } });
   const reservation = await prisma.reservation.findFirst({
     where: { id: reservationId, property: { ownerId: session.user.id } },
@@ -33,7 +45,7 @@ export async function POST(req: NextRequest) {
   if (!rendered) return NextResponse.json({ error: "Message is empty after filling in the fields." }, { status: 400 });
 
   const message = await prisma.message.create({
-    data: { body: rendered, direction: "OUTBOUND", channel: "PLATFORM", isRead: true, reservationId },
+    data: { body: rendered, direction: "OUTBOUND", channel: "PLATFORM", isRead: true, reservationId, attachments },
   });
   const channelOk = await deliverAiMessage(message.id); // Smoobu relay + guest email
 

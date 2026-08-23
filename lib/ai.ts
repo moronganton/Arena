@@ -211,10 +211,19 @@ export async function deliverAiMessage(messageId: string): Promise<boolean> {
   let channelOk = true;
 
   // One shared relay for every channel - see lib/channels/relay.ts for why
-  // this must not be hand-copied per call site again.
+  // this must not be hand-copied per call site again. message.attachments
+  // covers both a host/AI reply sent with a photo and a template that
+  // carries its own images.
+  let attachments: string[] = [];
+  try {
+    attachments = message.attachments ? (JSON.parse(message.attachments) as string[]) : [];
+  } catch {
+    // left empty - a malformed stored value must not block the text send
+  }
   const relay = await relayMessageToChannel(
     { externalId: reservation.externalId, ownerId: reservation.property.ownerId },
-    message.body
+    message.body,
+    attachments
   );
   if (relay.status === "sent") {
     // Clear a prior failure flag if this (re)send finally got through
