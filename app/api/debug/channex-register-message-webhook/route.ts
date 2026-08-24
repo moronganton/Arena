@@ -19,7 +19,16 @@ import { channexGet, channexPost, channexPut, ChannexError } from "@/lib/channel
 //   GET /api/debug/channex-register-message-webhook              -> dry run
 //   GET /api/debug/channex-register-message-webhook?confirm=true  -> registers it
 //   GET /api/debug/channex-register-message-webhook?activate=true -> tries to activate the existing one
-const WEBHOOK_URL = "https://stayhq-dev.up.railway.app/api/channex/webhook";
+// Derived, not pinned. This was hardcoded to the Railway hostname, which is
+// the one place in the repo a domain change would not propagate - and it
+// would fail silently, registering a webhook against a host we no longer
+// deploy to. NEXTAUTH_URL is what resolveAppOrigin() prefers everywhere else,
+// so this now agrees with the rest of the app by construction.
+function webhookUrl(): string | null {
+  const origin = process.env.NEXTAUTH_URL?.replace(/\/$/, "");
+  if (!origin || origin.includes("localhost")) return null;
+  return `${origin}/api/channex/webhook`;
+}
 
 // "booking" was the one confirmed value for the booking event - trying its
 // obvious singular-noun counterpart first, same convention.
@@ -63,9 +72,18 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       mode: "dry run - nothing sent to Channex",
       property: listing.property.name,
+      callbackUrl: webhookUrl(),
       candidateEventMasks: EVENT_MASK_CANDIDATES,
       nextStep: "Add ?confirm=true to actually attempt registration.",
     });
+  }
+
+  const callbackUrl = webhookUrl();
+  if (!callbackUrl) {
+    return NextResponse.json(
+      { error: "NEXTAUTH_URL is unset or points at localhost - refusing to register that with Channex" },
+      { status: 400 }
+    );
   }
 
   const attempts: unknown[] = [];
@@ -75,7 +93,7 @@ export async function GET(req: NextRequest) {
     try {
       const res = await channexPost("/webhooks", {
         webhook: {
-          callback_url: WEBHOOK_URL,
+          callback_url: callbackUrl,
           is_global: false,
           property_id: listing.channexPropertyId,
           event_mask: eventMask,
