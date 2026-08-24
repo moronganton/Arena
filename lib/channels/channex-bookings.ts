@@ -20,11 +20,19 @@ import {
 //   - Each room's booking_room_id is the stable per-room-stay id, so it's
 //     used as the externalId (one Reservation = one room-stay, same as
 //     every other source in this schema).
-//   - customer only ever carries {name, surname} - no email/phone field
-//     exists in this API at all, unlike Smoobu's detail endpoint. Guests
-//     import with no contact info; deliverAiMessage already handles that
-//     gracefully (skips both the Smoobu relay and the email step when
-//     neither applies).
+//   - customer carries considerably more than a name. Confirmed against a
+//     real Airbnb revision: {name, surname, mail, phone, language, address,
+//     city, country, zip}. An earlier version of this comment claimed only
+//     {name, surname} existed - that was inferred from Booking.com test
+//     bookings whose contact fields all happened to be null, and it meant a
+//     real guest phone number arrived and was silently dropped.
+//     Note the field is `mail`, not `email`.
+//
+//     What is populated varies by OTA and this is worth knowing rather than
+//     assuming: Airbnb withholds `mail` (it relays guest email through its
+//     own addresses) but does send `phone`. Booking.com generally sends
+//     both. Everything here stays optional, and deliverAiMessage already
+//     degrades gracefully when a channel is missing.
 
 export interface ChannexBookingRoom {
   meta: {
@@ -62,7 +70,17 @@ export interface ChannexBookingAttributes {
   ota_reservation_code: string;
   ota_name: string;
   property_id: string;
-  customer?: { name?: string; surname?: string };
+  customer?: {
+    name?: string;
+    surname?: string;
+    mail?: string | null; // Channex spells it `mail`, not `email`
+    phone?: string | null;
+    language?: string | null;
+    address?: string | null;
+    city?: string | null;
+    country?: string | null;
+    zip?: string | null;
+  };
   rooms: ChannexBookingRoom[];
 }
 
@@ -288,7 +306,21 @@ export async function upsertReservationsFromBookingData(
         continue;
       }
 
-      const guest = await prisma.guest.create({ data: { name: guestName } });
+      // Blank strings are normalised to null so "has no email" is one value
+      // rather than two, and language falls back to the schema default
+      // rather than writing an empty string over it.
+      const clean = (v: string | null | undefined) => {
+        const t = v?.trim();
+        return t ? t : null;
+      };
+      const guest = await prisma.guest.create({
+        data: {
+          name: guestName,
+          email: clean(booking.customer?.mail),
+          phone: clean(booking.customer?.phone),
+          ...(clean(booking.customer?.language) ? { language: booking.customer!.language!.trim() } : {}),
+        },
+      });
       const reservation = await prisma.reservation.create({
         data: {
           externalId,
@@ -343,6 +375,25 @@ export async function upsertReservationsFromBookingData(
           currency: booking.currency || existing.currency,
         },
       });
+
+      // Contact details do not always arrive on the first revision - some
+      // OTAs only release them closer to arrival - so a later revision is a
+      // real chance to fill gaps. Deliberately only fills what is currently
+      // empty: a host who typed a guest's real number in by hand should not
+      // have it overwritten by a channel that later sends something worse.
+      const contactPatch: { email?: string; phone?: string } = {};
+      const incomingMail = booking.customer?.mail?.trim();
+      const incomingPhone = booking.customer?.phone?.trim();
+      const currentGuest = await prisma.guest.findUnique({
+        where: { id: existing.guestId },
+        select: { email: true, phone: true },
+      });
+      if (incomingMail && !currentGuest?.email) contactPatch.email = incomingMail;
+      if (incomingPhone && !currentGuest?.phone) contactPatch.phone = incomingPhone;
+      if (Object.keys(contactPatch).length > 0) {
+        await prisma.guest.update({ where: { id: existing.guestId }, data: contactPatch });
+      }
+
       reservationIds.push(existing.id);
 
       if (becameCancelled) {
