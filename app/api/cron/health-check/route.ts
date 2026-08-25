@@ -50,7 +50,7 @@ export async function GET(req: NextRequest) {
     const stale = job.status === "stale - not being called";
     const title = stale ? `${job.job} has stopped running` : `${job.job} is failing`;
     const body = stale
-      ? `Last ran ${job.minutesSinceLastRun ?? "?"} minutes ago; expected every ${job.expectedEveryMinutes}. Bookings and availability may not be syncing.`
+      ? `Last ran ${job.minutesSinceLastRun ?? "?"} minutes ago; it runs every ${job.expectedEveryMinutes}. Bookings and availability may not be syncing.`
       : `Its last run failed: ${job.lastFailure?.error?.slice(0, 140) ?? "no error recorded"}`;
 
     for (const owner of owners) {

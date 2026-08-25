@@ -14,22 +14,39 @@ import { closeStaleCronRuns } from "@/lib/cron-run";
 // reports how long ago each job last ran against how often it is expected
 // to, and calls it stale when the gap is too wide.
 
-// Intervals are deliberately generous rather than matching the pinger
-// exactly: combined with STALE_MULTIPLIER, a job firing late must read as
-// late, not as an outage.
+// What the cron pinger is actually configured to do. These were previously
+// "deliberately generous" guesses, and the generosity had a cost nobody had
+// measured: drain-ari really runs every two minutes but was declared hourly,
+// so at a x3 multiplier the watchdog would have waited THREE HOURS before
+// admitting it had stopped. That is the job whose silence causes double
+// bookings, and most of a night could pass first.
+//
+// Keep these matched to the pinger. A number here that is larger than
+// reality does not make the check safer, it makes it blind for longer.
 export const EXPECTED_INTERVAL_MINUTES: Record<string, number> = {
+  "drain-ari": 2,
+  "scheduled-messages": 2,
+  "sync-messages": 2,
   "channex-messages": 15,
-  "channex-revisions": 60,
-  "drain-ari": 60,
-  "sync-reservations": 60,
-  "sync-messages": 15,
+  "channex-revisions": 15,
+  "sync-reservations": 30,
   "channex-full-sync": 1440,
-  "scheduled-messages": 60,
 };
 
-// Allow a wide margin before calling a job stale - a pinger firing a little
-// late must not read as an outage.
+// A job late by a factor of three is late enough to mean something.
 export const STALE_MULTIPLIER = 3;
+
+// ...but not below this. A job on a two-minute schedule would otherwise be
+// declared dead after six, and free cron pingers skip a tick often enough
+// that this would page you for nothing - which is how a monitoring system
+// teaches you to ignore it. The floor buys roughly ten missed ticks on the
+// fast jobs while still catching a real outage inside twenty minutes rather
+// than three hours.
+export const MIN_STALE_MINUTES = 20;
+
+export function staleAfterMinutes(everyMinutes: number): number {
+  return Math.max(everyMinutes * STALE_MULTIPLIER, MIN_STALE_MINUTES);
+}
 
 export type JobStatus = "never run" | "stale - not being called" | "failing" | "recovered" | "healthy";
 
@@ -37,6 +54,7 @@ export interface JobHealth {
   job: string;
   status: JobStatus;
   expectedEveryMinutes: number;
+  staleAfterMinutes: number;
   lastRunAt: Date | null;
   minutesSinceLastRun: number | null;
   lastRunOk: boolean | null;
@@ -69,7 +87,7 @@ export async function collectCronHealth(): Promise<CronHealth> {
 
       let status: JobStatus;
       if (!lastRun) status = "never run";
-      else if (minutesAgo !== null && minutesAgo > everyMinutes * STALE_MULTIPLIER) status = "stale - not being called";
+      else if (minutesAgo !== null && minutesAgo > staleAfterMinutes(everyMinutes)) status = "stale - not being called";
       else if (lastRun.ok === false) status = "failing";
       else if (failuresInLast20 > 0) status = "recovered";
       else status = "healthy";
@@ -78,6 +96,7 @@ export async function collectCronHealth(): Promise<CronHealth> {
         job,
         status,
         expectedEveryMinutes: everyMinutes,
+        staleAfterMinutes: staleAfterMinutes(everyMinutes),
         lastRunAt: lastRun?.startedAt ?? null,
         minutesSinceLastRun: minutesAgo,
         lastRunOk: lastRun?.ok ?? null,
