@@ -91,6 +91,7 @@ export interface DrainSummary {
   rowsDone: number;
   rowsFailedTerminally: number;
   stoppedEarly: boolean; // hit MAX_CALLS_PER_RUN with more eligible work left
+  taskIds: string[]; // Channex task ids returned by successful calls this run
 }
 
 export async function drainAriOutbox(): Promise<DrainSummary> {
@@ -112,6 +113,7 @@ export async function drainAriOutbox(): Promise<DrainSummary> {
     rowsDone: 0,
     rowsFailedTerminally: 0,
     stoppedEarly: false,
+    taskIds: [],
   };
   if (eligible.length === 0) return summary;
 
@@ -152,8 +154,9 @@ export async function drainAriOutbox(): Promise<DrainSummary> {
       await throttle();
       summary.callsMade++;
       try {
-        await pushAriForDateRange(propertyId, range.from, range.to);
+        const taskIds = await pushAriForDateRange(propertyId, range.from, range.to);
         summary.callsSucceeded++;
+        summary.taskIds.push(...taskIds);
         await prisma.ariOutbox.updateMany({
           where: { id: { in: contributing.map((r) => r.id) } },
           data: { status: "DONE", lastError: null },
