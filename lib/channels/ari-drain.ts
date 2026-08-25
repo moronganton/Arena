@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { pushAriForDateRange } from "./channex-ari";
 import { ChannexError } from "./channex-core";
+import { notifyUserThrottled } from "@/lib/notify";
 
 // Turns queued AriOutbox rows into a small number of batched Channex calls.
 //
@@ -120,6 +121,13 @@ export async function drainAriOutbox(): Promise<DrainSummary> {
     byProperty.get(row.propertyId)!.push(row);
   }
 
+  // A row that gives up is the one failure here with a consequence outside
+  // this function: the dates it was carrying stay open on every other
+  // channel, so a night that is booked remains sellable. Collected per
+  // property rather than per row so one broken range produces one alert
+  // instead of one per contributing row.
+  const gaveUp = new Map<string, { rows: number; lastError: string }>();
+
   let lastCallAt = 0;
   const throttle = async () => {
     const wait = lastCallAt === 0 ? 0 : MIN_MS_BETWEEN_CALLS - (Date.now() - lastCallAt);
@@ -173,7 +181,11 @@ export async function drainAriOutbox(): Promise<DrainSummary> {
               nextAttemptAt: givingUp ? null : new Date(Date.now() + backoffMs(attempts)),
             },
           });
-          if (givingUp) summary.rowsFailedTerminally++;
+          if (givingUp) {
+            summary.rowsFailedTerminally++;
+            const prev = gaveUp.get(propertyId);
+            gaveUp.set(propertyId, { rows: (prev?.rows ?? 0) + 1, lastError: message });
+          }
         }
         console.error(
           `[drain-ari] property ${propertyId} range ${range.from.toISOString()}..${range.to.toISOString()} failed ` +
@@ -184,5 +196,47 @@ export async function drainAriOutbox(): Promise<DrainSummary> {
     }
   }
 
+  await alertOnGiveUp(gaveUp);
+
   return summary;
+}
+
+// Tell the owner when a property's availability push has stopped retrying.
+//
+// Everything else in this module is careful about the difference between a
+// failure worth retrying and one that is terminal; this is what makes that
+// distinction visible. A terminal failure used to be a console.error and an
+// AriOutbox.lastError column - both true, neither read by anyone - while the
+// actual effect was a booked night still on sale elsewhere.
+//
+// Best-effort throughout: a drain run that pushed real updates must not be
+// reported as failed because a notification could not be written.
+async function alertOnGiveUp(gaveUp: Map<string, { rows: number; lastError: string }>): Promise<void> {
+  if (gaveUp.size === 0) return;
+  try {
+    const properties = await prisma.property.findMany({
+      where: { id: { in: [...gaveUp.keys()] } },
+      select: { id: true, name: true, ownerId: true },
+    });
+    for (const property of properties) {
+      const failure = gaveUp.get(property.id);
+      if (!failure) continue;
+      await notifyUserThrottled(
+        property.ownerId,
+        {
+          type: "ari_failed",
+          title: `Calendar sync gave up for ${property.name}`,
+          body:
+            `${failure.rows} pending update${failure.rows === 1 ? "" : "s"} stopped retrying. ` +
+            `Those dates may still be on sale on other channels. ${failure.lastError.slice(0, 120)}`,
+          link: "/settings/channels",
+        },
+        // Long window on purpose: a broken channel connection fails on every
+        // subsequent edit, and the fix is the same one all day.
+        6 * 60
+      );
+    }
+  } catch (err) {
+    console.error("[drain-ari] failed to send give-up notification:", err);
+  }
 }

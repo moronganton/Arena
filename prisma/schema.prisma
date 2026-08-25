@@ -108,7 +108,7 @@ model MessageTemplateSend {
 // that failed to reach the guest. Optionally also delivered as a web push.
 model Notification {
   id        String   @id @default(cuid())
-  type      String   // guest_reply | ai_paused | delivery_failed | checkout | info
+  type      String   // guest_reply | ai_paused | delivery_failed | checkout | mapping_issue | ari_failed | cron_stale | app_error | info
   title     String
   body      String
   link      String? // in-app path to open when tapped, e.g. /messages?reservationId=...

@@ -27,6 +27,15 @@ export type NotificationType =
   | "delivery_failed"
   | "checkout"
   | "mapping_issue"
+  // Operational alerts. These three exist so a failure the app already
+  // records reaches the phone instead of only a database column or a log
+  // line: an ARI push that gave up (nights left sellable that should not
+  // be), a scheduled job that stopped being called, and an unhandled
+  // exception. Before these, the most dangerous failure in the system -
+  // terminal ARI failure - was a console.error and nothing more.
+  | "ari_failed"
+  | "cron_stale"
+  | "app_error"
   | "info";
 
 interface NotifyInput {
@@ -92,4 +101,36 @@ export async function notifyUser(userId: string, input: NotifyInput): Promise<vo
       }
     })
   );
+}
+
+// notifyUser, but at most once per window for the same alert.
+//
+// Operational faults repeat: a job that stopped being called is still
+// stopped fifteen minutes later, and a property whose channel credentials
+// broke fails on every subsequent edit. Sending an identical push every
+// cycle trains you to swipe the alert away, which costs more than the alert
+// was worth. Identity is (type, title) - titles here carry the property or
+// job name, so two different broken properties still both get through.
+//
+// Returns whether it actually notified, so callers can log the difference
+// between "no fault" and "fault, already told you".
+export async function notifyUserThrottled(
+  userId: string,
+  input: NotifyInput,
+  windowMinutes: number
+): Promise<boolean> {
+  try {
+    const since = new Date(Date.now() - windowMinutes * 60_000);
+    const recent = await prisma.notification.findFirst({
+      where: { userId, type: input.type, title: input.title, createdAt: { gte: since } },
+      select: { id: true },
+    });
+    if (recent) return false;
+  } catch (err) {
+    // A failure to check must not swallow the alert - better a duplicate
+    // notification than a silent one.
+    console.error("[notify] throttle check failed, sending anyway:", err);
+  }
+  await notifyUser(userId, input);
+  return true;
 }
