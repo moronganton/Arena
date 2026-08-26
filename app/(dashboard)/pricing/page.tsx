@@ -21,6 +21,7 @@ interface PricingRule {
   endDate?: string;
   daysOfWeek?: string;
   minNights?: number;
+  priority: number;
   active: boolean;
   property: { id: string; name: string; currency: string };
 }
@@ -58,6 +59,10 @@ export default function PricingPage() {
     adjustment: "",
     adjType: "PERCENT",
     minNights: "1",
+    // Ties are resolved newest-first, so leaving this at 0 is workable for a
+    // handful of rules and stops being workable the moment two of them overlap
+    // and you care which wins.
+    priority: "0",
     daysOfWeek: [] as number[],
     active: true,
   };
@@ -109,6 +114,7 @@ export default function PricingPage() {
       adjustment: rule.adjustment != null ? String(rule.adjustment) : "",
       adjType: rule.adjType || "PERCENT",
       minNights: String(rule.minNights || 1),
+      priority: String(rule.priority ?? 0),
       daysOfWeek: rule.daysOfWeek ? (JSON.parse(rule.daysOfWeek) as number[]) : [],
       active: rule.active,
     });
@@ -124,6 +130,7 @@ export default function PricingPage() {
       price: form.price ? Number(form.price) : undefined,
       adjustment: form.adjustment ? Number(form.adjustment) : undefined,
       minNights: Number(form.minNights),
+      priority: Number(form.priority),
       daysOfWeek: form.daysOfWeek.length > 0 ? form.daysOfWeek : undefined,
     };
     if (editingId) body.id = editingId;
@@ -355,6 +362,20 @@ export default function PricingPage() {
                 className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 min="1"
               />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Priority</label>
+              <input
+                type="number"
+                value={form.priority}
+                onChange={(e) => setForm({ ...form, priority: e.target.value })}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                min="0"
+              />
+              <p className="text-xs text-slate-500 mt-1">
+                Higher wins where rules overlap. Seeded seasons use 10, weekend uplifts 20, and a
+                manual calendar override is 50 — so a rule above 50 beats everything.
+              </p>
             </div>
           </div>
           {saveError && (

@@ -20,6 +20,8 @@ export interface PricingRuleLike {
   minNights: number | null;
   priority: number;
   active: boolean;
+  // Only ever read to break a priority tie - see resolvePrice.
+  createdAt: Date;
 }
 
 export interface CalendarBlockLike {
@@ -84,9 +86,22 @@ function isOccupied(date: Date, stays: StayLike[]): boolean {
 // one (e.g. a season) that also matches the same date - the same "more
 // specific beats more general, expressed via an explicit priority number"
 // pattern the priority field already implies elsewhere in this codebase.
+//
+// Ties are broken by creation time, newest last, and that tie-break is not a
+// detail: the Pricing form has no priority field, so EVERY rule created
+// through the UI carries the default of 0 and ties with every other one.
+// Array.prototype.sort is stable, so before this the winner was whatever order
+// the rows arrived in - and the query that loads them has no ORDER BY, which
+// means Postgres was free to return them differently after an update or a
+// vacuum. Two overlapping rules could quietly swap which one set the price.
+//
+// Newest-wins is the intuitive reading of "I just made this rule": the one you
+// added last takes precedence over the one it overlaps.
 function resolvePrice(basePrice: number, applicable: PricingRuleLike[]): number {
   let price = basePrice;
-  const sorted = [...applicable].sort((a, b) => a.priority - b.priority);
+  const sorted = [...applicable].sort(
+    (a, b) => a.priority - b.priority || a.createdAt.getTime() - b.createdAt.getTime()
+  );
   for (const rule of sorted) {
     if (rule.price != null) {
       price = rule.price;

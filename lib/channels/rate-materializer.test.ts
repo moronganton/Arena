@@ -21,9 +21,13 @@ function rule(over: Partial<PricingRuleLike> = {}): PricingRuleLike {
     minNights: null,
     priority: 0,
     active: true,
+    // Distinct by default so a test that does not care about the tie-break
+    // does not accidentally depend on one.
+    createdAt: new Date(`2026-01-0${(seq = (seq % 9) + 1)}T00:00:00.000Z`),
     ...over,
   };
 }
+let seq = 0;
 
 const priceOn = (days: ReturnType<typeof materializeRates>, iso: string) =>
   days.find((x) => x.date === iso)!.price;
@@ -59,6 +63,31 @@ describe("ruleAppliesOn", () => {
 
   test("malformed daysOfWeek JSON does not restrict", () => {
     assert.equal(ruleAppliesOn(rule({ daysOfWeek: "not json" }), TUE), true);
+  });
+});
+
+describe("priority ties", () => {
+  // Every rule created through the Pricing form carries priority 0, because
+  // the form has no priority field. So ties are not an edge case here, they
+  // are the normal state of any two rules a user makes.
+  //
+  // Before this, the winner was decided by the order the rows happened to
+  // arrive in, from a query with no ORDER BY.
+  const older = rule({ price: 90, priority: 0, createdAt: new Date("2026-01-01T00:00:00Z") });
+  const newer = rule({ price: 250, priority: 0, createdAt: new Date("2026-06-01T00:00:00Z") });
+
+  test("the newer rule wins regardless of the order it is passed in", () => {
+    const a = materializeRates(100, [older, newer], [], TUE, NEXT_TUE)[0].price;
+    const b = materializeRates(100, [newer, older], [], TUE, NEXT_TUE)[0].price;
+    assert.equal(a, 250);
+    assert.equal(b, 250, "reversing the input must not change the answer");
+  });
+
+  test("priority still outranks creation time", () => {
+    const oldButHigher = rule({ price: 90, priority: 10, createdAt: new Date("2026-01-01T00:00:00Z") });
+    const newButLower = rule({ price: 250, priority: 0, createdAt: new Date("2026-06-01T00:00:00Z") });
+    const days = materializeRates(100, [newButLower, oldButHigher], [], TUE, NEXT_TUE);
+    assert.equal(days[0].price, 90, "priority 10 is applied last and wins");
   });
 });
 

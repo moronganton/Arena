@@ -39,7 +39,13 @@ export async function buildAriValues(
   const [listing, property, rules, blocks, stays] = await Promise.all([
     prisma.channexListing.findUnique({ where: { propertyId } }),
     prisma.property.findUniqueOrThrow({ where: { id: propertyId }, select: { basePrice: true } }),
-    prisma.pricingRule.findMany({ where: { propertyId, active: true } }),
+    // Ordered even though resolvePrice now sorts for itself: an unordered
+    // read of the rules that decide prices is the kind of thing that looks
+    // harmless until it isn't.
+    prisma.pricingRule.findMany({
+      where: { propertyId, active: true },
+      orderBy: [{ priority: "asc" }, { createdAt: "asc" }],
+    }),
     prisma.calendarBlock.findMany({ where: { propertyId } }),
     // Nights already sold. Cancelled stays are excluded, which is exactly what
     // frees those nights again the moment a guest cancels - no separate
