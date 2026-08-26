@@ -112,6 +112,16 @@ async function apply(prisma: PrismaClient, plan: Plan): Promise<void> {
     await prisma.recurringExpense.deleteMany({ where: { propertyId: { in: propertyIds } } });
     await prisma.perReservationCost.deleteMany({ where: { propertyId: { in: propertyIds } } });
     await prisma.expense.deleteMany({ where: { propertyId: { in: propertyIds } } });
+    // Both of these reference Property and were missing from an earlier version
+    // of this list, which would have failed on a foreign key violation at the
+    // Property delete below rather than doing anything dangerous - but failed
+    // halfway, leaving the reservations gone and the property still there.
+    await prisma.channelConfig.deleteMany({ where: { propertyId: { in: propertyIds } } });
+    await prisma.cleaningChecklistItem.deleteMany({ where: { propertyId: { in: propertyIds } } });
+    // MessageTemplate is ON DELETE CASCADE, so it would go by itself - deleted
+    // explicitly so this list reads as the complete set of what references a
+    // Property, rather than leaving a reader to check the schema for omissions.
+    await prisma.messageTemplate.deleteMany({ where: { propertyId: { in: propertyIds } } });
     await prisma.property.deleteMany({ where: { id: { in: propertyIds } } });
   }
 
