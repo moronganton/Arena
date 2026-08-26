@@ -1,11 +1,13 @@
 import { prisma } from "@/lib/prisma";
-import { channexPost, channexDelete, channexBaseUrl, ChannexError } from "@/lib/channels/channex-core";
+import { channexGet, channexPost, channexPut, channexDelete, channexBaseUrl, ChannexError } from "@/lib/channels/channex-core";
 import { enqueueAriUpdate, defaultHorizon } from "@/lib/channels/ari-outbox";
 import {
   DEFAULT_RATE_PLAN_SET,
   buildDerivedRatePlanPayload,
   buildParentRatePlanPayload,
+  findTitleCollisions,
   isParent,
+  retiredTitle,
   validateRatePlanSet,
   type RatePlanPayloadContext,
   type RatePlanSpec,
@@ -70,6 +72,36 @@ export interface ProvisionRatePlansOptions {
   specs?: RatePlanSpec[];
   /** Nothing is written to Channex or the database unless this is true. */
   apply: boolean;
+  /**
+   * Rename the plan being replaced so its title stops colliding with the
+   * family taking over. Off by default: renaming a plan that is currently
+   * selling is a real change to a live listing, and it should be asked for.
+   */
+  retireExisting?: boolean;
+}
+
+interface ChannexRatePlanRow {
+  id: string;
+  attributes?: { title?: string };
+  relationships?: { property?: { data?: { id?: string } } };
+}
+
+// Titles already on this property. Read rather than assumed, because the
+// collision this prevents is raised by Channex at create time and would
+// otherwise be discovered halfway through building a family.
+async function fetchExistingTitles(
+  channexPropertyId: string
+): Promise<{ titles: string[]; byTitle: Map<string, string> }> {
+  const res = await channexGet<ChannexRatePlanRow[]>("/rate_plans");
+  const rows = (res.data ?? []).filter(
+    (r) => r.relationships?.property?.data?.id === channexPropertyId
+  );
+  const byTitle = new Map<string, string>();
+  for (const r of rows) {
+    const t = r.attributes?.title;
+    if (t) byTitle.set(t.trim().toLowerCase(), r.id);
+  }
+  return { titles: [...byTitle.keys()], byTitle };
 }
 
 export async function provisionRatePlanSet(
@@ -116,6 +148,56 @@ export async function provisionRatePlanSet(
       });
     }
     return result;
+  }
+
+  // --- 0. title collisions ---
+  // Channex raises "Duplication in Rate Plan title is not allowed!" as a 422 at
+  // create time. Checked before anything is written, because a collision hit on
+  // the third child leaves a half-built family behind, where one found here
+  // leaves nothing at all.
+  const existing = await fetchExistingTitles(opts.channexPropertyId);
+  const collisions = findTitleCollisions(specs, existing.titles);
+
+  if (collisions.length > 0 && !opts.retireExisting) {
+    result.problems.push(
+      `these titles already exist on the property: ${collisions.join(", ")}. ` +
+        `Channex does not allow duplicates. Pass retireExisting to rename the plan being ` +
+        `replaced out of the way first, or choose different titles.`
+    );
+    return result;
+  }
+
+  if (collisions.length > 0) {
+    for (const title of collisions) {
+      const id = existing.byTitle.get(title.trim().toLowerCase());
+      if (!id) continue;
+      // Only ever rename the plan this run is replacing. Renaming some other
+      // colliding plan would be silently editing something nobody asked about.
+      if (id !== opts.currentChannexRatePlanId) {
+        result.problems.push(
+          `"${title}" collides with rate plan ${id}, which is not the one being replaced ` +
+            `(${opts.currentChannexRatePlanId}). Refusing to rename a plan this run does not own.`
+        );
+        return result;
+      }
+      const newTitle = retiredTitle(title, id);
+      const payload = { rate_plan: { title: newTitle } };
+      try {
+        await channexPut(`/rate_plans/${id}`, payload);
+        result.steps.push({
+          step: `retire existing "${title}" -> "${newTitle}"`,
+          path: `/rate_plans/${id}`, payload, status: "ok",
+        });
+      } catch (err) {
+        const e = err as ChannexError;
+        result.steps.push({
+          step: `retire existing "${title}"`, path: `/rate_plans/${id}`, payload, status: "failed",
+          error: { message: e.message, status: e.status, code: e.code, details: e.details },
+        });
+        // Still nothing created - the old plan keeps its name and keeps selling.
+        return result;
+      }
+    }
   }
 
   // --- 1. parent ---

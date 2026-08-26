@@ -25,6 +25,8 @@ import { DEFAULT_RATE_PLAN_SET } from "@/lib/channels/rate-plan-spec";
 const provisionSchema = z.object({
   propertyId: z.string().min(1),
   apply: z.boolean().default(false),
+  // Rename a colliding plan being replaced out of the way first.
+  retireExisting: z.boolean().default(false),
   // Removing a plan the family replaced. Refused if it is the one currently
   // being pushed into - see deleteRatePlan.
   deleteRatePlanId: z.string().min(1).optional(),
@@ -61,7 +63,7 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid body", details: parsed.error.flatten() }, { status: 400 });
   }
-  const { propertyId, apply, deleteRatePlanId } = parsed.data;
+  const { propertyId, apply, retireExisting, deleteRatePlanId } = parsed.data;
 
   const guard = await requireChannexProperty(propertyId, session.user.id);
   if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: guard.status });
@@ -89,14 +91,21 @@ export async function POST(req: NextRequest) {
     occupancy: property.maxGuests,
     currentChannexRatePlanId: guard.channexRatePlanId,
     apply,
+    retireExisting,
   });
 
   if (result.problems.length > 0) {
     return NextResponse.json({ status: "rejected", problems: result.problems }, { status: 400 });
   }
 
+  const status = result.applied
+    ? "created"
+    : apply
+      ? "FAILED - see steps"
+      : "dry run - nothing was created on Channex";
+
   return NextResponse.json({
-    status: result.applied ? "created" : "dry run - nothing was created on Channex",
+    status,
     ...result,
     nextStep: result.applied
       ? `Confirm prices land on ${result.parentChannexRatePlanId} after the next drain-ari cycle, then POST { deleteRatePlanId: "${result.previousParentChannexRatePlanId}" } to remove the old plan.`

@@ -2,6 +2,8 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
   DEFAULT_RATE_PLAN_SET,
+  findTitleCollisions,
+  retiredTitle,
   buildDerivedRatePlanPayload,
   buildParentRatePlanPayload,
   derivedRateOption,
@@ -170,5 +172,53 @@ describe("buildDerivedRatePlanPayload", () => {
 
   test("refuses to build a derived payload for a parent spec", () => {
     assert.throws(() => buildDerivedRatePlanPayload(DEFAULT_RATE_PLAN_SET[0], "parent-id", CTX));
+  });
+});
+
+describe("findTitleCollisions", () => {
+  // The 422 this exists to prevent: every property's first rate plan is called
+  // "Standard Rate" (see /api/channex/provision), and the default family's
+  // parent carries that same name, so a first provisioning always collides.
+  test("catches the Standard Rate collision the default set always hits", () => {
+    assert.deepEqual(findTitleCollisions(DEFAULT_RATE_PLAN_SET, ["Standard Rate"]), ["Standard Rate"]);
+  });
+
+  test("no collision against unrelated titles", () => {
+    assert.deepEqual(findTitleCollisions(DEFAULT_RATE_PLAN_SET, ["Corporate Rate", "Long Stay"]), []);
+  });
+
+  test("comparison ignores case and surrounding space", () => {
+    assert.deepEqual(findTitleCollisions(DEFAULT_RATE_PLAN_SET, ["  standard RATE "]), ["Standard Rate"]);
+  });
+
+  test("reports every colliding title, not just the first", () => {
+    const found = findTitleCollisions(DEFAULT_RATE_PLAN_SET, ["Standard Rate", "Weekly Rate"]);
+    assert.deepEqual(found, ["Standard Rate", "Weekly Rate"]);
+  });
+
+  test("nothing existing means nothing collides", () => {
+    assert.deepEqual(findTitleCollisions(DEFAULT_RATE_PLAN_SET, []), []);
+  });
+});
+
+describe("retiredTitle", () => {
+  test("suffixes with the plan's own id, not a timestamp", () => {
+    assert.equal(
+      retiredTitle("Standard Rate", "4c7127bc-41f6-4eea-a575-4e9829f39fdb"),
+      "Standard Rate (retired 4c7127bc)"
+    );
+  });
+
+  // Re-running a failed provisioning must not produce
+  // "Standard Rate (retired 4c7127bc) (retired 4c7127bc)".
+  test("is idempotent - retiring an already-retired title changes nothing", () => {
+    const once = retiredTitle("Standard Rate", "4c7127bc-41f6-4eea-a575-4e9829f39fdb");
+    assert.equal(retiredTitle(once, "4c7127bc-41f6-4eea-a575-4e9829f39fdb"), once);
+  });
+
+  test("two different plans retire to two different titles", () => {
+    const a = retiredTitle("Standard Rate", "aaaaaaaa-1111-2222-3333-444444444444");
+    const b = retiredTitle("Standard Rate", "bbbbbbbb-1111-2222-3333-444444444444");
+    assert.notEqual(a, b);
   });
 });

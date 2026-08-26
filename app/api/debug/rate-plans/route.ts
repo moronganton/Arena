@@ -28,6 +28,7 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const apply = searchParams.get("apply") === "true";
+  const retireExisting = searchParams.get("retireExisting") === "true";
   const deleteRatePlanId = searchParams.get("deleteRatePlanId");
 
   let propertyId = searchParams.get("propertyId");
@@ -74,14 +75,24 @@ export async function GET(req: NextRequest) {
     occupancy: property.maxGuests,
     currentChannexRatePlanId: guard.channexRatePlanId,
     apply,
+    retireExisting,
   });
 
   if (result.problems.length > 0) {
     return NextResponse.json({ status: "rejected", problems: result.problems }, { status: 400 });
   }
 
+  // Three outcomes, not two. Reporting a FAILED apply as "dry run - nothing
+  // was created" reads as "you only previewed it" when what actually happened
+  // is a write that was rejected - and on a partial failure some plans exist.
+  const status = result.applied
+    ? "created"
+    : apply
+      ? "FAILED - see steps"
+      : "dry run - nothing was created on Channex";
+
   return NextResponse.json({
-    status: result.applied ? "created" : "dry run - nothing was created on Channex",
+    status,
     ...result,
     nextStep: result.applied
       ? `Confirm prices land on ${result.parentChannexRatePlanId} after the next drain-ari cycle, then call with ?deleteRatePlanId=${result.previousParentChannexRatePlanId} to remove the old plan.`

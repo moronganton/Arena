@@ -56,6 +56,31 @@ export function validateRatePlanSet(specs: RatePlanSpec[]): string[] {
   return problems;
 }
 
+// Channex rejects a rate plan whose title already exists on the property -
+// "Duplication in Rate Plan title is not allowed!", a 422 raised at create
+// time. Since the first plan a property ever gets is called "Standard Rate"
+// (see /api/channex/provision), provisioning a family whose parent carries
+// that same name collides with it every time.
+//
+// Detected up front rather than discovered mid-run: a collision on the third
+// child would leave a half-built family behind, where a collision found before
+// the first call leaves nothing at all.
+export function findTitleCollisions(specs: RatePlanSpec[], existingTitles: string[]): string[] {
+  const existing = new Set(existingTitles.map((t) => t.trim().toLowerCase()));
+  return specs.filter((s) => existing.has(s.title.trim().toLowerCase())).map((s) => s.title);
+}
+
+// What a plan being replaced is renamed to, so its title stops colliding with
+// the family taking over. Suffixed with the plan's own id rather than a
+// timestamp so running this twice is idempotent instead of stacking
+// "(retired) (retired)".
+export function retiredTitle(currentTitle: string, channexRatePlanId: string): string {
+  const short = channexRatePlanId.slice(0, 8);
+  return currentTitle.includes(`(retired ${short})`)
+    ? currentTitle
+    : `${currentTitle} (retired ${short})`;
+}
+
 // Channex expresses a modifier as a direction plus a positive magnitude, not as
 // a signed number. -15 becomes ["decrease_by_percent", "15.00"].
 export function derivedRateOption(percent: number): [string, string][] {
