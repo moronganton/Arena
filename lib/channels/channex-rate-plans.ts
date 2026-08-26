@@ -56,7 +56,15 @@ export interface ProvisionRatePlansResult {
   previousParentChannexRatePlanId: string;
   created: { title: string; channexRatePlanId: string; derivedPercent: number | null; minStayArrival: number }[];
   steps: RatePlanStep[];
+  /** Blockers. A non-empty list means nothing was attempted. */
   problems: string[];
+  /**
+   * Things a dry run wants to say without refusing to show its plan. A
+   * collision is a blocker on apply and a warning on a preview - reporting it
+   * as a blocker would return an error instead of the very plan you asked to
+   * see.
+   */
+  warnings: string[];
 }
 
 export interface ProvisionRatePlansOptions {
@@ -124,15 +132,46 @@ export async function provisionRatePlanSet(
     created: [],
     steps: [],
     problems: validateRatePlanSet(specs),
+    warnings: [],
   };
   if (result.problems.length > 0) return result;
 
   const parentSpec = specs.find(isParent)!;
   const derivedSpecs = specs.filter((s) => !isParent(s));
 
+  // --- 0. title collisions ---
+  // Channex raises "Duplication in Rate Plan title is not allowed!" as a 422 at
+  // create time. Checked before anything is written, because a collision hit on
+  // the third child leaves a half-built family behind, where one found here
+  // leaves nothing at all.
+  //
+  // Deliberately ahead of the dry-run branch. An earlier version checked only
+  // on apply, so a dry run reported a clean plan and the apply that followed
+  // failed on the first call - which is the opposite of what a dry run is for.
+  // It costs one GET to tell the truth instead.
+  const existing = await fetchExistingTitles(opts.channexPropertyId);
+  const collisions = findTitleCollisions(specs, existing.titles);
+  const retireSteps: RatePlanStep[] = collisions.map((title) => {
+    const id = existing.byTitle.get(title.trim().toLowerCase()) ?? "(unknown)";
+    return {
+      step: `retire existing "${title}" -> "${retiredTitle(title, id)}"`,
+      path: `/rate_plans/${id}`,
+      payload: { rate_plan: { title: retiredTitle(title, id) } },
+      status: "planned" as const,
+    };
+  });
+
   // Dry run: show exactly what would be sent, with the parent id left as a
   // placeholder since it does not exist yet.
   if (!opts.apply) {
+    if (collisions.length > 0) {
+      result.warnings.push(
+        `these titles already exist on the property: ${collisions.join(", ")}. ` +
+          `Channex does not allow duplicates, so applying as-is would fail on the first call. ` +
+          `Pass retireExisting to rename the plan being replaced out of the way first.`
+      );
+      result.steps.push(...retireSteps);
+    }
     result.steps.push({
       step: `create parent "${parentSpec.title}"`,
       path: "/rate_plans",
@@ -149,14 +188,6 @@ export async function provisionRatePlanSet(
     }
     return result;
   }
-
-  // --- 0. title collisions ---
-  // Channex raises "Duplication in Rate Plan title is not allowed!" as a 422 at
-  // create time. Checked before anything is written, because a collision hit on
-  // the third child leaves a half-built family behind, where one found here
-  // leaves nothing at all.
-  const existing = await fetchExistingTitles(opts.channexPropertyId);
-  const collisions = findTitleCollisions(specs, existing.titles);
 
   if (collisions.length > 0 && !opts.retireExisting) {
     result.problems.push(
