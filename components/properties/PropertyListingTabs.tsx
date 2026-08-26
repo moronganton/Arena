@@ -1,8 +1,9 @@
 "use client";
 import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { Landmark, ClipboardList, Sparkles, Images, Star, CreditCard } from "lucide-react";
+import { Landmark, ClipboardList, Sparkles, Images, Star, CreditCard, Layers } from "lucide-react";
 import CityTaxSettingsPanel from "@/components/properties/CityTaxSettingsPanel";
+import RatePlansPanel from "@/components/properties/RatePlansPanel";
 import {
   HotelPolicyPanel,
   FacilitiesPanel,
@@ -16,6 +17,9 @@ import {
 // that works for every property regardless of channel manager, so it's
 // always shown first, ahead of this list.
 const CHANNEX_TABS = [
+  // First of the Channex tabs: what the listing actually sells is the thing
+  // you check before anything about how it is described.
+  { id: "rateplans", label: "Rate plans", icon: Layers },
   { id: "policy", label: "Hotel Policy", icon: ClipboardList },
   { id: "facilities", label: "Facilities", icon: Sparkles },
   { id: "photos", label: "Photos", icon: Images },
@@ -97,6 +101,7 @@ export default function PropertyListingTabs({ propertyId, isChannex }: { propert
       )}
 
       {tab === "taxes" && <CityTaxSettingsPanel propertyId={propertyId} />}
+      {isChannex && tab === "rateplans" && <RatePlansPanel propertyId={propertyId} />}
       {isChannex && tab === "policy" && <HotelPolicyPanel propertyId={propertyId} />}
       {isChannex && tab === "facilities" && <FacilitiesPanel propertyId={propertyId} />}
       {isChannex && tab === "photos" && <PhotosPanel propertyId={propertyId} />}
