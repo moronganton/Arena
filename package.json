@@ -12,6 +12,7 @@
     "db:studio": "prisma studio",
     "db:seed": "tsx prisma/seed.ts",
     "db:census": "tsx scripts/db-census.ts",
+    "db:staging-scrub": "tsx scripts/staging-scrub.ts",
     "cron:drain-ari": "tsx scripts/cron/drain-ari.ts",
     "cron:channex-full-sync": "tsx scripts/cron/channex-full-sync.ts",
     "cron:channex-revisions": "tsx scripts/cron/channex-revisions.ts",
