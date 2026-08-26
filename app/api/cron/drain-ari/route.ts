@@ -43,6 +43,7 @@ export async function GET(req: NextRequest) {
       rowsDone: summary.rowsDone,
       rowsFailedTerminally: summary.rowsFailedTerminally,
       stoppedEarly: summary.stoppedEarly,
+      taskIds: summary.taskIds,
     };
   });
 }

@@ -23,6 +23,7 @@ async function main() {
       rowsDone: s.rowsDone,
       rowsFailedTerminally: s.rowsFailedTerminally,
       stoppedEarly: s.stoppedEarly,
+      taskIds: s.taskIds,
     };
   });
   console.log(`[cron/drain-ari] ${JSON.stringify(summary)}`);
