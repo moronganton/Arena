@@ -81,6 +81,17 @@ export function retiredTitle(currentTitle: string, channexRatePlanId: string): s
     : `${currentTitle} (retired ${short})`;
 }
 
+// What a derived plan quotes when the parent quotes parentPrice.
+//
+// Channex computes this itself - nothing here is pushed - so this exists only
+// to SHOW the operator what their one price becomes across the family. Rounded
+// to cents the same way resolvePrice rounds, so the preview and the real number
+// agree.
+export function derivedPriceFor(parentPrice: number, percent: number | null): number {
+  if (percent === null) return Math.round(parentPrice * 100) / 100;
+  return Math.round(parentPrice * (1 + percent / 100) * 100) / 100;
+}
+
 // Channex expresses a modifier as a direction plus a positive magnitude, not as
 // a signed number. -15 becomes ["decrease_by_percent", "15.00"].
 export function derivedRateOption(percent: number): [string, string][] {
