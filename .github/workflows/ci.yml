@@ -29,5 +29,12 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # Pure-function tests only - no database, no network, no fixtures. These
+      # cover the paths where a silent failure is expensive: what price and
+      # minimum stay a night resolves to, whether a booked night can still be
+      # reported as sellable, and which listing an incoming booking belongs to.
+      - name: Test
+        run: npm test
+
       - name: Build
         run: npm run build

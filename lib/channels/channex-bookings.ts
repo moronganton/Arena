@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { channexGet } from "@/lib/channels/channex-core";
+import { findListingForRoomType } from "@/lib/channels/listing-match";
 import { notifyUser } from "@/lib/notify";
 import {
   autoGenerateCodesForReservation,
@@ -244,12 +245,20 @@ export async function upsertReservationsFromBookingData(
       }
       continue;
     }
-    const listing = listings.find(
-      (l) => l.channexRoomTypeId === room.room_type_id && l.channexRatePlanId === room.rate_plan_id
-    );
+    const listing = findListingForRoomType(listings, room.room_type_id);
     if (!listing) {
-      skipped.push(`room ${room.booking_room_id}: no ChannexListing for that room/rate pair`);
+      skipped.push(`room ${room.booking_room_id}: no ChannexListing for room type ${room.room_type_id}`);
       continue;
+    }
+    // Not a problem - this is exactly what a derived rate plan looks like on
+    // the way in - but worth seeing in the log the first time it happens, so
+    // "a plan we did not provision is selling" is observable rather than
+    // inferred from a revenue figure that looks wrong.
+    if (room.rate_plan_id !== listing.channexRatePlanId) {
+      console.log(
+        `[channex-bookings] booking ${booking.booking_id} room ${room.booking_room_id} arrived on rate plan ` +
+          `${room.rate_plan_id} (listing's own is ${listing.channexRatePlanId}) - treating as the same unit`
+      );
     }
     // Same exclusivity gate AriOutbox uses - a property only goes live on
     // the Channex side once explicitly migrated (see migrate-to-channex),
