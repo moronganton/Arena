@@ -1,4 +1,4 @@
-import { auth } from "@/lib/auth";
+import { requireSession } from "@/lib/require-session";
 import { prisma } from "@/lib/prisma";
 import { formatCurrency, formatShortDate, SOURCE_COLORS, SOURCE_LABELS } from "@/lib/utils";
 import Link from "next/link";
@@ -148,15 +148,15 @@ function dashTime(d: Date): { date: string; time: string } {
 }
 
 export default async function DashboardPage() {
-  const session = await auth();
-  const d = await getDashboardData(session!.user.id);
+  const session = await requireSession();
+  const d = await getDashboardData(session.user.id);
   // Read the identity from the database, not from session.user: the JWT holds
   // whatever was true at sign-in (updateAge is 24h), so a name changed in
   // Settings would otherwise keep showing the old one for up to a day. Falls
   // back to the email so the greeting always names the account that is actually
   // signed in, never a stale or seeded placeholder.
   const account = await prisma.user.findUnique({
-    where: { id: session!.user.id },
+    where: { id: session.user.id },
     select: { name: true, email: true },
   });
   const greetingName = account?.name?.trim() || account?.email || "";

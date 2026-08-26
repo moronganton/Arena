@@ -1,4 +1,4 @@
-import { auth } from "@/lib/auth";
+import { requireSession } from "@/lib/require-session";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import { MessageSquare, Bot, AlertTriangle } from "lucide-react";
@@ -11,7 +11,7 @@ export default async function MessagesPage({
 }: {
   searchParams: Promise<{ propertyId?: string; source?: string; unread?: string; needsReply?: string }>;
 }) {
-  const session = await auth();
+  const session = await requireSession();
   const params = await searchParams;
   const unreadOnly = params.unread === "1";
   const needsReplyOnly = params.needsReply === "1";
@@ -20,7 +20,7 @@ export default async function MessagesPage({
   const [conversations, properties] = await Promise.all([
     prisma.reservation.findMany({
       where: {
-        property: { ownerId: session!.user.id },
+        property: { ownerId: session.user.id },
         ...(params.propertyId ? { propertyId: params.propertyId } : {}),
         ...(params.source ? { source: params.source } : {}),
         // "some: {}" (any message at all) is the default; unread-only tightens
@@ -46,7 +46,7 @@ export default async function MessagesPage({
       orderBy: { updatedAt: "desc" },
     }),
     prisma.property.findMany({
-      where: { ownerId: session!.user.id },
+      where: { ownerId: session.user.id },
       select: { id: true, name: true },
       orderBy: { name: "asc" },
     }),
@@ -66,7 +66,7 @@ export default async function MessagesPage({
     where: {
       needsHostReply: true,
       direction: "INBOUND",
-      reservation: { property: { ownerId: session!.user.id } },
+      reservation: { property: { ownerId: session.user.id } },
     },
     select: { reservationId: true },
   });

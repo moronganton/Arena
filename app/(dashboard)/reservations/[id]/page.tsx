@@ -1,4 +1,4 @@
-import { auth } from "@/lib/auth";
+import { requireSession } from "@/lib/require-session";
 import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
 import { formatDate, formatCurrency, SOURCE_COLORS, SOURCE_LABELS, STATUS_COLORS, nightsBetween } from "@/lib/utils";
@@ -16,11 +16,11 @@ export default async function ReservationDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const session = await auth();
+  const session = await requireSession();
   const { id } = await params;
 
   const reservation = await prisma.reservation.findFirst({
-    where: { id, property: { ownerId: session!.user.id } },
+    where: { id, property: { ownerId: session.user.id } },
     include: {
       guest: true,
       property: { include: { locks: true } },

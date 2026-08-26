@@ -33,6 +33,43 @@ export const EXPECTED_INTERVAL_MINUTES: Record<string, number> = {
   "channex-full-sync": 1440,
 };
 
+// Which of those jobs THIS environment is actually pinged for.
+//
+// The list above is the catalogue of jobs that exist; it is not a claim that
+// every deployment runs all of them. Once the Channex work moved to staging,
+// production stopped being pinged for drain-ari, channex-revisions,
+// channex-messages and channex-full-sync - correctly - and the watchdog
+// started reporting a stopped job every twenty minutes, forever. Staging has
+// the mirror image: it never runs the Smoobu jobs and reports three of them as
+// "never run" on every check.
+//
+// An alert that is always firing is not an alert. It is how a monitoring
+// system teaches you to swipe it away, and the one time it means something you
+// will swipe that away too.
+//
+// CRON_JOBS_EXPECTED is a comma-separated list of job names. Unset means "all
+// of them", which is the right default for a single-environment deployment and
+// what every deployment did before this existed.
+//
+//   production   CRON_JOBS_EXPECTED=scheduled-messages,sync-messages,sync-reservations
+//   staging      CRON_JOBS_EXPECTED=drain-ari,channex-messages,channex-revisions,channex-full-sync
+export function expectedJobs(): Record<string, number> {
+  const configured = process.env.CRON_JOBS_EXPECTED?.trim();
+  if (!configured) return EXPECTED_INTERVAL_MINUTES;
+
+  const wanted = new Set(
+    configured.split(",").map((s) => s.trim()).filter(Boolean)
+  );
+  const filtered: Record<string, number> = {};
+  for (const [job, every] of Object.entries(EXPECTED_INTERVAL_MINUTES)) {
+    if (wanted.has(job)) filtered[job] = every;
+  }
+  // A value that matches nothing is far more likely to be a typo than a
+  // deliberate "watch no jobs at all", and silently watching nothing is the
+  // worst outcome available here.
+  return Object.keys(filtered).length > 0 ? filtered : EXPECTED_INTERVAL_MINUTES;
+}
+
 // A job late by a factor of three is late enough to mean something.
 export const STALE_MULTIPLIER = 3;
 
@@ -75,7 +112,7 @@ export async function collectCronHealth(): Promise<CronHealth> {
   const staleClosed = await closeStaleCronRuns();
 
   const jobs = await Promise.all(
-    Object.entries(EXPECTED_INTERVAL_MINUTES).map(async ([job, everyMinutes]): Promise<JobHealth> => {
+    Object.entries(expectedJobs()).map(async ([job, everyMinutes]): Promise<JobHealth> => {
       const [lastRun, lastFailure, recent] = await Promise.all([
         prisma.cronRun.findFirst({ where: { job }, orderBy: { startedAt: "desc" } }),
         prisma.cronRun.findFirst({ where: { job, ok: false }, orderBy: { startedAt: "desc" } }),

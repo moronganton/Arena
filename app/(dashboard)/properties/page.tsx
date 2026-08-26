@@ -1,4 +1,4 @@
-import { auth } from "@/lib/auth";
+import { requireSession } from "@/lib/require-session";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import { Plus, MapPin, Bed, Users } from "lucide-react";
@@ -11,13 +11,13 @@ export default async function PropertiesPage({
 }: {
   searchParams: Promise<{ city?: string; status?: string }>;
 }) {
-  const session = await auth();
+  const session = await requireSession();
   const params = await searchParams;
 
   const [properties, allProperties] = await Promise.all([
     prisma.property.findMany({
       where: {
-        ownerId: session!.user.id,
+        ownerId: session.user.id,
         ...(params.city ? { city: params.city } : {}),
         ...(params.status === "active" ? { active: true } : params.status === "inactive" ? { active: false } : {}),
       },
@@ -35,7 +35,7 @@ export default async function PropertiesPage({
     // Unfiltered, just for the city list in the filter menu - so the option
     // set doesn't shrink to only what's currently visible once a filter is applied.
     prisma.property.findMany({
-      where: { ownerId: session!.user.id },
+      where: { ownerId: session.user.id },
       select: { city: true },
     }),
   ]);

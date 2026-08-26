@@ -1,4 +1,4 @@
-import { auth } from "@/lib/auth";
+import { requireSession } from "@/lib/require-session";
 import { prisma } from "@/lib/prisma";
 import { getChannelState } from "@/lib/channels/channel-state";
 import { notFound } from "next/navigation";
@@ -9,11 +9,11 @@ import PropertyActions from "./PropertyActions";
 import PropertyListingTabs from "@/components/properties/PropertyListingTabs";
 
 export default async function PropertyDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const session = await auth();
+  const session = await requireSession();
   const { id } = await params;
 
   const property = await prisma.property.findFirst({
-    where: { id, ownerId: session!.user.id },
+    where: { id, ownerId: session.user.id },
     include: {
       locks: { include: { _count: { select: { accessCodes: true } } } },
       pricingRules: { where: { active: true }, orderBy: { priority: "desc" } },

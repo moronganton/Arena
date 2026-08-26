@@ -1,4 +1,4 @@
-import { auth } from "@/lib/auth";
+import { requireSession } from "@/lib/require-session";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import { formatShortDate, formatCurrency, SOURCE_COLORS, SOURCE_LABELS, STATUS_COLORS } from "@/lib/utils";
@@ -10,11 +10,11 @@ export default async function ReservationsPage({
 }: {
   searchParams: Promise<{ status?: string; source?: string; propertyId?: string; q?: string; sort?: string }>;
 }) {
-  const session = await auth();
+  const session = await requireSession();
   const params = await searchParams;
 
   const where: Record<string, unknown> = {
-    property: { ownerId: session!.user.id },
+    property: { ownerId: session.user.id },
   };
   if (params.status) where.status = params.status;
   if (params.source) where.source = params.source;
@@ -45,7 +45,7 @@ export default async function ReservationsPage({
       orderBy: { [sort.field]: sort.dir },
     }),
     prisma.property.findMany({
-      where: { ownerId: session!.user.id },
+      where: { ownerId: session.user.id },
       select: { id: true, name: true },
       orderBy: { name: "asc" },
     }),
