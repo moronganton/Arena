@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
-import { Layers, AlertTriangle, Check, Loader2 } from "lucide-react";
+import { Layers, AlertTriangle, Check, Loader2, Pencil, Trash2, Plus, X } from "lucide-react";
 
 // What this property sells on the OTAs, as opposed to what it charges per night.
 //
@@ -32,6 +32,10 @@ export default function RatePlansPanel({ propertyId }: { propertyId: string }) {
   const [pushesInto, setPushesInto] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -53,6 +57,31 @@ export default function RatePlansPanel({ propertyId }: { propertyId: string }) {
   useEffect(() => {
     if (propertyId) load();
   }, [propertyId, load]);
+
+  // Every write goes to Channex first and the list is re-read afterwards, so
+  // what the panel shows is what Channex actually holds - not what the form
+  // hoped it would hold.
+  async function send(url: string, init: RequestInit) {
+    setBusy(true);
+    setActionError(null);
+    try {
+      const r = await fetch(url, { headers: { "Content-Type": "application/json" }, ...init });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setActionError((d.problems ?? []).join("; ") || d.error || "That didn't work");
+        return false;
+      }
+      setEditing(null);
+      setAdding(false);
+      load();
+      return true;
+    } catch {
+      setActionError("Couldn't reach the server");
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -99,16 +128,91 @@ export default function RatePlansPanel({ propertyId }: { propertyId: string }) {
         </p>
       </div>
 
-      {parent && (
-        <PlanRow plan={parent} isPushTarget={parent.channexRatePlanId === pushesInto} />
+      {actionError && (
+        <div className="flex items-start gap-2 text-sm px-3 py-2 rounded-lg border bg-red-50 border-red-200 text-red-700">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          {actionError}
+        </div>
       )}
+
+      {parent &&
+        (editing === parent.id ? (
+          <PlanEditor
+            plan={parent}
+            busy={busy}
+            onCancel={() => setEditing(null)}
+            onSave={(body) =>
+              send(`/api/channex/rate-plans/${parent.id}`, {
+                method: "PATCH",
+                body: JSON.stringify({ propertyId, ...body }),
+              })
+            }
+          />
+        ) : (
+          <PlanRow
+            plan={parent}
+            isPushTarget={parent.channexRatePlanId === pushesInto}
+            onEdit={() => { setActionError(null); setEditing(parent.id); }}
+          />
+        ))}
 
       {derived.length > 0 && (
         <div className="pl-4 border-l-2 border-slate-100 space-y-2">
-          {derived.map((p) => (
-            <PlanRow key={p.id} plan={p} isPushTarget={p.channexRatePlanId === pushesInto} />
-          ))}
+          {derived.map((p) =>
+            editing === p.id ? (
+              <PlanEditor
+                key={p.id}
+                plan={p}
+                busy={busy}
+                onCancel={() => setEditing(null)}
+                onSave={(body) =>
+                  send(`/api/channex/rate-plans/${p.id}`, {
+                    method: "PATCH",
+                    body: JSON.stringify({ propertyId, ...body }),
+                  })
+                }
+              />
+            ) : (
+              <PlanRow
+                key={p.id}
+                plan={p}
+                isPushTarget={p.channexRatePlanId === pushesInto}
+                onEdit={() => { setActionError(null); setEditing(p.id); }}
+                onDelete={() => {
+                  if (!confirm(`Remove "${p.title}"? It stops being sellable on every channel it is mapped to.`)) return;
+                  send(`/api/channex/rate-plans/${p.id}?propertyId=${propertyId}`, { method: "DELETE" });
+                }}
+              />
+            )
+          )}
         </div>
+      )}
+
+      {adding ? (
+        <div className="pl-4 border-l-2 border-slate-100">
+          <PlanEditor
+            plan={{ id: "new", channexRatePlanId: null, title: "", kind: "DERIVED", derivedPercent: -10, minStayArrival: 2, position: 0, active: true }}
+            busy={busy}
+            isNew
+            onCancel={() => setAdding(false)}
+            onSave={(body) =>
+              send(`/api/channex/rate-plans`, {
+                method: "POST",
+                body: JSON.stringify({ propertyId, addPlan: body }),
+              })
+            }
+          />
+        </div>
+      ) : (
+        parent && (
+          <button
+            onClick={() => { setActionError(null); setAdding(true); }}
+            className="flex items-center gap-1.5 text-sm font-medium text-indigo-600 hover:text-indigo-700 px-3 py-2"
+          >
+            <Plus className="w-4 h-4" />
+            Add a rate plan
+          </button>
+        )
       )}
 
       {parent && parent.channexRatePlanId !== pushesInto && (
@@ -125,7 +229,11 @@ export default function RatePlansPanel({ propertyId }: { propertyId: string }) {
   );
 }
 
-function PlanRow({ plan, isPushTarget }: { plan: RatePlan; isPushTarget: boolean }) {
+function PlanRow({
+  plan, isPushTarget, onEdit, onDelete,
+}: {
+  plan: RatePlan; isPushTarget: boolean; onEdit?: () => void; onDelete?: () => void;
+}) {
   const isParent = plan.kind === "PARENT";
   const pct = plan.derivedPercent;
 
@@ -172,6 +280,117 @@ function PlanRow({ plan, isPushTarget }: { plan: RatePlan; isPushTarget: boolean
             {pct}%
           </span>
         )}
+      </div>
+
+      <div className="flex items-center gap-1 shrink-0">
+        {onEdit && (
+          <button onClick={onEdit} aria-label={`Edit ${plan.title}`}
+            className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-50">
+            <Pencil className="w-4 h-4" />
+          </button>
+        )}
+        {/* No delete on the parent: every other plan derives from it. */}
+        {onDelete && (
+          <button onClick={onDelete} aria-label={`Remove ${plan.title}`}
+            className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg hover:bg-red-50">
+            <Trash2 className="w-4 h-4" />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// The editor for one plan, also used for adding a new one.
+//
+// The parent's percentage is deliberately absent rather than disabled-and-
+// empty: it does not have one, and showing a greyed field implies it could.
+function PlanEditor({
+  plan, busy, isNew, onCancel, onSave,
+}: {
+  plan: RatePlan;
+  busy: boolean;
+  isNew?: boolean;
+  onCancel: () => void;
+  onSave: (body: { title: string; derivedPercent?: number; minStayArrival: number }) => void;
+}) {
+  const isParent = plan.kind === "PARENT";
+  const [title, setTitle] = useState(plan.title);
+  const [pct, setPct] = useState(String(plan.derivedPercent ?? ""));
+  const [minStay, setMinStay] = useState(String(plan.minStayArrival));
+
+  const parsedPct = Number(pct);
+  const pctValid = isParent || (pct.trim() !== "" && Number.isFinite(parsedPct));
+
+  return (
+    <div className="bg-white border-2 border-indigo-200 rounded-xl p-3 space-y-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <div className="sm:col-span-3">
+          <label className="block text-xs font-medium text-slate-600 mb-1">Name</label>
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Weekly Rate"
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+        </div>
+
+        {!isParent && (
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">% of parent</label>
+            <input
+              type="number"
+              value={pct}
+              onChange={(e) => setPct(e.target.value)}
+              placeholder="-15"
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            <p className="text-[11px] text-slate-500 mt-1">Negative discounts, positive surcharges.</p>
+          </div>
+        )}
+
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">Min. nights</label>
+          <input
+            type="number"
+            min="1"
+            value={minStay}
+            onChange={(e) => setMinStay(e.target.value)}
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+        </div>
+      </div>
+
+      {isParent && (
+        <p className="text-xs text-slate-500">
+          The parent&apos;s price comes from your pricing rules — there is no percentage to set here.
+          Its minimum stay is overwritten on every push, so change that in the pricing rule instead.
+        </p>
+      )}
+
+      <div className="flex gap-2">
+        <button
+          disabled={busy || !title.trim() || !pctValid}
+          onClick={() =>
+            onSave({
+              title: title.trim(),
+              ...(isParent ? {} : { derivedPercent: parsedPct }),
+              minStayArrival: Number(minStay) || 1,
+            })
+          }
+          className="flex items-center gap-1.5 bg-indigo-600 text-white text-sm font-medium px-3 py-2 rounded-lg disabled:opacity-50"
+        >
+          {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+          {isNew ? "Create on Channex" : "Save"}
+        </button>
+        <button
+          onClick={onCancel}
+          disabled={busy}
+          className="flex items-center gap-1.5 border border-slate-200 text-slate-600 text-sm font-medium px-3 py-2 rounded-lg"
+        >
+          <X className="w-4 h-4" />
+          Cancel
+        </button>
       </div>
     </div>
   );

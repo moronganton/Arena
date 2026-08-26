@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 import { requireChannexProperty } from "@/lib/channels/channex-property-guard";
-import { provisionRatePlanSet, deleteRatePlan } from "@/lib/channels/channex-rate-plans";
+import { provisionRatePlanSet, deleteRatePlan, addDerivedRatePlan } from "@/lib/channels/channex-rate-plans";
 import { DEFAULT_RATE_PLAN_SET } from "@/lib/channels/rate-plan-spec";
 
 // Provisioning a rate plan family for ONE property.
@@ -30,6 +30,15 @@ const provisionSchema = z.object({
   // Removing a plan the family replaced. Refused if it is the one currently
   // being pushed into - see deleteRatePlan.
   deleteRatePlanId: z.string().min(1).optional(),
+  // Adding ONE derived plan to a family that already exists, as opposed to
+  // provisioning a whole set.
+  addPlan: z
+    .object({
+      title: z.string().min(1),
+      derivedPercent: z.number(),
+      minStayArrival: z.number().int().min(1),
+    })
+    .optional(),
 });
 
 export async function GET(req: NextRequest) {
@@ -63,7 +72,7 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid body", details: parsed.error.flatten() }, { status: 400 });
   }
-  const { propertyId, apply, retireExisting, deleteRatePlanId } = parsed.data;
+  const { propertyId, apply, retireExisting, deleteRatePlanId, addPlan } = parsed.data;
 
   const guard = await requireChannexProperty(propertyId, session.user.id);
   if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: guard.status });
@@ -80,6 +89,24 @@ export async function POST(req: NextRequest) {
     where: { id: propertyId },
     select: { currency: true, maxGuests: true },
   });
+
+  if (addPlan) {
+    const res = await addDerivedRatePlan({
+      channexListingId: guard.channexListingId,
+      channexPropertyId: guard.channexPropertyId,
+      channexRoomTypeId: guard.channexRoomTypeId,
+      currency: property.currency,
+      occupancy: property.maxGuests,
+      spec: { ...addPlan, derivedPercent: addPlan.derivedPercent },
+    });
+    if (!res.ok) {
+      return NextResponse.json(
+        { error: res.error, problems: res.problems, details: res.details },
+        { status: res.problems ? 400 : 409 }
+      );
+    }
+    return NextResponse.json({ ok: true, channexRatePlanId: res.channexRatePlanId });
+  }
 
   const result = await provisionRatePlanSet({
     channexListingId: guard.channexListingId,

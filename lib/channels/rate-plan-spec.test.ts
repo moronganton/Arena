@@ -2,8 +2,11 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
   DEFAULT_RATE_PLAN_SET,
+  buildRatePlanUpdatePayload,
+  derivedPriceFor,
   findTitleCollisions,
   retiredTitle,
+  validateRatePlanChanges,
   buildDerivedRatePlanPayload,
   buildParentRatePlanPayload,
   derivedRateOption,
@@ -220,5 +223,81 @@ describe("retiredTitle", () => {
     const a = retiredTitle("Standard Rate", "aaaaaaaa-1111-2222-3333-444444444444");
     const b = retiredTitle("Standard Rate", "bbbbbbbb-1111-2222-3333-444444444444");
     assert.notEqual(a, b);
+  });
+});
+
+describe("validateRatePlanChanges", () => {
+  test("accepts an ordinary edit", () => {
+    assert.deepEqual(validateRatePlanChanges({ derivedPercent: 100, minStayArrival: 2 }, false, []), []);
+  });
+
+  // The edit that started this: 2 Day Rate at +20% gives €120 off a €100
+  // parent, and the operator wanted €200.
+  test("+100% is a valid way to double the parent", () => {
+    assert.deepEqual(validateRatePlanChanges({ derivedPercent: 100 }, false, []), []);
+  });
+
+  test("refuses a percentage on the parent", () => {
+    const p = validateRatePlanChanges({ derivedPercent: -10 }, true, []);
+    assert.ok(p.some((x) => x.includes("receives prices from your pricing rules")));
+  });
+
+  test("refuses a title another plan already uses, case-insensitively", () => {
+    const p = validateRatePlanChanges({ title: "weekly RATE" }, false, ["Weekly Rate"]);
+    assert.ok(p.some((x) => x.includes("already used")));
+  });
+
+  test("allows keeping a title that is not on the sibling list", () => {
+    assert.deepEqual(validateRatePlanChanges({ title: "Weekly Rate" }, false, ["Monthly Rate"]), []);
+  });
+
+  test("refuses a discount at or past 100%", () => {
+    assert.ok(validateRatePlanChanges({ derivedPercent: -100 }, false, []).length > 0);
+  });
+
+  test("refuses a minimum stay below 1", () => {
+    assert.ok(validateRatePlanChanges({ minStayArrival: 0 }, false, []).length > 0);
+  });
+});
+
+describe("buildRatePlanUpdatePayload", () => {
+  // A PUT carrying every field would rewrite parent_rate_plan_id and the
+  // inherit flags on every edit - which is how renaming a plan detaches it
+  // from its family.
+  test("sends only what changed", () => {
+    assert.deepEqual(buildRatePlanUpdatePayload({ title: "New name" }, 2), {
+      rate_plan: { title: "New name" },
+    });
+  });
+
+  test("a percentage change carries the derived option and nothing else", () => {
+    const p = buildRatePlanUpdatePayload({ derivedPercent: 100 }, 2).rate_plan;
+    assert.deepEqual(Object.keys(p), ["options"]);
+    assert.deepEqual(p.options, [
+      { occupancy: 2, is_primary: true, derived_option: { rate: [["increase_by_percent", "100.00"]] } },
+    ]);
+  });
+
+  test("min stay becomes the seven-day default array", () => {
+    assert.deepEqual(buildRatePlanUpdatePayload({ minStayArrival: 4 }, 2).rate_plan.min_stay_arrival,
+      [4, 4, 4, 4, 4, 4, 4]);
+  });
+
+  test("an empty change set produces an empty payload", () => {
+    assert.deepEqual(buildRatePlanUpdatePayload({}, 2), { rate_plan: {} });
+  });
+});
+
+describe("derivedPriceFor", () => {
+  test("the parent quotes what it is given", () => {
+    assert.equal(derivedPriceFor(115, null), 115);
+  });
+
+  test("+100% doubles it - the edit this feature exists for", () => {
+    assert.equal(derivedPriceFor(100, 100), 200);
+  });
+
+  test("−15% off 115 rounds to cents", () => {
+    assert.equal(derivedPriceFor(115, -15), 97.75);
   });
 });

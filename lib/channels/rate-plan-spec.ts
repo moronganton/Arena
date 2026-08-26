@@ -107,6 +107,76 @@ export function weeklyDefault(value: number): number[] {
   return Array(7).fill(value);
 }
 
+// Changing a plan that already exists, as opposed to creating one.
+//
+// Only the fields an operator can actually change. Everything else about a
+// derived plan - which parent it follows, that it inherits the rate, that it
+// does NOT inherit min stay - is structural, and letting a form edit it would
+// only ever break the family.
+export interface RatePlanChanges {
+  title?: string;
+  derivedPercent?: number;
+  minStayArrival?: number;
+}
+
+export function validateRatePlanChanges(
+  changes: RatePlanChanges,
+  isParentPlan: boolean,
+  otherTitles: string[]
+): string[] {
+  const problems: string[] = [];
+
+  if (changes.title !== undefined) {
+    if (!changes.title.trim()) problems.push("a rate plan needs a title");
+    const taken = new Set(otherTitles.map((t) => t.trim().toLowerCase()));
+    if (taken.has(changes.title.trim().toLowerCase())) {
+      problems.push(`"${changes.title}" is already used by another rate plan on this property`);
+    }
+  }
+
+  if (changes.minStayArrival !== undefined && changes.minStayArrival < 1) {
+    problems.push("minimum stay must be at least 1");
+  }
+
+  if (changes.derivedPercent !== undefined) {
+    // The parent is where prices arrive from the pricing rules; it has nothing
+    // to derive from, and giving it a percentage would silently do nothing.
+    if (isParentPlan) {
+      problems.push("the parent plan has no percentage - it receives prices from your pricing rules");
+    }
+    if (changes.derivedPercent === 0) problems.push("a 0% plan is a duplicate of its parent");
+    if (changes.derivedPercent <= -100) {
+      problems.push(`a discount of ${changes.derivedPercent}% would price the room at or below zero`);
+    }
+  }
+
+  return problems;
+}
+
+// Only the keys being changed are sent. A PUT carrying every field would
+// rewrite parent_rate_plan_id and the inherit flags on every edit, which is how
+// a form that only meant to rename something detaches a plan from its family.
+export function buildRatePlanUpdatePayload(
+  changes: RatePlanChanges,
+  occupancy: number
+): { rate_plan: Record<string, unknown> } {
+  const rate_plan: Record<string, unknown> = {};
+  if (changes.title !== undefined) rate_plan.title = changes.title.trim();
+  if (changes.minStayArrival !== undefined) {
+    rate_plan.min_stay_arrival = weeklyDefault(changes.minStayArrival);
+  }
+  if (changes.derivedPercent !== undefined) {
+    rate_plan.options = [
+      {
+        occupancy,
+        is_primary: true,
+        derived_option: { rate: derivedRateOption(changes.derivedPercent) },
+      },
+    ];
+  }
+  return { rate_plan };
+}
+
 export interface RatePlanPayloadContext {
   channexPropertyId: string;
   channexRoomTypeId: string;

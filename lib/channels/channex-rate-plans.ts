@@ -5,10 +5,13 @@ import {
   DEFAULT_RATE_PLAN_SET,
   buildDerivedRatePlanPayload,
   buildParentRatePlanPayload,
+  buildRatePlanUpdatePayload,
   findTitleCollisions,
   isParent,
   retiredTitle,
+  validateRatePlanChanges,
   validateRatePlanSet,
+  type RatePlanChanges,
   type RatePlanPayloadContext,
   type RatePlanSpec,
 } from "@/lib/channels/rate-plan-spec";
@@ -361,4 +364,131 @@ export async function deleteRatePlan(
     // removed, and knowing which changes what you do next.
     return { ok: false, error: e.message, details: e.details };
   }
+}
+
+// Changing one plan in an existing family.
+//
+// Channex first, database second. If Channex rejects the change, the local row
+// still describes what is really out there - the reverse order would leave the
+// app confidently showing a percentage the OTAs have never heard of.
+export async function updateRatePlan(
+  channexListingId: string,
+  ratePlanId: string,
+  changes: RatePlanChanges,
+  occupancy: number
+): Promise<{ ok: boolean; error?: string; details?: unknown; problems?: string[] }> {
+  const plan = await prisma.ratePlan.findFirst({ where: { id: ratePlanId, channexListingId } });
+  if (!plan) return { ok: false, error: "rate plan not found on this listing" };
+  if (!plan.channexRatePlanId) return { ok: false, error: "this plan has never been provisioned on Channex" };
+
+  const siblings = await prisma.ratePlan.findMany({
+    where: { channexListingId, id: { not: ratePlanId } },
+    select: { title: true },
+  });
+  const problems = validateRatePlanChanges(changes, plan.kind === "PARENT", siblings.map((s) => s.title));
+  if (problems.length > 0) return { ok: false, problems };
+
+  const payload = buildRatePlanUpdatePayload(changes, occupancy);
+  if (Object.keys(payload.rate_plan).length === 0) return { ok: false, error: "nothing to change" };
+
+  try {
+    await channexPut(`/rate_plans/${plan.channexRatePlanId}`, payload);
+  } catch (err) {
+    const e = err as ChannexError;
+    return { ok: false, error: e.message, details: e.details };
+  }
+
+  await prisma.ratePlan.update({
+    where: { id: ratePlanId },
+    data: {
+      ...(changes.title !== undefined ? { title: changes.title.trim() } : {}),
+      ...(changes.derivedPercent !== undefined ? { derivedPercent: changes.derivedPercent } : {}),
+      ...(changes.minStayArrival !== undefined ? { minStayArrival: changes.minStayArrival } : {}),
+    },
+  });
+  return { ok: true };
+}
+
+// Adding one derived plan to a family that already exists.
+//
+// Always derived, never a second parent: a listing has exactly one plan that
+// receives prices, and a second would silently receive nothing.
+export async function addDerivedRatePlan(
+  opts: {
+    channexListingId: string;
+    channexPropertyId: string;
+    channexRoomTypeId: string;
+    currency: string;
+    occupancy: number;
+    spec: RatePlanSpec;
+  }
+): Promise<{ ok: boolean; channexRatePlanId?: string; error?: string; details?: unknown; problems?: string[] }> {
+  if (opts.spec.derivedPercent === null) {
+    return { ok: false, problems: ["a new plan must have a percentage - there can only be one parent"] };
+  }
+
+  const existing = await prisma.ratePlan.findMany({ where: { channexListingId: opts.channexListingId } });
+  const parent = existing.find((p) => p.kind === "PARENT");
+  if (!parent?.channexRatePlanId) {
+    return { ok: false, error: "this listing has no provisioned parent plan to derive from" };
+  }
+
+  const problems = validateRatePlanChanges(
+    { title: opts.spec.title, derivedPercent: opts.spec.derivedPercent, minStayArrival: opts.spec.minStayArrival },
+    false,
+    existing.map((p) => p.title)
+  );
+  if (problems.length > 0) return { ok: false, problems };
+
+  const payload = buildDerivedRatePlanPayload(opts.spec, parent.channexRatePlanId, {
+    channexPropertyId: opts.channexPropertyId,
+    channexRoomTypeId: opts.channexRoomTypeId,
+    currency: opts.currency,
+    occupancy: opts.occupancy,
+  });
+
+  let created: { id: string };
+  try {
+    created = (await channexPost<{ id: string }>("/rate_plans", payload)).data;
+  } catch (err) {
+    const e = err as ChannexError;
+    return { ok: false, error: e.message, details: e.details };
+  }
+
+  await prisma.ratePlan.create({
+    data: {
+      channexListingId: opts.channexListingId,
+      channexRatePlanId: created.id,
+      title: opts.spec.title.trim(),
+      kind: "DERIVED",
+      derivedPercent: opts.spec.derivedPercent,
+      minStayArrival: opts.spec.minStayArrival,
+      position: existing.length,
+    },
+  });
+  return { ok: true, channexRatePlanId: created.id };
+}
+
+// Removing a plan from a family, by its local id.
+//
+// deleteRatePlan above takes a Channex id and exists for retiring a REPLACED
+// plan - one this app may never have had a row for. This is the one a UI calls,
+// and it refuses to remove the parent: every other plan derives from it, so
+// deleting it would leave five products quoting nothing.
+export async function removeRatePlan(
+  channexListingId: string,
+  ratePlanId: string
+): Promise<{ ok: boolean; error?: string; details?: unknown }> {
+  const plan = await prisma.ratePlan.findFirst({ where: { id: ratePlanId, channexListingId } });
+  if (!plan) return { ok: false, error: "rate plan not found on this listing" };
+  if (plan.kind === "PARENT") {
+    return { ok: false, error: "the parent cannot be removed - every other plan derives from it" };
+  }
+  if (!plan.channexRatePlanId) {
+    await prisma.ratePlan.delete({ where: { id: ratePlanId } });
+    return { ok: true };
+  }
+  const res = await deleteRatePlan(channexListingId, plan.channexRatePlanId);
+  if (res.ok) await prisma.ratePlan.deleteMany({ where: { id: ratePlanId } });
+  return res;
 }
