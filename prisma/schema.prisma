@@ -305,6 +305,59 @@ model ChannexListing {
 
   propertyId String   @unique
   property   Property @relation(fields: [propertyId], references: [id])
+
+  ratePlans RatePlan[]
+}
+
+// The rate plans a listing sells, which is what lifts the old one-plan-per-
+// property limit.
+//
+// StayHQ still resolves exactly ONE price per date - see rate-materializer.ts -
+// and still pushes that single stream into one plan. What changes is that the
+// plan it pushes into can now be the PARENT of a family, with the rest DERIVED
+// from it by a percentage that Channex applies itself. That is how a property
+// sells six products off one price: Standard, a non-refundable at -5%, a weekly
+// rate at -15%, a monthly at -25%, and short-stay plans at a premium.
+//
+// Why derived rather than independent: a derived child needs no second price
+// stream, so nothing here has to know how many nights a guest is booking. That
+// question is only answerable at search time, by the OTA, which is exactly why
+// length-of-stay pricing lives in plan structure and not in PricingRule.
+model RatePlan {
+  id String @id @default(cuid())
+
+  // Channex's own id. Null until this plan has been provisioned there.
+  channexRatePlanId String?
+
+  title String
+
+  // PARENT is the plan ARI is pushed into - exactly one per listing, and the
+  // one ChannexListing.channexRatePlanId points at. DERIVED plans are never
+  // pushed to; Channex recomputes them whenever the parent moves.
+  kind String @default("DERIVED") // PARENT | DERIVED
+
+  // Percent applied to the parent's rate. Positive is a surcharge (a one-night
+  // stay at +60%), negative a discount (a weekly rate at -15%). Null on the
+  // parent, which has nothing to derive from.
+  derivedPercent Float?
+
+  // This plan's own minimum stay on arrival, and the entire reason it exists as
+  // a separate product. Provisioned with inherit_min_stay_arrival = false so the
+  // parent's per-date min-stay pushes cannot overwrite it.
+  minStayArrival Int @default(1)
+
+  // Order shown to the operator; also the order they are created in, so a
+  // parent is always provisioned before anything deriving from it.
+  position Int     @default(0)
+  active   Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  channexListingId String
+  channexListing   ChannexListing @relation(fields: [channexListingId], references: [id], onDelete: Cascade)
+
+  @@index([channexListingId])
 }
 
 // One row queued per date range that needs pushing to Channex. Never call

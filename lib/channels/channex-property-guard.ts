@@ -16,6 +16,7 @@ import { prisma } from "@/lib/prisma";
 export interface ChannexPropertyGuardResult {
   ok: true;
   propertyName: string;
+  channexListingId: string;
   channexPropertyId: string;
   channexRoomTypeId: string;
   channexRatePlanId: string;
@@ -35,6 +36,7 @@ export async function requireChannexProperty(propertyId: string, ownerId: string
       channelProvider: true,
       channexListing: {
         select: {
+          id: true,
           channexPropertyId: true,
           channexRoomTypeId: true,
           channexRatePlanId: true,
@@ -51,6 +53,7 @@ export async function requireChannexProperty(propertyId: string, ownerId: string
   return {
     ok: true,
     propertyName: property.name,
+    channexListingId: property.channexListing.id,
     channexPropertyId: property.channexListing.channexPropertyId,
     channexRoomTypeId: property.channexListing.channexRoomTypeId,
     channexRatePlanId: property.channexListing.channexRatePlanId,
