@@ -335,7 +335,7 @@ export async function provisionRatePlanSet(
 export async function deleteRatePlan(
   channexListingId: string,
   channexRatePlanId: string
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; details?: unknown }> {
   const listing = await prisma.channexListing.findUnique({
     where: { id: channexListingId },
     select: { channexRatePlanId: true },
@@ -355,6 +355,10 @@ export async function deleteRatePlan(
       await prisma.ratePlan.deleteMany({ where: { channexListingId, channexRatePlanId } });
       return { ok: true };
     }
-    return { ok: false, error: e.message };
+    // e.message alone is "Validation Error (validation_error)", which says
+    // nothing. Channex puts the actual reason in details - a rate plan with
+    // bookings against it, or one still mapped to a channel, cannot be
+    // removed, and knowing which changes what you do next.
+    return { ok: false, error: e.message, details: e.details };
   }
 }

@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
   if (deleteRatePlanId) {
     const res = await deleteRatePlan(guard.channexListingId, deleteRatePlanId);
     return NextResponse.json(
-      { property: guard.propertyName, deleted: res.ok ? deleteRatePlanId : null, error: res.error },
+      { property: guard.propertyName, deleted: res.ok ? deleteRatePlanId : null, error: res.error, details: res.details },
       { status: res.ok ? 200 : 409 }
     );
   }
