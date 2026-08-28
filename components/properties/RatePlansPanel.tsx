@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import { Layers, AlertTriangle, Check, Loader2, Pencil, Trash2, Plus, X } from "lucide-react";
+import { derivedPriceFor } from "@/lib/channels/rate-plan-spec";
 
 // What this property sells on the OTAs, as opposed to what it charges per night.
 //
@@ -27,7 +28,18 @@ interface RatePlan {
   active: boolean;
 }
 
-export default function RatePlansPanel({ propertyId }: { propertyId: string }) {
+// previewBase is tonight's resolved parent price (from /api/pricing/summary).
+// When present, every plan row shows what it actually quotes in currency -
+// "-15%" and "€85.00" are the same fact, but only one of them is a price.
+export default function RatePlansPanel({
+  propertyId,
+  previewBase,
+  previewCurrency,
+}: {
+  propertyId: string;
+  previewBase?: number;
+  previewCurrency?: string;
+}) {
   const [plans, setPlans] = useState<RatePlan[]>([]);
   const [pushesInto, setPushesInto] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -152,6 +164,7 @@ export default function RatePlansPanel({ propertyId }: { propertyId: string }) {
           <PlanRow
             plan={parent}
             isPushTarget={parent.channexRatePlanId === pushesInto}
+            preview={previewBase !== undefined && previewCurrency ? { base: previewBase, currency: previewCurrency } : undefined}
             onEdit={() => { setActionError(null); setEditing(parent.id); }}
           />
         ))}
@@ -177,6 +190,7 @@ export default function RatePlansPanel({ propertyId }: { propertyId: string }) {
                 key={p.id}
                 plan={p}
                 isPushTarget={p.channexRatePlanId === pushesInto}
+                preview={previewBase !== undefined && previewCurrency ? { base: previewBase, currency: previewCurrency } : undefined}
                 onEdit={() => { setActionError(null); setEditing(p.id); }}
                 onDelete={() => {
                   if (!confirm(`Remove "${p.title}"? It stops being sellable on every channel it is mapped to.`)) return;
@@ -230,12 +244,14 @@ export default function RatePlansPanel({ propertyId }: { propertyId: string }) {
 }
 
 function PlanRow({
-  plan, isPushTarget, onEdit, onDelete,
+  plan, isPushTarget, onEdit, onDelete, preview,
 }: {
   plan: RatePlan; isPushTarget: boolean; onEdit?: () => void; onDelete?: () => void;
+  preview?: { base: number; currency: string };
 }) {
   const isParent = plan.kind === "PARENT";
   const pct = plan.derivedPercent;
+  const quoted = preview ? derivedPriceFor(preview.base, isParent ? null : pct) : null;
 
   return (
     <div className="bg-white border border-slate-100 rounded-xl p-3 flex items-center gap-3">
@@ -268,16 +284,22 @@ function PlanRow({
       </div>
 
       <div className="text-right shrink-0">
+        {quoted !== null && preview && (
+          <div className="text-sm font-bold tabular-nums text-slate-900">
+            {preview.currency} {quoted.toFixed(2)}
+            <span className="text-[10px] font-medium text-slate-400"> tonight</span>
+          </div>
+        )}
         {isParent ? (
           <span className="text-xs text-slate-400">from your pricing rules</span>
         ) : (
           <span
-            className={`text-sm font-bold tabular-nums ${
+            className={`text-xs font-bold tabular-nums ${
               pct !== null && pct < 0 ? "text-emerald-600" : "text-amber-600"
             }`}
           >
             {pct !== null && pct > 0 ? "+" : ""}
-            {pct}%
+            {pct}% of parent
           </span>
         )}
       </div>

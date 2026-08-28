@@ -1,0 +1,207 @@
+"use client";
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { ArrowRight, ArrowDown, CalendarDays, Loader2, Pencil } from "lucide-react";
+import RatePlansPanel from "@/components/properties/RatePlansPanel";
+
+// The Rate plans tab as cause and effect, side by side.
+//
+// The two layers of the revenue model meet on this screen and nowhere else:
+// pricing rules resolve to ONE number per night (the cause, left), and that
+// number is what the whole plan family derives from (the effect, right). They
+// used to live on different pages - the rules on /pricing, the plans on this
+// tab - which is exactly why the link between them stayed invisible. The
+// connector between the columns is the point of the layout, not decoration.
+
+interface RuleRow {
+  id: string;
+  name: string;
+  startDate: string | null;
+  endDate: string | null;
+  daysOfWeek: string | null;
+  price: number | null;
+  adjustment: number | null;
+  adjType: string | null;
+  minNights: number | null;
+  priority: number;
+}
+
+interface Summary {
+  currency: string;
+  basePrice: number;
+  rules: RuleRow[];
+  week: { date: string; dow: string; price: number; minStay: number }[];
+}
+
+function ruleValue(r: RuleRow, currency: string): string {
+  if (r.price !== null) return `${currency} ${r.price}`;
+  if (r.adjustment !== null) {
+    const sign = r.adjustment > 0 ? "+" : "";
+    return r.adjType === "FIXED" ? `${sign}${r.adjustment} ${currency}` : `${sign}${r.adjustment}%`;
+  }
+  return "—";
+}
+
+function rulePeriod(r: RuleRow): string {
+  const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const parts: string[] = [];
+  if (r.startDate || r.endDate) parts.push(`${r.startDate ?? "…"} → ${r.endDate ?? "…"}`);
+  else parts.push("always");
+  if (r.daysOfWeek) {
+    try {
+      const days = JSON.parse(r.daysOfWeek) as number[];
+      if (Array.isArray(days) && days.length > 0 && days.length < 7) {
+        parts.push(days.map((d) => DOW[d]).join(" "));
+      }
+    } catch {
+      // malformed day list - omit rather than crash the panel over a label
+    }
+  }
+  if (r.minNights && r.minNights > 1) parts.push(`min ${r.minNights}`);
+  return parts.join(" · ");
+}
+
+export default function RateRevenueTab({ propertyId }: { propertyId: string }) {
+  const [summary, setSummary] = useState<Summary | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setSummary(null);
+    setError(null);
+    fetch(`/api/pricing/summary?propertyId=${propertyId}`)
+      .then(async (r) => {
+        const d = await r.json();
+        if (!r.ok) throw new Error(d?.error || `HTTP ${r.status}`);
+        return d as Summary;
+      })
+      .then((d) => {
+        if (!cancelled) setSummary(d);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : "Couldn't load pricing");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [propertyId]);
+
+  // The week's floor price, so nights lifted by a rule (weekend, season) read
+  // as elevated at a glance without inventing a weekend concept here.
+  const floor = summary ? Math.min(...summary.week.map((d) => d.price)) : 0;
+  const todayPrice = summary?.week[0]?.price;
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto_1fr] gap-4 items-start">
+      {/* ---- Cause ---- */}
+      <div className="bg-white rounded-2xl border border-slate-100 p-4">
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+            Cause — your rules
+          </span>
+          <div className="flex items-center gap-3">
+            <Link
+              href="/pricing"
+              className="text-xs font-medium text-indigo-600 hover:underline inline-flex items-center gap-1"
+            >
+              <Pencil className="w-3 h-3" />
+              Edit rules
+            </Link>
+            <Link
+              href="/pricing/calendar"
+              className="text-xs font-medium text-indigo-600 hover:underline inline-flex items-center gap-1"
+            >
+              <CalendarDays className="w-3 h-3" />
+              Calendar
+            </Link>
+          </div>
+        </div>
+
+        {error ? (
+          <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>
+        ) : !summary ? (
+          <div className="flex items-center gap-2 text-sm text-slate-400 py-6">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            Loading rules…
+          </div>
+        ) : (
+          <>
+            <div className="space-y-2 mb-4">
+              {summary.rules.length === 0 && (
+                <p className="text-sm text-slate-500">
+                  No pricing rules yet — every night sells at the base price of {summary.currency}{" "}
+                  {summary.basePrice}.
+                </p>
+              )}
+              {summary.rules.map((r) => (
+                <div
+                  key={r.id}
+                  className="flex items-center gap-3 bg-slate-50 border border-slate-100 rounded-xl px-3 py-2"
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-semibold text-slate-800 truncate">{r.name}</div>
+                    <div className="text-[11px] text-slate-500">{rulePeriod(r)}</div>
+                  </div>
+                  <span className="text-sm font-bold tabular-nums text-indigo-600 shrink-0">
+                    {ruleValue(r, summary.currency)}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+              Next 7 nights resolve to
+            </div>
+            <div className="grid grid-cols-7 gap-1.5">
+              {summary.week.map((d) => (
+                <div
+                  key={d.date}
+                  title={`${d.date} · min stay ${d.minStay}`}
+                  className={`rounded-lg border px-1 py-1.5 text-center ${
+                    d.price > floor
+                      ? "bg-indigo-50 border-indigo-100"
+                      : "bg-slate-50 border-slate-100"
+                  }`}
+                >
+                  <div className="text-[9px] font-bold uppercase text-slate-400">{d.dow}</div>
+                  <div className="text-[11px] font-semibold tabular-nums text-slate-800">
+                    {Math.round(d.price)}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="text-[11px] text-slate-400 mt-2">
+              Rules never leave host24 — only these resolved numbers are pushed to your channels.
+            </p>
+          </>
+        )}
+      </div>
+
+      {/* ---- Connector ---- */}
+      <div className="hidden lg:flex flex-col items-center justify-center gap-1.5 pt-16 px-1">
+        <ArrowRight className="w-7 h-7 text-indigo-600" />
+        <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 text-center leading-tight">
+          flows
+          <br />
+          into
+        </span>
+      </div>
+      <div className="flex lg:hidden items-center justify-center gap-2 -my-1">
+        <ArrowDown className="w-5 h-5 text-indigo-600" />
+        <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600">flows into</span>
+      </div>
+
+      {/* ---- Effect ---- */}
+      <div className="bg-white rounded-2xl border border-slate-100 p-4">
+        <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-3">
+          Effect — what sells
+        </div>
+        <RatePlansPanel
+          propertyId={propertyId}
+          previewBase={todayPrice}
+          previewCurrency={summary?.currency}
+        />
+      </div>
+    </div>
+  );
+}
