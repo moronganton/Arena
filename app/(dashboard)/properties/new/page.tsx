@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Plus } from "lucide-react";
+import PropertyImageInput from "@/components/properties/PropertyImageInput";
 
 const CURRENCIES = ["EUR", "USD", "GBP", "CHF", "CAD", "AUD"];
 const TIMEZONES = [
@@ -97,16 +98,10 @@ export default function NewPropertyPage() {
               placeholder="Describe your property..."
             />
           </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Photo URL</label>
-            <input
-              type="url"
-              value={form.imageUrl}
-              onChange={(e) => setForm({ ...form, imageUrl: e.target.value })}
-              className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              placeholder="https://example.com/photo.jpg"
-            />
-          </div>
+          <PropertyImageInput
+            value={form.imageUrl}
+            onChange={(next) => setForm({ ...form, imageUrl: next })}
+          />
         </div>
 
         {/* Location */}

@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { enqueueAriUpdate, defaultHorizon } from "@/lib/channels/ari-outbox";
 import { upsertCityTax, deleteChannexTax } from "@/lib/channels/channex-taxes";
+import { isAcceptableImageSrc } from "@/lib/image";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
@@ -35,6 +36,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const body = await req.json();
+
+  // This route takes the body largely unvalidated, which is tolerable for
+  // scalars but not for imageUrl: it is the one field that can carry an
+  // arbitrary URL scheme into something later rendered as a src.
+  if (body.imageUrl != null && body.imageUrl !== "" && !isAcceptableImageSrc(String(body.imageUrl))) {
+    return NextResponse.json(
+      { error: "imageUrl must be an uploaded image or an http(s) URL" },
+      { status: 400 }
+    );
+  }
   const updated = await prisma.property.update({
     where: { id },
     data: {

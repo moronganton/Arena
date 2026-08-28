@@ -6,6 +6,7 @@ import Link from "next/link";
 import { ArrowLeft, MapPin, Bed, Bath, Users } from "lucide-react";
 import PropertyActions from "./PropertyActions";
 import PropertyListingTabs from "@/components/properties/PropertyListingTabs";
+import PropertyPhoto from "@/components/properties/PropertyPhoto";
 
 // One full-width column. The right sidebar this page used to carry - pricing
 // summary, channel manager, smart locks, knowledge base - squeezed the actual
@@ -109,18 +110,11 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
           listing content like photos and facilities, so it lives with them
           under the Listing content tab rather than in the hero. */}
       <div className="bg-white rounded-2xl border border-slate-100 p-4 md:p-5 mb-6 flex gap-4 md:gap-5 items-start flex-wrap">
-        {property.imageUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={property.imageUrl}
-            alt={property.name}
-            className="w-36 h-24 md:w-44 md:h-28 rounded-xl object-cover shrink-0"
-          />
-        ) : (
-          <div className="w-36 h-24 md:w-44 md:h-28 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shrink-0">
-            <span className="text-white text-3xl font-bold">{property.name[0]}</span>
-          </div>
-        )}
+        <PropertyPhoto
+          src={property.imageUrl}
+          name={property.name}
+          className="w-36 h-24 md:w-44 md:h-28"
+        />
         <div className="flex-1 min-w-[240px]">
           <div className="flex items-center gap-2.5 flex-wrap">
             <h1 className="text-xl md:text-2xl font-bold text-slate-900">{property.name}</h1>

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
+import { isAcceptableImageSrc } from "@/lib/image";
 
 const createSchema = z.object({
   name: z.string().min(1),
@@ -15,7 +16,14 @@ const createSchema = z.object({
   basePrice: z.number().min(0).default(100),
   currency: z.string().default("EUR"),
   timezone: z.string().default("UTC"),
-  imageUrl: z.string().url().optional(),
+  // Not z.string().url(): that accepts javascript: and data:text/html, both
+  // of which are stored XSS the moment anything renders the field outside an
+  // <img>. isAcceptableImageSrc allows only inline images and http(s), and
+  // caps the inline size so a row cannot be bloated.
+  imageUrl: z
+    .string()
+    .refine(isAcceptableImageSrc, "Must be an uploaded image or an http(s) URL")
+    .optional(),
 });
 
 export async function GET() {
