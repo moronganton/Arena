@@ -3,6 +3,8 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { requireChannexProperty } from "@/lib/channels/channex-property-guard";
 import { buildAriValues } from "@/lib/channels/channex-ari";
+import { channexGet } from "@/lib/channels/channex-core";
+import { connectedChannels, type ChannelConnectionLike } from "@/lib/channels/channel-offers";
 
 // The left half of the Rate plans tab: which rules are in play and what the
 // next seven nights resolve to.
@@ -31,7 +33,7 @@ export async function GET(req: NextRequest) {
   from.setUTCHours(0, 0, 0, 0);
   const to = new Date(from.getTime() + 7 * 24 * 60 * 60 * 1000);
 
-  const [values, property, rules] = await Promise.all([
+  const [values, property, rules, plans, channels] = await Promise.all([
     buildAriValues(propertyId, from, to),
     prisma.property.findUniqueOrThrow({
       where: { id: propertyId },
@@ -41,6 +43,19 @@ export async function GET(req: NextRequest) {
       where: { propertyId, active: true },
       orderBy: { priority: "asc" },
     }),
+    prisma.ratePlan.findMany({
+      where: { channexListingId: guard.channexListingId, active: true },
+      orderBy: { position: "asc" },
+      select: { id: true, title: true, kind: true, derivedPercent: true, minStayArrival: true },
+    }),
+    // Which OTAs actually sell this property. Channex reports connections
+    // account-wide with the property ids each covers, so this is the only way
+    // to answer it per property. Best-effort on purpose: a failure here must
+    // not take down the pricing summary, and the panel says "couldn't check"
+    // rather than claiming a channel is absent.
+    channexGet<ChannelConnectionLike[]>("/channels")
+      .then((res) => connectedChannels(Array.isArray(res.data) ? res.data : [], guard.channexPropertyId))
+      .catch(() => null),
   ]);
 
   const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -59,6 +74,10 @@ export async function GET(req: NextRequest) {
       minNights: r.minNights,
       priority: r.priority,
     })),
+    plans,
+    // null means "not determined", which the UI must render differently from
+    // an empty list - one is ignorance, the other is a fact.
+    connectedChannels: channels,
     week: values.map((v) => ({
       date: v.date,
       dow: DOW[new Date(`${v.date}T00:00:00.000Z`).getUTCDay()],

@@ -4,6 +4,8 @@ import Link from "next/link";
 import { ArrowRight, ArrowDown, CalendarDays, Loader2, Pencil } from "lucide-react";
 import RatePlansPanel from "@/components/properties/RatePlansPanel";
 import PriceCalendarPanel, { type PriceCalendarProperty } from "@/components/pricing/PriceCalendarPanel";
+import ChannelOffersPanel from "@/components/properties/ChannelOffersPanel";
+import type { ChannelKey, PlanLike } from "@/lib/channels/channel-offers";
 
 // The Rate plans tab as cause and effect, side by side.
 //
@@ -31,6 +33,10 @@ interface Summary {
   currency: string;
   basePrice: number;
   rules: RuleRow[];
+  plans: PlanLike[];
+  // null means Channex could not be reached to check - the panel renders that
+  // differently from "nothing is connected".
+  connectedChannels: ChannelKey[] | null;
   week: { date: string; dow: string; price: number; minStay: number }[];
 }
 
@@ -211,9 +217,19 @@ export default function RateRevenueTab({
           propertyId={propertyId}
           previewBase={todayPrice}
           previewCurrency={summary?.currency}
+          showChannelChips
         />
       </div>
     </div>
+
+    {summary && todayPrice !== undefined && (
+      <ChannelOffersPanel
+        plans={summary.plans}
+        parentPrice={todayPrice}
+        currency={summary.currency}
+        connected={summary.connectedChannels}
+      />
+    )}
 
     {calendarProperty && (
       <div className="bg-white rounded-2xl border border-slate-100 p-4">

@@ -35,10 +35,14 @@ export default function RatePlansPanel({
   propertyId,
   previewBase,
   previewCurrency,
+  showChannelChips = false,
 }: {
   propertyId: string;
   previewBase?: number;
   previewCurrency?: string;
+  // Marks each row with the channels that carry it. Off by default so the
+  // panel stays honest wherever channel state isn't known.
+  showChannelChips?: boolean;
 }) {
   const [plans, setPlans] = useState<RatePlan[]>([]);
   const [pushesInto, setPushesInto] = useState<string | null>(null);
@@ -165,6 +169,7 @@ export default function RatePlansPanel({
             plan={parent}
             isPushTarget={parent.channexRatePlanId === pushesInto}
             preview={previewBase !== undefined && previewCurrency ? { base: previewBase, currency: previewCurrency } : undefined}
+            showChannelChips={showChannelChips}
             onEdit={() => { setActionError(null); setEditing(parent.id); }}
           />
         ))}
@@ -191,6 +196,7 @@ export default function RatePlansPanel({
                 plan={p}
                 isPushTarget={p.channexRatePlanId === pushesInto}
                 preview={previewBase !== undefined && previewCurrency ? { base: previewBase, currency: previewCurrency } : undefined}
+                showChannelChips={showChannelChips}
                 onEdit={() => { setActionError(null); setEditing(p.id); }}
                 onDelete={() => {
                   if (!confirm(`Remove "${p.title}"? It stops being sellable on every channel it is mapped to.`)) return;
@@ -244,10 +250,11 @@ export default function RatePlansPanel({
 }
 
 function PlanRow({
-  plan, isPushTarget, onEdit, onDelete, preview,
+  plan, isPushTarget, onEdit, onDelete, preview, showChannelChips,
 }: {
   plan: RatePlan; isPushTarget: boolean; onEdit?: () => void; onDelete?: () => void;
   preview?: { base: number; currency: string };
+  showChannelChips?: boolean;
 }) {
   const isParent = plan.kind === "PARENT";
   const pct = plan.derivedPercent;
@@ -281,6 +288,29 @@ function PlanRow({
             <span className="text-slate-400"> · {plan.channexRatePlanId.slice(0, 8)}</span>
           )}
         </div>
+        {/* Airbnb takes exactly one rate plan per listing - the parent's
+            mirror - so every derived plan is Booking.com-only. The dashed
+            empty slot is deliberate: absence is the information, and a
+            missing badge would read as an oversight instead. */}
+        {showChannelChips && (
+          <div className="flex items-center gap-1 mt-1.5">
+            <span className="text-[9px] font-bold tracking-wide px-1.5 py-0.5 rounded border bg-sky-50 text-sky-800 border-sky-200">
+              BOOKING
+            </span>
+            {isParent ? (
+              <span className="text-[9px] font-bold tracking-wide px-1.5 py-0.5 rounded border bg-rose-50 text-rose-800 border-rose-200">
+                AIRBNB
+              </span>
+            ) : (
+              <span
+                title="Airbnb accepts one rate plan per listing - only the parent reaches it"
+                className="text-[9px] font-bold tracking-wide px-1.5 py-0.5 rounded border border-dashed border-slate-200 text-slate-400"
+              >
+                &mdash;
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="text-right shrink-0">
