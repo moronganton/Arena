@@ -160,21 +160,73 @@ describe("minimum stay", () => {
     assert.ok(days.every((x) => x.minStay === 1));
   });
 
-  // Unlike price, min stay ignores priority entirely and takes the MAXIMUM.
-  // Two rules disagreeing on price is settled by authority; on min stay, by
-  // caution - an overlap may only ever tighten a restriction the host set.
-  test("takes the strictest value, not the highest-priority one", () => {
+  // Among ORDINARY rules (below the manual-override layer at priority 50),
+  // min stay ignores priority and takes the MAXIMUM: a weekend uplift created
+  // with the default "min 1" must not quietly erase the base rule's floor, so
+  // disagreement between standing rules only ever tightens.
+  test("ordinary rules: the strictest value wins, not the highest-priority one", () => {
     const days = materializeRates(
       90,
       [
         rule({ minNights: 5, priority: 1 }),
-        rule({ minNights: 2, priority: 99 }), // higher priority, looser - must not win
+        rule({ minNights: 2, priority: 30 }), // higher priority, looser - must not win
       ],
       [],
       TUE,
       NEXT_TUE
     );
     assert.ok(days.every((x) => x.minStay === 5));
+  });
+
+  // A MANUAL override (priority >= 50, what the calendar's per-date editor
+  // writes) is the operator naming a value for a date, and it REPLACES the
+  // merge outright. Under max() a calendar edit lowering min stay below a
+  // standing rule's floor was stored and then silently lost - the exact bug
+  // this contract exists to prevent.
+  test("a manual override lowers min stay below a standing rule's floor", () => {
+    const days = materializeRates(
+      90,
+      [rule({ minNights: 4, priority: 0 }), rule({ minNights: 2, priority: 50 })],
+      [],
+      TUE,
+      NEXT_TUE
+    );
+    assert.ok(days.every((x) => x.minStay === 2));
+  });
+
+  test("between two overrides, higher priority wins; on a tie, the newest", () => {
+    const byPriority = materializeRates(
+      90,
+      [rule({ minNights: 2, priority: 50 }), rule({ minNights: 3, priority: 60 })],
+      [],
+      TUE,
+      NEXT_TUE
+    );
+    assert.ok(byPriority.every((x) => x.minStay === 3));
+
+    const byAge = materializeRates(
+      90,
+      [
+        rule({ minNights: 2, priority: 50, createdAt: d("2026-01-01") }),
+        rule({ minNights: 6, priority: 50, createdAt: d("2026-02-01") }),
+      ],
+      [],
+      TUE,
+      NEXT_TUE
+    );
+    assert.ok(byAge.every((x) => x.minStay === 6), "the later edit is the operator's current intent");
+  });
+
+  test("an override only replaces on dates it applies to", () => {
+    const days = materializeRates(
+      90,
+      [rule({ minNights: 4, priority: 0 }), rule({ minNights: 1, priority: 50, daysOfWeek: "[5]" })],
+      [],
+      TUE,
+      NEXT_TUE
+    );
+    assert.equal(days.find((x) => x.date === "2026-09-04")!.minStay, 1, "Friday - override wins");
+    assert.equal(days.find((x) => x.date === "2026-09-03")!.minStay, 4, "Thursday - floor stands");
   });
 
   test("only counts rules that apply on the date", () => {

@@ -3,31 +3,76 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 import { enqueueAriUpdate } from "@/lib/channels/ari-outbox";
+import { groupContiguousDates } from "@/lib/date-ranges";
+import { MANUAL_OVERRIDE_PRIORITY } from "@/lib/channels/rate-materializer";
 
-// Manual per-range price overrides made by dragging a date range on the
-// calendar grid at /pricing/calendar - writing into the same PricingRule
-// table the rule-list page (/pricing) uses, just entered by drag-select
-// instead of a form. Distinguished from every other rule by a "[manual]"
-// name prefix, the same convention seed-realistic-rates.ts already uses for
-// its own generated rules, so the two never collide and re-editing the same
-// exact range replaces its own prior override instead of piling up
-// duplicates that would all apply at the same priority.
+// Manual per-date price overrides made on the calendar grid - writing into
+// the same PricingRule table the rule-list page (/pricing) uses, just entered
+// by clicking dates instead of a form. Distinguished from every other rule by
+// a "[manual]" name prefix, the same convention seed-realistic-rates.ts
+// already uses, so the two never collide and re-editing the same exact range
+// replaces its own prior override instead of piling up duplicates.
 //
-// Priority 50 is deliberately above the seeded layers (season=10,
-// weekend=20, holiday=30, see seed-realistic-rates.ts) so a manual edit from
-// the calendar always wins over whatever rule was under it - the same
-// "more specific beats more general" contract resolvePrice already
-// implements for every other rule.
+// The priority comes from MANUAL_OVERRIDE_PRIORITY in the materializer - the
+// single definition of "the manual layer". Above it, resolveMinStay lets an
+// override REPLACE the min-stay merge instead of joining the max(), which is
+// what makes lowering a minimum from the calendar possible at all.
+//
+// Two accepted shapes:
+//   { startDate, endDate, ... }  - one inclusive range (the original contract)
+//   { dates: ["YYYY-MM-DD",...] } - hand-picked dates; adjacent picks are
+//     grouped into contiguous ranges first, so all the Saturdays of a month
+//     become one small rule per weekend rather than thirty one-day rules.
 const MANUAL_PREFIX = "[manual]";
-const MANUAL_PRIORITY = 50;
 
-const bodySchema = z.object({
-  propertyId: z.string(),
-  startDate: z.string(),
-  endDate: z.string(), // inclusive, same convention as the rest of PricingRule
-  price: z.number().min(0),
-  minNights: z.number().int().min(1).optional(),
-});
+const bodySchema = z
+  .object({
+    propertyId: z.string(),
+    price: z.number().min(0),
+    minNights: z.number().int().min(1).optional(),
+    startDate: z.string().optional(),
+    endDate: z.string().optional(), // inclusive, same convention as PricingRule
+    dates: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).min(1).max(366).optional(),
+  })
+  .refine((b) => b.dates !== undefined || (b.startDate !== undefined && b.endDate !== undefined), {
+    message: "provide either dates[] or startDate+endDate",
+  });
+
+async function upsertManualRule(
+  propertyId: string,
+  startYmd: string,
+  endYmd: string,
+  price: number,
+  minNights: number | undefined
+) {
+  const startDate = new Date(`${startYmd}T00:00:00.000Z`);
+  const endDate = new Date(`${endYmd}T00:00:00.000Z`);
+
+  // Re-editing the exact same range updates that rule instead of stacking a
+  // second one on top of it at the same priority.
+  const existing = await prisma.pricingRule.findFirst({
+    where: { propertyId, name: { startsWith: MANUAL_PREFIX }, startDate, endDate },
+  });
+
+  return existing
+    ? prisma.pricingRule.update({
+        where: { id: existing.id },
+        data: { price, minNights: minNights ?? existing.minNights, active: true },
+      })
+    : prisma.pricingRule.create({
+        data: {
+          propertyId,
+          name: `${MANUAL_PREFIX} ${startYmd} to ${endYmd}`,
+          ruleType: "SEASONAL",
+          startDate,
+          endDate,
+          price,
+          minNights: minNights ?? 1,
+          priority: MANUAL_OVERRIDE_PRIORITY,
+          active: true,
+        },
+      });
+}
 
 export async function POST(req: NextRequest) {
   const session = await auth();
@@ -36,8 +81,6 @@ export async function POST(req: NextRequest) {
   const parsed = bodySchema.safeParse(await req.json());
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   const { propertyId, price, minNights } = parsed.data;
-  const startDate = new Date(parsed.data.startDate);
-  const endDate = new Date(parsed.data.endDate);
 
   const property = await prisma.property.findFirst({ where: { id: propertyId, ownerId: session!.user!.id } });
   if (!property) return NextResponse.json({ error: "Property not found" }, { status: 404 });
@@ -53,38 +96,25 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Re-editing the exact same range updates that rule instead of stacking a
-  // second one on top of it at the same priority, where only insertion
-  // order would decide which one actually won.
-  const existing = await prisma.pricingRule.findFirst({
-    where: { propertyId, name: { startsWith: MANUAL_PREFIX }, startDate, endDate },
-  });
+  const ranges = parsed.data.dates
+    ? groupContiguousDates(parsed.data.dates)
+    : [{ start: parsed.data.startDate!, end: parsed.data.endDate! }];
 
-  const name = `${MANUAL_PREFIX} ${parsed.data.startDate} to ${parsed.data.endDate}`;
-  const rule = existing
-    ? await prisma.pricingRule.update({
-        where: { id: existing.id },
-        data: { price, minNights: minNights ?? existing.minNights, active: true },
-      })
-    : await prisma.pricingRule.create({
-        data: {
-          propertyId,
-          name,
-          ruleType: "SEASONAL",
-          startDate,
-          endDate,
-          price,
-          minNights: minNights ?? 1,
-          priority: MANUAL_PRIORITY,
-          active: true,
-        },
-      });
+  const rules = [];
+  for (const r of ranges) {
+    rules.push(await upsertManualRule(propertyId, r.start, r.end, price, minNights));
+  }
 
+  // One push spanning the whole selection. Days between picked ranges get
+  // re-pushed with unchanged truth, which is safe by construction - every
+  // push sends the full resolved state per date - and the outbox coalesces
+  // overlapping spans anyway.
+  const spanFrom = new Date(`${ranges[0].start}T00:00:00.000Z`);
   // endDate is inclusive on PricingRule; the push range is exclusive, same
   // +1 day convention ruleRange() uses in app/api/pricing/route.ts.
-  const pushTo = new Date(endDate.getTime() + 86400000);
-  await enqueueAriUpdate(propertyId, startDate, pushTo, "RATE");
-  await enqueueAriUpdate(propertyId, startDate, pushTo, "RESTRICTION");
+  const spanTo = new Date(new Date(`${ranges[ranges.length - 1].end}T00:00:00.000Z`).getTime() + 86400000);
+  await enqueueAriUpdate(propertyId, spanFrom, spanTo, "RATE");
+  await enqueueAriUpdate(propertyId, spanFrom, spanTo, "RESTRICTION");
 
-  return NextResponse.json(rule, { status: existing ? 200 : 201 });
+  return NextResponse.json({ rules, ranges }, { status: 201 });
 }

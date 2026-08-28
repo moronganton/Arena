@@ -112,10 +112,34 @@ function resolvePrice(basePrice: number, applicable: PricingRuleLike[]): number 
   return Math.round(price * 100) / 100;
 }
 
-// The strictest (largest) minNights among applicable rules wins - taking
-// the max only ever tightens the restriction, never loosens one a host
-// configured, which is the safe direction to err in if two rules disagree.
+// Rules at or above this priority are the manual-override layer: what the
+// operator typed onto a specific date on the calendar, as opposed to a
+// standing rule. The seeded layers sit below it (season 10, weekend 20,
+// holiday 30) and /api/pricing/override writes at exactly this value.
+export const MANUAL_OVERRIDE_PRIORITY = 50;
+
+// Two regimes, because min stay has two kinds of author.
+//
+// Among ORDINARY rules the strictest (largest) minNights wins: a weekend
+// uplift created with the default "min 1" must not quietly erase the base
+// rule's min 4, so disagreement between standing rules only ever tightens.
+//
+// A MANUAL override is different: it is the operator saying "this date, this
+// value", and under max() a calendar edit lowering min stay below a standing
+// rule's floor was stored and then silently lost - the value came straight
+// back as the old floor. So an override (highest priority, newest on a tie -
+// the same order resolvePrice settles disagreements in) replaces the merge
+// outright instead of joining it.
 function resolveMinStay(applicable: PricingRuleLike[]): number {
+  const overrides = applicable.filter(
+    (r) => r.priority >= MANUAL_OVERRIDE_PRIORITY && r.minNights != null
+  );
+  if (overrides.length > 0) {
+    const winner = overrides.sort(
+      (a, b) => a.priority - b.priority || a.createdAt.getTime() - b.createdAt.getTime()
+    )[overrides.length - 1];
+    return winner.minNights as number;
+  }
   let minStay = 1;
   for (const rule of applicable) {
     if (rule.minNights != null && rule.minNights > minStay) minStay = rule.minNights;

@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
+import { groupContiguousDates } from "@/lib/date-ranges";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, RefreshCw, CalendarDays, Info } from "lucide-react";
 import { formatCurrency, SOURCE_LABELS } from "@/lib/utils";
@@ -94,12 +95,14 @@ export default function PriceCalendarPanel({ property }: { property: PriceCalend
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
 
-  // Editable, drag-to-select range - only meaningful for Channex properties,
-  // whose prices live in StayHQ's own rule engine. Smoobu-managed properties
-  // are set in PriceLabs, so there is nothing here to edit for them; the
-  // calendar stays the read-only Smoobu mirror it always was.
-  const [selStart, setSelStart] = useState<string | null>(null);
-  const [selEnd, setSelEnd] = useState<string | null>(null);
+  // Editable, click-to-toggle selection - only meaningful for Channex
+  // properties, whose prices live in StayHQ's own rule engine. A click adds a
+  // date, a second click removes it, so non-adjacent dates (all the weekends
+  // of a month, say) can be edited in one go - the old start/end range model
+  // could only express one contiguous block. Smoobu-managed properties are
+  // set in PriceLabs, so there is nothing here to edit for them; the calendar
+  // stays the read-only Smoobu mirror it always was.
+  const [sel, setSel] = useState<Set<string>>(new Set());
   const [editPrice, setEditPrice] = useState("");
   const [editMinNights, setEditMinNights] = useState("1");
   const [saving, setSaving] = useState(false);
@@ -138,52 +141,59 @@ export default function PriceCalendarPanel({ property }: { property: PriceCalend
 
   // Clear any in-progress selection when switching property or month, so a
   // selection can never be saved against the wrong context.
-  useEffect(() => { setSelStart(null); setSelEnd(null); setSaveErr(""); }, [propId, year, month]);
+  useEffect(() => { setSel(new Set()); setSaveErr(""); }, [propId, year, month]);
 
-  // Every date in the current selection, inclusive.
-  const selectedKeys: string[] = [];
-  if (selStart && selEnd) {
-    const cur = new Date(selStart);
-    const stop = new Date(selEnd);
-    while (cur <= stop) { selectedKeys.push(ymd(cur)); cur.setUTCDate(cur.getUTCDate() + 1); }
-  }
+  // Every selected date, in calendar order regardless of click order.
+  const selectedKeys: string[] = [...sel].sort();
 
+  // "Sep 4 - Sep 5, Sep 11 - Sep 12, +2 more" - the selection described the
+  // way the operator thinks of it, as runs of days rather than a date soup.
+  const selRanges = groupContiguousDates(selectedKeys);
+  const selLabel =
+    selRanges
+      .slice(0, 3)
+      .map((r) => (r.start === r.end ? fmtShort(r.start) : `${fmtShort(r.start)} — ${fmtShort(r.end)}`))
+      .join(", ") + (selRanges.length > 3 ? `, +${selRanges.length - 3} more` : "");
+
+  const firstSelected = selectedKeys[0] ?? null;
   useEffect(() => {
-    if (selStart && selEnd) {
-      const r = rates[selStart];
+    if (firstSelected) {
+      const r = rates[firstSelected];
       setEditPrice(r?.price != null ? String(Math.round(r.price)) : "");
       setEditMinNights(String(r?.minStay || 1));
     }
-  }, [selStart, selEnd, rates]);
+    // Prefill from the earliest picked date only when the selection gains its
+    // anchor - retyping must survive adding more dates to the selection.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firstSelected]);
 
   function onDayClick(key: string) {
     if (!isChannex) return;
     setSaveErr("");
-    if (!selStart || selEnd) {
-      setSelStart(key); setSelEnd(null);
-      return;
-    }
-    if (key < selStart) { setSelEnd(selStart); setSelStart(key); }
-    else setSelEnd(key);
+    setSel((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   }
 
   async function saveOverride() {
-    if (!selStart || !selEnd || !propId || !editPrice) return;
+    if (selectedKeys.length === 0 || !propId || !editPrice) return;
     setSaving(true); setSaveErr("");
     const res = await fetch("/api/pricing/override", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         propertyId: propId,
-        startDate: selStart,
-        endDate: selEnd,
+        dates: selectedKeys,
         price: Number(editPrice),
         minNights: Number(editMinNights) || 1,
       }),
     });
     setSaving(false);
     if (res.ok) {
-      setSelStart(null); setSelEnd(null);
+      setSel(new Set());
       load();
       return;
     }
@@ -236,7 +246,7 @@ export default function PriceCalendarPanel({ property }: { property: PriceCalend
       <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
         <p className="text-slate-500 text-sm">
           {isChannex
-            ? "Tap a date, then another, to set a price for that range. Pushes to Channex automatically."
+            ? "Tap dates to select them - tap again to deselect. One price applies to everything selected, and pushes to Channex automatically."
             : "A read-only view of your current rates in Smoobu (managed by PriceLabs)."}
         </p>
         <div className="flex items-center gap-2 ml-auto">
@@ -286,7 +296,7 @@ export default function PriceCalendarPanel({ property }: { property: PriceCalend
               // block/stay breakdown; the Channex path reports both.
               const unavailable = r && (r.available === 0 || r.available === false);
               const blocked = !!r?.blocked;
-              const inSelection = isChannex && selStart != null && (selEnd ? key >= selStart && key <= selEnd : key === selStart);
+              const inSelection = isChannex && sel.has(key);
 
               const cell = (
                 <>
@@ -378,19 +388,14 @@ export default function PriceCalendarPanel({ property }: { property: PriceCalend
         </div>
       )}
 
-      {isChannex && selStart && (
+      {isChannex && selectedKeys.length > 0 && (
         <div className="bg-white border border-indigo-200 rounded-2xl p-4 sm:p-5 mt-4">
-          {!selEnd ? (
-            <p className="text-sm text-slate-700">
-              <strong>{fmtShort(selStart)}</strong> selected — tap an end date for a range, or tap it again for one night.
-            </p>
-          ) : (
             <>
               <div className="flex items-baseline justify-between gap-3 flex-wrap mb-4">
                 <h3 className="font-semibold text-slate-900">
-                  {selStart === selEnd ? fmtShort(selStart) : `${fmtShort(selStart)} — ${fmtShort(selEnd)}`}
+                  {selLabel}
                   <span className="ml-2 text-sm font-normal text-slate-500">
-                    {selectedKeys.length} night{selectedKeys.length === 1 ? "" : "s"}
+                    {selectedKeys.length} night{selectedKeys.length === 1 ? "" : "s"} selected
                   </span>
                 </h3>
                 {priceLo != null && (
@@ -435,10 +440,10 @@ export default function PriceCalendarPanel({ property }: { property: PriceCalend
                   {saving ? "Saving…" : "Save price"}
                 </button>
                 <button
-                  onClick={() => { setSelStart(null); setSelEnd(null); }}
+                  onClick={() => setSel(new Set())}
                   className="bg-white hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-xl text-sm font-medium border border-slate-200 transition"
                 >
-                  Cancel
+                  Clear selection
                 </button>
               </div>
               {saveErr && <p className="text-xs text-rose-600 mt-2">{saveErr}</p>}
@@ -518,7 +523,6 @@ export default function PriceCalendarPanel({ property }: { property: PriceCalend
                 </div>
               )}
             </>
-          )}
         </div>
       )}
 
