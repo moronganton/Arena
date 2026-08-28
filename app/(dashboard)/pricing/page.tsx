@@ -1,7 +1,32 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { Plus, Trash2, Pencil, DollarSign, CalendarDays, X } from "lucide-react";
+import { Plus, Trash2, Pencil, CalendarDays, X, ChevronDown, AlertTriangle } from "lucide-react";
+import {
+  classifyRule,
+  describeRule,
+  parseDays,
+  toDateInput,
+  CONCEPT_LABEL,
+  MANUAL_PREFIX,
+  PRIORITY,
+  WEEKEND_DAYS,
+  type Concept,
+} from "@/lib/pricing-concepts";
+
+// Pricing as four decisions, not a generic rule builder.
+//
+// The engine underneath is unchanged - every card here still writes a
+// PricingRule row. What changed is that the operator no longer meets the row:
+// no Rule Type dropdown (the materializer never read it), no Priority integer
+// (each concept owns a fixed tier, so a weekend always beats a season and a
+// clicked date always beats both), no choosing between price and adjustment on
+// the same form. See lib/pricing-concepts.ts for why this vocabulary and not
+// the generic one.
+//
+// Anything that predates this - or that a determined operator builds in the
+// advanced drawer - still works and still shows up; it is classified by shape
+// rather than hidden.
 
 interface Property {
   id: string;
@@ -14,538 +39,692 @@ interface PricingRule {
   id: string;
   name: string;
   ruleType: string;
-  price?: number;
-  adjustment?: number;
+  price?: number | null;
+  adjustment?: number | null;
   adjType?: string;
-  startDate?: string;
-  endDate?: string;
-  daysOfWeek?: string;
-  minNights?: number;
+  startDate?: string | null;
+  endDate?: string | null;
+  daysOfWeek?: string | null;
+  minNights?: number | null;
   priority: number;
   active: boolean;
-  property: { id: string; name: string; currency: string };
+  property?: { id: string; name: string; currency: string };
 }
-
-// A rule's currency comes from its property relation, which is not
-// guaranteed to be present on every code path that puts a rule into state.
-// Reading it directly took the whole page down once already, so it degrades
-// to the selected property's currency and then to nothing.
-function ruleCurrency(rule: PricingRule, fallback?: string): string {
-  return rule.property?.currency ?? fallback ?? "";
-}
-
-const RULE_TYPE_LABELS: Record<string, string> = {
-  BASE: "Base Price",
-  WEEKEND: "Weekend Rate",
-  SEASONAL: "Seasonal Rate",
-  LAST_MINUTE: "Last Minute",
-  MINIMUM_STAY: "Min. Stay",
-};
 
 export default function PricingPage() {
   const [properties, setProperties] = useState<Property[]>([]);
   const [rules, setRules] = useState<PricingRule[]>([]);
-  const [selectedProperty, setSelectedProperty] = useState<string>("");
-  const [_loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const blankForm = {
-    name: "",
-    ruleType: "SEASONAL",
-    startDate: "",
-    endDate: "",
-    price: "",
-    adjustment: "",
-    adjType: "PERCENT",
-    minNights: "1",
-    // Ties are resolved newest-first, so leaving this at 0 is workable for a
-    // handful of rules and stops being workable the moment two of them overlap
-    // and you care which wins.
-    priority: "0",
-    daysOfWeek: [] as number[],
-    active: true,
-  };
-  const [form, setForm] = useState(blankForm);
+  const [propId, setPropId] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
-  // Both of these render straight into .map/.find, so a non-array response -
-  // an auth failure or a 500 returning {error} - would crash the page rather
-  // than show it empty. Normalising here keeps a bad response visible as "no
-  // rules" instead of a white screen.
   useEffect(() => {
     fetch("/api/properties")
       .then((r) => r.json())
-      .then((data) => {
-        const list = Array.isArray(data) ? data : [];
+      .then((d) => {
+        const list: Property[] = Array.isArray(d) ? d : [];
         setProperties(list);
-        if (list.length > 0) setSelectedProperty(list[0].id);
-        setLoading(false);
+        if (list.length) setPropId((cur) => cur || list[0].id);
       })
-      .catch(() => setLoading(false));
+      .catch(() => setError("Couldn't load your properties"));
   }, []);
 
-  useEffect(() => {
-    if (!selectedProperty) return;
-    fetch(`/api/pricing?propertyId=${selectedProperty}`)
+  const loadRules = useCallback(() => {
+    if (!propId) return;
+    fetch(`/api/pricing?propertyId=${propId}`)
       .then((r) => r.json())
-      .then((data) => setRules(Array.isArray(data) ? data : []))
-      .catch(() => setRules([]));
-  }, [selectedProperty]);
+      .then((d) => setRules(Array.isArray(d) ? d : []))
+      .catch(() => setError("Couldn't load pricing"));
+  }, [propId]);
+  useEffect(() => loadRules(), [loadRules]);
 
-  function openNew() {
-    setEditingId(null);
-    setForm(blankForm);
-    setSaveError(null);
-    setShowForm(true);
-  }
+  const property = properties.find((p) => p.id === propId);
+  const currency = property?.currency ?? "EUR";
 
-  // Prefills the same form used to create a rule, so editing is "open the
-  // rule's own values, change what's wrong, save" rather than a second form
-  // with a different shape. daysOfWeek comes back from the API as a JSON
-  // string ("[5,6]"); everything else is already the right primitive type.
-  function openEdit(rule: PricingRule) {
-    setEditingId(rule.id);
-    setForm({
-      name: rule.name,
-      ruleType: rule.ruleType,
-      startDate: rule.startDate ? rule.startDate.slice(0, 10) : "",
-      endDate: rule.endDate ? rule.endDate.slice(0, 10) : "",
-      price: rule.price != null ? String(rule.price) : "",
-      adjustment: rule.adjustment != null ? String(rule.adjustment) : "",
-      adjType: rule.adjType || "PERCENT",
-      minNights: String(rule.minNights || 1),
-      priority: String(rule.priority ?? 0),
-      daysOfWeek: rule.daysOfWeek ? (JSON.parse(rule.daysOfWeek) as number[]) : [],
-      active: rule.active,
-    });
-    setSaveError(null);
-    setShowForm(true);
-  }
+  const mine = rules.filter((r) => (r.property?.id ?? propId) === propId);
+  const seasons = mine.filter((r) => classifyRule(r as never) === "SEASON");
+  const weekend = mine.find((r) => classifyRule(r as never) === "WEEKEND") ?? null;
+  const overrides = mine.filter((r) => classifyRule(r as never) === "OVERRIDE");
+  const custom = mine.filter((r) => classifyRule(r as never) === "CUSTOM");
+  const baseRules = mine.filter((r) => classifyRule(r as never) === "BASE");
 
-  async function saveRule() {
-    setSaveError(null);
-    const body: Record<string, unknown> = {
-      ...form,
-      propertyId: selectedProperty,
-      price: form.price ? Number(form.price) : undefined,
-      adjustment: form.adjustment ? Number(form.adjustment) : undefined,
-      minNights: Number(form.minNights),
-      priority: Number(form.priority),
-      daysOfWeek: form.daysOfWeek.length > 0 ? form.daysOfWeek : undefined,
-    };
-    if (editingId) body.id = editingId;
-    const res = await fetch("/api/pricing", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (res.ok) {
-      const saved = await res.json();
-      // The update branch of the API doesn't re-include `property` on its
-      // response (only create does) - spreading onto the existing row keeps
-      // it, the same defensive merge toggleRule already relies on below.
-      setRules((prev) =>
-        editingId ? prev.map((r) => (r.id === saved.id ? { ...r, ...saved } : r)) : [...prev, saved]
-      );
-      setShowForm(false);
-      setEditingId(null);
-      setForm(blankForm);
-      return;
+  async function save(body: Record<string, unknown>) {
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/pricing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ propertyId: propId, ...body }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => null);
+        setError(typeof d?.error === "string" ? d.error : "Couldn't save that");
+        return false;
+      }
+      loadRules();
+      return true;
+    } finally {
+      setSaving(false);
     }
-    // A rejected save used to do nothing at all - the form just sat there,
-    // indistinguishable from a click that never registered.
-    const detail = await res.json().catch(() => null);
-    setSaveError(
-      typeof detail?.error === "string"
-        ? detail.error
-        : `Could not save this rule (${res.status}). Check the dates and price and try again.`
-    );
   }
 
-  async function deleteRule(id: string) {
+  async function remove(id: string) {
     const res = await fetch(`/api/pricing?id=${id}`, { method: "DELETE" });
     if (res.ok) setRules((prev) => prev.filter((r) => r.id !== id));
   }
 
-  async function toggleRule(rule: PricingRule) {
-    const res = await fetch("/api/pricing", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: rule.id, active: !rule.active }),
-    });
-    if (res.ok) {
-      const updated = await res.json();
-      setRules((prev) => prev.map((r) => (r.id === rule.id ? { ...r, ...updated } : r)));
-    }
-  }
-
-  const DOW_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  function toggleDay(d: number) {
-    setForm((f) => ({
-      ...f,
-      daysOfWeek: f.daysOfWeek.includes(d) ? f.daysOfWeek.filter((x) => x !== d) : [...f.daysOfWeek, d].sort(),
-    }));
-  }
-
-  const selectedProp = properties.find((p) => p.id === selectedProperty);
-
   return (
-    <div className="p-4 md:p-8 max-w-5xl mx-auto">
-      <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
+    <div className="p-4 md:p-8 max-w-4xl mx-auto">
+      <div className="flex items-start justify-between gap-3 flex-wrap mb-1">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Pricing</h1>
-          <p className="text-slate-500 text-sm mt-0.5">Manage rates and pricing rules</p>
+          <p className="text-sm text-slate-500 mt-0.5">
+            Four settings decide every night&apos;s price. They stack in the order shown.
+          </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Link href="/pricing/calendar" className="flex items-center gap-2 border border-slate-200 text-slate-700 hover:bg-slate-50 px-4 py-2.5 rounded-xl text-sm font-medium transition">
-            <CalendarDays className="w-4 h-4" /> Live prices
-          </Link>
-          <button
-            onClick={openNew}
-            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition"
-          >
-            <Plus className="w-4 h-4" />
-            Add Rule
-          </button>
-        </div>
+        <Link
+          href="/pricing/calendar"
+          className="flex items-center gap-1.5 text-sm font-medium text-indigo-600 hover:underline"
+        >
+          <CalendarDays className="w-4 h-4" />
+          Open calendar
+        </Link>
       </div>
 
-      {/* Property Selector */}
-      <div className="bg-white rounded-2xl border border-slate-100 p-4 mb-6">
-        <div className="flex items-center gap-4">
-          <label className="text-sm font-medium text-slate-700">Property:</label>
-          <select
-            value={selectedProperty}
-            onChange={(e) => setSelectedProperty(e.target.value)}
-            className="text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          >
-            {properties.map((p) => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </select>
-          {selectedProp && (
-            <span className="text-sm text-slate-500">
-              Base rate: <strong>{selectedProp.currency} {selectedProp.basePrice}/night</strong>
-            </span>
-          )}
-        </div>
-      </div>
+      {properties.length > 1 && (
+        <select
+          value={propId}
+          onChange={(e) => setPropId(e.target.value)}
+          className="border border-slate-200 rounded-xl px-3 py-2 text-sm mt-4 max-w-xs w-full focus:outline-none focus:ring-2 focus:ring-indigo-500"
+        >
+          {properties.map((p) => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </select>
+      )}
 
-      {/* Add / Edit Rule Form - same shape either way, just pre-filled and
-          POSTed with an id when editing (see openEdit / saveRule).
-          Opens as a fixed sheet rather than inline in the page flow: editing
-          a rule near the bottom of a long list used to mean scrolling all
-          the way back to the top to reach the form. Same sheet chrome as the
-          price calendar on the Calendar tab, so it's now the one place in
-          the app "click something in a list, edit it here" looks like. */}
-      {showForm && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center">
-          <div
-            className="absolute inset-0 bg-slate-900/40"
-            onClick={() => { setShowForm(false); setEditingId(null); }}
-          />
-          <div className="relative w-full max-w-2xl max-h-[88vh] bg-white rounded-t-3xl shadow-2xl overflow-y-auto">
-            <div className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b border-slate-100 px-4 py-3 flex items-center gap-3">
-              <span className="w-9 h-1 bg-slate-200 rounded-full absolute left-1/2 -translate-x-1/2 top-1.5" />
-              <h3 className="font-semibold text-slate-900 mt-1">{editingId ? "Edit Pricing Rule" : "New Pricing Rule"}</h3>
-              <button
-                onClick={() => { setShowForm(false); setEditingId(null); }}
-                className="ml-auto p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition shrink-0"
-                aria-label="Close"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="p-4 sm:p-5">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Rule Name</label>
-              <input
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                placeholder="e.g. Summer 2025"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Rule Type</label>
-              <select
-                value={form.ruleType}
-                onChange={(e) => setForm({ ...form, ruleType: e.target.value })}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              >
-                {Object.entries(RULE_TYPE_LABELS).map(([v, l]) => (
-                  <option key={v} value={v}>{l}</option>
-                ))}
-              </select>
-            </div>
-            {/* Dates apply to any rule type, not just Seasonal/Last Minute -
-                a Weekend rule can span a season just as easily (see the
-                seeded "Weekend uplift" rule, which covers the whole
-                500-day horizon). Left blank, a rule applies always. */}
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Start Date <span className="text-slate-400 font-normal">(optional)</span></label>
-              <input
-                type="date"
-                value={form.startDate}
-                onChange={(e) => setForm({ ...form, startDate: e.target.value })}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">End Date <span className="text-slate-400 font-normal">(optional)</span></label>
-              <input
-                type="date"
-                value={form.endDate}
-                onChange={(e) => setForm({ ...form, endDate: e.target.value })}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-            </div>
-            {form.ruleType === "WEEKEND" && (
-              <div className="col-span-2">
-                <label className="block text-sm font-medium text-slate-700 mb-1">Applies on</label>
-                <div className="flex flex-wrap gap-1.5">
-                  {DOW_LABELS.map((label, d) => (
-                    <button
-                      key={d}
-                      type="button"
-                      onClick={() => toggleDay(d)}
-                      className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border transition ${
-                        form.daysOfWeek.includes(d)
-                          ? "bg-indigo-600 border-indigo-600 text-white"
-                          : "bg-white border-slate-200 text-slate-600 hover:border-indigo-300"
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-                <p className="text-xs text-slate-400 mt-1">None selected = every day.</p>
-              </div>
-            )}
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Fixed Price (or leave blank)</label>
-              <input
-                type="number"
-                value={form.price}
-                onChange={(e) => setForm({ ...form, price: e.target.value })}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                placeholder="150"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Adjustment</label>
-              <div className="flex gap-2">
-                <input
-                  type="number"
-                  value={form.adjustment}
-                  onChange={(e) => setForm({ ...form, adjustment: e.target.value })}
-                  className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  placeholder="+20 or -10"
-                />
-                <select
-                  value={form.adjType}
-                  onChange={(e) => setForm({ ...form, adjType: e.target.value })}
-                  className="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none"
-                >
-                  <option value="PERCENT">%</option>
-                  <option value="FIXED">Fixed</option>
-                </select>
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Min. Nights</label>
-              <input
-                type="number"
-                value={form.minNights}
-                onChange={(e) => setForm({ ...form, minNights: e.target.value })}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                min="1"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Priority</label>
-              <input
-                type="number"
-                value={form.priority}
-                onChange={(e) => setForm({ ...form, priority: e.target.value })}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                min="0"
-              />
-              <p className="text-xs text-slate-500 mt-1">
-                Higher wins where rules overlap. Seeded seasons use 10, weekend uplifts 20, and a
-                manual calendar override is 50 — so a rule above 50 beats everything.
-              </p>
-            </div>
-          </div>
-          {saveError && (
-            <div className="mt-4 px-3 py-2 rounded-lg bg-red-50 text-red-700 text-sm">{saveError}</div>
-          )}
-          <div className="flex gap-3 mt-4">
-            <button
-              onClick={saveRule}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-sm font-medium transition"
-            >
-              {editingId ? "Save Changes" : "Save Rule"}
-            </button>
-            <button
-              onClick={() => { setShowForm(false); setEditingId(null); }}
-              className="bg-white hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-xl text-sm font-medium border border-slate-200 transition"
-            >
-              Cancel
-            </button>
-          </div>
-            </div>
-          </div>
+      {error && (
+        <div className="flex items-start gap-2 text-sm px-3 py-2 rounded-lg border bg-red-50 border-red-200 text-red-700 mt-4">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          {error}
         </div>
       )}
 
-      {/* Rules List */}
-      {rules.length === 0 ? (
-        <div className="bg-white rounded-2xl border border-slate-100 text-center py-16">
-          <DollarSign className="w-10 h-10 text-slate-300 mx-auto mb-3" />
-          <p className="text-slate-400">No pricing rules yet</p>
+      <div className="space-y-4 mt-5">
+        <BaseCard
+          property={property}
+          baseRules={baseRules}
+          currency={currency}
+          onSaved={() => {
+            loadRules();
+            // The base price lives on the property, so the selector's copy is
+            // stale after an edit until it is re-read.
+            fetch("/api/properties")
+              .then((r) => r.json())
+              .then((d) => Array.isArray(d) && setProperties(d))
+              .catch(() => {});
+          }}
+        />
+
+        <SeasonsCard
+          seasons={seasons}
+          currency={currency}
+          saving={saving}
+          onSave={save}
+          onRemove={remove}
+        />
+
+        <WeekendCard rule={weekend} saving={saving} onSave={save} onRemove={remove} />
+
+        <OverridesCard overrides={overrides} currency={currency} onRemove={remove} />
+
+        {custom.length > 0 && (
+          <AdvancedCard rules={custom} currency={currency} onRemove={remove} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Card({
+  step,
+  title,
+  hint,
+  children,
+}: {
+  step: string;
+  title: string;
+  hint: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="bg-white rounded-2xl border border-slate-100 p-5">
+      <div className="flex items-start gap-3 mb-4">
+        <span className="w-6 h-6 rounded-lg bg-indigo-50 text-indigo-700 text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
+          {step}
+        </span>
+        <div>
+          <h2 className="font-semibold text-slate-900">{title}</h2>
+          <p className="text-xs text-slate-500 mt-0.5">{hint}</p>
+        </div>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function BaseCard({
+  property,
+  baseRules,
+  currency,
+  onSaved,
+}: {
+  property?: Property;
+  baseRules: PricingRule[];
+  currency: string;
+  onSaved: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => setValue(property ? String(property.basePrice) : ""), [property]);
+
+  async function commit() {
+    if (!property) return;
+    setBusy(true);
+    await fetch(`/api/properties/${property.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ basePrice: Number(value) }),
+    });
+    setBusy(false);
+    setEditing(false);
+    onSaved();
+  }
+
+  return (
+    <Card step="1" title="Base price" hint="What a night costs when nothing else applies.">
+      {editing ? (
+        <div className="flex items-end gap-2 flex-wrap">
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">Per night ({currency})</label>
+            <input
+              type="number"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              className="w-32 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+          <button
+            onClick={commit}
+            disabled={busy || !value}
+            className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2 rounded-xl text-sm font-medium"
+          >
+            {busy ? "Saving…" : "Save"}
+          </button>
+          <button
+            onClick={() => setEditing(false)}
+            className="border border-slate-200 px-4 py-2 rounded-xl text-sm font-medium text-slate-700"
+          >
+            Cancel
+          </button>
         </div>
       ) : (
-        <>
-          {/* Mobile cards — every field on its own line, nothing to scroll or crop */}
-          <div className="md:hidden space-y-3">
-            {rules.map((rule) => (
-              <div key={rule.id} className="bg-white rounded-2xl border border-slate-100 p-4">
-                <div className="flex items-start justify-between gap-3 mb-2">
-                  <div className="min-w-0">
-                    <p className="font-medium text-slate-900 text-sm truncate">{rule.name}</p>
-                    <span className="inline-block mt-1 text-xs bg-slate-100 text-slate-700 px-2.5 py-1 rounded-full">
-                      {RULE_TYPE_LABELS[rule.ruleType] || rule.ruleType}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1 flex-shrink-0">
-                    <button
-                      onClick={() => openEdit(rule)}
-                      className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition"
-                    >
-                      <Pencil className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => deleteRule(rule.id)}
-                      className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
+        <div className="flex items-center gap-3">
+          <span className="text-2xl font-bold text-slate-900 tabular-nums">
+            {currency} {property?.basePrice ?? "—"}
+          </span>
+          <span className="text-sm text-slate-400">/ night</span>
+          <button
+            onClick={() => setEditing(true)}
+            className="ml-auto flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-indigo-600 border border-slate-200 hover:border-indigo-200 px-3 py-1.5 rounded-lg"
+          >
+            <Pencil className="w-3.5 h-3.5" />
+            Change
+          </button>
+        </div>
+      )}
+
+      {/* A base-shaped rule is legacy: the property's own basePrice is the
+          floor now, and a full-year rule sitting on top of it is a second
+          answer to the same question. Surfaced rather than silently ignored. */}
+      {baseRules.length > 0 && (
+        <div className="mt-3 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          {baseRules.length === 1 ? "A rule also sets" : `${baseRules.length} rules also set`} a flat price for
+          every night ({baseRules.map((r) => r.name).join(", ")}). It overrides the base price above. You can
+          remove it in Advanced below if you would rather the base price alone decided.
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function SeasonsCard({
+  seasons,
+  currency,
+  saving,
+  onSave,
+  onRemove,
+}: {
+  seasons: PricingRule[];
+  currency: string;
+  saving: boolean;
+  onSave: (body: Record<string, unknown>) => Promise<boolean>;
+  onRemove: (id: string) => void;
+}) {
+  const [editing, setEditing] = useState<string | "new" | null>(null);
+  const blank = { name: "", startDate: "", endDate: "", price: "", minNights: "" };
+  const [form, setForm] = useState(blank);
+
+  function open(rule?: PricingRule) {
+    if (rule) {
+      setForm({
+        name: rule.name,
+        startDate: toDateInput(rule.startDate ?? null),
+        endDate: toDateInput(rule.endDate ?? null),
+        price: rule.price != null ? String(rule.price) : "",
+        minNights: rule.minNights && rule.minNights > 1 ? String(rule.minNights) : "",
+      });
+      setEditing(rule.id);
+    } else {
+      setForm(blank);
+      setEditing("new");
+    }
+  }
+
+  async function commit() {
+    const ok = await onSave({
+      ...(editing !== "new" ? { id: editing } : {}),
+      name: form.name || "Season",
+      ruleType: "SEASONAL",
+      startDate: form.startDate || undefined,
+      endDate: form.endDate || undefined,
+      price: Number(form.price),
+      minNights: form.minNights ? Number(form.minNights) : 1,
+      priority: PRIORITY.SEASON,
+      active: true,
+    });
+    if (ok) setEditing(null);
+  }
+
+  return (
+    <Card step="2" title="Seasons" hint="A different price for a stretch of dates. Beats the base price.">
+      <div className="space-y-2">
+        {seasons.map((s) =>
+          editing === s.id ? (
+            <SeasonForm
+              key={s.id}
+              form={form}
+              setForm={setForm}
+              currency={currency}
+              saving={saving}
+              onCancel={() => setEditing(null)}
+              onSave={commit}
+            />
+          ) : (
+            <div key={s.id} className="flex items-center gap-3 bg-slate-50 border border-slate-100 rounded-xl px-3 py-2.5">
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-semibold text-slate-800 truncate">{s.name}</div>
+                <div className="text-xs text-slate-500 tabular-nums">
+                  {toDateInput(s.startDate ?? null) || "any"} → {toDateInput(s.endDate ?? null) || "any"}
+                  {s.minNights && s.minNights > 1 ? ` · min ${s.minNights} nights` : ""}
                 </div>
-                <dl className="grid grid-cols-2 gap-y-1.5 text-sm">
-                  <dt className="text-slate-500">Rate</dt>
-                  <dd className="text-right">
-                    {rule.price && <span className="font-medium text-slate-900">{ruleCurrency(rule)} {rule.price}/night</span>}
-                    {rule.adjustment && (
-                      <span className={`font-medium ${rule.adjustment > 0 ? "text-green-600" : "text-red-600"}`}>
-                        {rule.adjustment > 0 ? "+" : ""}{rule.adjustment}{rule.adjType === "PERCENT" ? "%" : ` ${ruleCurrency(rule)}`}
-                      </span>
-                    )}
-                    {!rule.price && !rule.adjustment && <span className="text-slate-400">—</span>}
-                  </dd>
-                  <dt className="text-slate-500">Period</dt>
-                  <dd className="text-right text-slate-700">
-                    {rule.startDate && rule.endDate
-                      ? `${new Date(rule.startDate).toLocaleDateString()} — ${new Date(rule.endDate).toLocaleDateString()}`
-                      : "Always"}
-                  </dd>
-                  <dt className="text-slate-500">Min. nights</dt>
-                  <dd className="text-right text-slate-700">{rule.minNights || 1} nights</dd>
-                </dl>
+              </div>
+              <span className="text-sm font-bold text-indigo-600 tabular-nums shrink-0">
+                {currency} {s.price}
+              </span>
+              <button onClick={() => open(s)} aria-label={`Edit ${s.name}`} className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100">
+                <Pencil className="w-4 h-4" />
+              </button>
+              <button onClick={() => onRemove(s.id)} aria-label={`Delete ${s.name}`} className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg hover:bg-red-50">
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+          )
+        )}
+
+        {editing === "new" ? (
+          <SeasonForm
+            form={form}
+            setForm={setForm}
+            currency={currency}
+            saving={saving}
+            onCancel={() => setEditing(null)}
+            onSave={commit}
+          />
+        ) : (
+          <button
+            onClick={() => open()}
+            className="flex items-center gap-1.5 text-sm font-medium text-indigo-600 hover:bg-indigo-50 px-3 py-2 rounded-lg"
+          >
+            <Plus className="w-4 h-4" />
+            Add a season
+          </button>
+        )}
+
+        {seasons.length === 0 && editing !== "new" && (
+          <p className="text-sm text-slate-400">No seasons yet — every night uses the base price.</p>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function SeasonForm({
+  form,
+  setForm,
+  currency,
+  saving,
+  onCancel,
+  onSave,
+}: {
+  form: { name: string; startDate: string; endDate: string; price: string; minNights: string };
+  setForm: (f: { name: string; startDate: string; endDate: string; price: string; minNights: string }) => void;
+  currency: string;
+  saving: boolean;
+  onCancel: () => void;
+  onSave: () => void;
+}) {
+  const valid = !!(form.startDate && form.endDate && form.price && form.startDate <= form.endDate);
+  return (
+    <div className="border border-indigo-200 rounded-xl p-3 space-y-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">Name</label>
+          <input
+            value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+            placeholder="Summer"
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">Price / night ({currency})</label>
+          <input
+            type="number"
+            value={form.price}
+            onChange={(e) => setForm({ ...form, price: e.target.value })}
+            placeholder="150"
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">From</label>
+          <input
+            type="date"
+            value={form.startDate}
+            onChange={(e) => setForm({ ...form, startDate: e.target.value })}
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">To</label>
+          <input
+            type="date"
+            value={form.endDate}
+            onChange={(e) => setForm({ ...form, endDate: e.target.value })}
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+        </div>
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-slate-600 mb-1">
+          Minimum nights <span className="font-normal text-slate-400">— optional</span>
+        </label>
+        <input
+          type="number"
+          min="1"
+          value={form.minNights}
+          onChange={(e) => setForm({ ...form, minNights: e.target.value })}
+          placeholder="Leave blank for no seasonal minimum"
+          className="w-full sm:w-64 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+        />
+        {/* The honest caveat, stated where the field is rather than found out
+            from a guest booking one night at Christmas. */}
+        <p className="text-[11px] text-slate-500 mt-1 max-w-lg">
+          This reaches your <strong>Standard Rate</strong> only. Your other rate plans keep their own minimum
+          (Weekly 7, Monthly 28, and so on), so a short-stay plan can still sell inside this season.
+        </p>
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={onSave}
+          disabled={saving || !valid}
+          className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2 rounded-xl text-sm font-medium"
+        >
+          {saving ? "Saving…" : "Save season"}
+        </button>
+        <button onClick={onCancel} className="border border-slate-200 px-4 py-2 rounded-xl text-sm font-medium text-slate-700">
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function WeekendCard({
+  rule,
+  saving,
+  onSave,
+  onRemove,
+}: {
+  rule: PricingRule | null;
+  saving: boolean;
+  onSave: (body: Record<string, unknown>) => Promise<boolean>;
+  onRemove: (id: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [pct, setPct] = useState("18");
+  const [days, setDays] = useState<number[]>(WEEKEND_DAYS);
+
+  useEffect(() => {
+    if (rule) {
+      setPct(rule.adjustment != null ? String(rule.adjustment) : "18");
+      setDays(parseDays(rule.daysOfWeek ?? null) ?? WEEKEND_DAYS);
+    }
+  }, [rule]);
+
+  async function commit() {
+    const ok = await onSave({
+      ...(rule ? { id: rule.id } : {}),
+      name: rule?.name || "Weekend",
+      ruleType: "WEEKEND",
+      daysOfWeek: days,
+      adjustment: Number(pct),
+      adjType: "PERCENT",
+      // Only set on creation. On an edit this stays undefined so the API's
+      // update branch leaves the stored value alone - hardcoding 1 here would
+      // silently rewrite a minimum the operator set deliberately.
+      ...(rule ? {} : { minNights: 1 }),
+      priority: PRIORITY.WEEKEND,
+      active: true,
+    });
+    if (ok) setEditing(false);
+  }
+
+  return (
+    <Card step="3" title="Weekend pricing" hint="A percentage on top, on the days you choose. Beats a season.">
+      {!rule && !editing ? (
+        <div className="flex items-center gap-3">
+          <p className="text-sm text-slate-400">Weekends cost the same as any other night.</p>
+          <button
+            onClick={() => setEditing(true)}
+            className="ml-auto flex items-center gap-1.5 text-sm font-medium text-indigo-600 hover:bg-indigo-50 px-3 py-1.5 rounded-lg"
+          >
+            <Plus className="w-4 h-4" />
+            Add weekend pricing
+          </button>
+        </div>
+      ) : editing ? (
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1.5">Which days</label>
+            <div className="flex gap-1.5 flex-wrap">
+              {DAY_NAMES.map((d, i) => (
                 <button
-                  onClick={() => toggleRule(rule)}
-                  className={`mt-3 w-full flex items-center justify-center gap-1.5 text-xs px-2.5 py-1.5 rounded-full font-medium border transition ${
-                    rule.active
-                      ? "bg-green-100 text-green-700 border-green-200 hover:bg-green-200"
-                      : "bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200"
+                  key={d}
+                  onClick={() => setDays((prev) => (prev.includes(i) ? prev.filter((x) => x !== i) : [...prev, i]))}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition ${
+                    days.includes(i)
+                      ? "bg-indigo-600 text-white border-indigo-600"
+                      : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
                   }`}
                 >
-                  <span className={`w-1.5 h-1.5 rounded-full ${rule.active ? "bg-green-600" : "bg-slate-400"}`} />
-                  {rule.active ? "Active" : "Inactive"}
-                  <span className="text-[10px] opacity-70">— tap to {rule.active ? "deactivate" : "activate"}</span>
+                  {d}
                 </button>
-              </div>
-            ))}
-          </div>
-
-          {/* Desktop table */}
-          <div className="hidden md:block bg-white rounded-2xl border border-slate-100 overflow-hidden">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-slate-100">
-                <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wide px-5 py-4">Rule</th>
-                <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wide px-5 py-4">Type</th>
-                <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wide px-5 py-4">Rate</th>
-                <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wide px-5 py-4">Period</th>
-                <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wide px-5 py-4">Min Nights</th>
-                <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wide px-5 py-4">Status</th>
-                <th className="px-5 py-4"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {rules.map((rule) => (
-                <tr key={rule.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-colors">
-                  <td className="px-5 py-4">
-                    <p className="font-medium text-slate-900 text-sm">{rule.name}</p>
-                  </td>
-                  <td className="px-5 py-4">
-                    <span className="text-xs bg-slate-100 text-slate-700 px-2.5 py-1 rounded-full">
-                      {RULE_TYPE_LABELS[rule.ruleType] || rule.ruleType}
-                    </span>
-                  </td>
-                  <td className="px-5 py-4">
-                    {rule.price && <span className="text-sm font-medium text-slate-900">{ruleCurrency(rule)} {rule.price}/night</span>}
-                    {rule.adjustment && (
-                      <span className={`text-sm font-medium ${rule.adjustment > 0 ? "text-green-600" : "text-red-600"}`}>
-                        {rule.adjustment > 0 ? "+" : ""}{rule.adjustment}{rule.adjType === "PERCENT" ? "%" : ` ${ruleCurrency(rule)}`}
-                      </span>
-                    )}
-                    {!rule.price && !rule.adjustment && <span className="text-slate-400 text-sm">—</span>}
-                  </td>
-                  <td className="px-5 py-4 text-sm text-slate-500">
-                    {rule.startDate && rule.endDate
-                      ? `${new Date(rule.startDate).toLocaleDateString()} — ${new Date(rule.endDate).toLocaleDateString()}`
-                      : "Always"}
-                  </td>
-                  <td className="px-5 py-4 text-sm text-slate-700">{rule.minNights || 1} nights</td>
-                  <td className="px-5 py-4">
-                    <button
-                      onClick={() => toggleRule(rule)}
-                      title={`Tap to ${rule.active ? "deactivate" : "activate"}`}
-                      className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full font-medium border transition ${
-                        rule.active
-                          ? "bg-green-100 text-green-700 border-green-200 hover:bg-green-200"
-                          : "bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200"
-                      }`}
-                    >
-                      <span className={`w-1.5 h-1.5 rounded-full ${rule.active ? "bg-green-600" : "bg-slate-400"}`} />
-                      {rule.active ? "Active" : "Inactive"}
-                    </button>
-                  </td>
-                  <td className="px-5 py-4">
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => openEdit(rule)}
-                        className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition"
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => deleteRule(rule.id)}
-                        className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
               ))}
-            </tbody>
-          </table>
+            </div>
           </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">Price change</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                value={pct}
+                onChange={(e) => setPct(e.target.value)}
+                className="w-28 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+              <span className="text-sm text-slate-500">% &mdash; use a minus for a discount</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={commit}
+              disabled={saving || !pct || days.length === 0}
+              className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2 rounded-xl text-sm font-medium"
+            >
+              {saving ? "Saving…" : "Save"}
+            </button>
+            <button onClick={() => setEditing(false)} className="border border-slate-200 px-4 py-2 rounded-xl text-sm font-medium text-slate-700">
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        rule && (
+          <div className="flex items-center gap-3 bg-slate-50 border border-slate-100 rounded-xl px-3 py-2.5">
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold text-slate-800">
+                {(parseDays(rule.daysOfWeek ?? null) ?? []).map((d) => DAY_NAMES[d]).join(", ") || "No days"}
+              </div>
+              <div className="text-xs text-slate-500">
+                {toDateInput(rule.startDate ?? null) || toDateInput(rule.endDate ?? null)
+                  ? `Only between ${toDateInput(rule.startDate ?? null) || "any"} and ${toDateInput(rule.endDate ?? null) || "any"}`
+                  : "Applied on top of the base price or the season"}
+              </div>
+            </div>
+            <span className="text-sm font-bold text-indigo-600 tabular-nums shrink-0">
+              {rule.adjustment != null && rule.adjustment > 0 ? "+" : ""}
+              {rule.adjustment}%
+            </span>
+            <button onClick={() => setEditing(true)} aria-label="Edit weekend pricing" className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100">
+              <Pencil className="w-4 h-4" />
+            </button>
+            <button onClick={() => onRemove(rule.id)} aria-label="Remove weekend pricing" className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg hover:bg-red-50">
+              <Trash2 className="w-4 h-4" />
+            </button>
+          </div>
+        )
+      )}
+    </Card>
+  );
+}
+
+function OverridesCard({
+  overrides,
+  currency,
+  onRemove,
+}: {
+  overrides: PricingRule[];
+  currency: string;
+  onRemove: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Card step="4" title="Calendar overrides" hint="Dates you priced by hand. Beats everything above.">
+      {overrides.length === 0 ? (
+        <p className="text-sm text-slate-400">
+          None yet. Click dates on the{" "}
+          <Link href="/pricing/calendar" className="text-indigo-600 hover:underline">calendar</Link> to set a
+          price for specific nights.
+        </p>
+      ) : (
+        <>
+          <button
+            onClick={() => setOpen((v) => !v)}
+            className="flex items-center gap-1.5 text-sm font-medium text-slate-700"
+          >
+            <ChevronDown className={`w-4 h-4 transition ${open ? "rotate-180" : ""}`} />
+            {overrides.length} override{overrides.length === 1 ? "" : "s"}
+          </button>
+          {open && (
+            <div className="space-y-2 mt-3">
+              {overrides.map((o) => (
+                <div key={o.id} className="flex items-center gap-3 bg-slate-50 border border-slate-100 rounded-xl px-3 py-2">
+                  <div className="flex-1 min-w-0 text-xs text-slate-600 tabular-nums truncate">
+                    {o.name.replace(MANUAL_PREFIX, "").trim()}
+                    {o.minNights && o.minNights > 1 ? ` · min ${o.minNights}` : ""}
+                  </div>
+                  <span className="text-sm font-semibold text-slate-800 tabular-nums shrink-0">
+                    {currency} {o.price}
+                  </span>
+                  <button onClick={() => onRemove(o.id)} aria-label="Remove override" className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg hover:bg-red-50">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </>
+      )}
+    </Card>
+  );
+}
+
+function AdvancedCard({
+  rules,
+  currency,
+  onRemove,
+}: {
+  rules: PricingRule[];
+  currency: string;
+  onRemove: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-5">
+      <button onClick={() => setOpen((v) => !v)} className="flex items-center gap-2 w-full text-left">
+        <ChevronDown className={`w-4 h-4 text-slate-400 transition ${open ? "rotate-180" : ""}`} />
+        <div>
+          <h2 className="font-semibold text-slate-700 text-sm">
+            Advanced &mdash; {rules.length} rule{rules.length === 1 ? "" : "s"} that don&apos;t fit the four above
+          </h2>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Still applied exactly as before. Shown here so nothing is hidden.
+          </p>
+        </div>
+      </button>
+      {open && (
+        <div className="space-y-2 mt-4">
+          {rules.map((r) => (
+            <div key={r.id} className="flex items-center gap-3 bg-slate-50 border border-slate-100 rounded-xl px-3 py-2.5">
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-semibold text-slate-800 truncate">{r.name}</div>
+                <div className="text-xs text-slate-500">{describeRule(r as never, currency)}</div>
+              </div>
+              <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 shrink-0">
+                {CONCEPT_LABEL[classifyRule(r as never) as Concept]}
+              </span>
+              <button onClick={() => onRemove(r.id)} aria-label={`Delete ${r.name}`} className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg hover:bg-red-50">
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
