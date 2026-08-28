@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, ArrowDown, CalendarDays, Loader2, Pencil } from "lucide-react";
 import RatePlansPanel from "@/components/properties/RatePlansPanel";
+import PriceCalendarPanel, { type PriceCalendarProperty } from "@/components/pricing/PriceCalendarPanel";
 
 // The Rate plans tab as cause and effect, side by side.
 //
@@ -61,7 +62,16 @@ function rulePeriod(r: RuleRow): string {
   return parts.join(" · ");
 }
 
-export default function RateRevenueTab({ propertyId }: { propertyId: string }) {
+export default function RateRevenueTab({
+  propertyId,
+  calendarProperty,
+}: {
+  propertyId: string;
+  // When provided, the live price calendar renders full-width below the
+  // cause/effect columns - the month view is the same rules made visible
+  // thirty days at a time instead of seven.
+  calendarProperty?: PriceCalendarProperty;
+}) {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -92,6 +102,7 @@ export default function RateRevenueTab({ propertyId }: { propertyId: string }) {
   const todayPrice = summary?.week[0]?.price;
 
   return (
+    <div className="space-y-4">
     <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto_1fr] gap-4 items-start">
       {/* ---- Cause ---- */}
       <div className="bg-white rounded-2xl border border-slate-100 p-4">
@@ -202,6 +213,14 @@ export default function RateRevenueTab({ propertyId }: { propertyId: string }) {
           previewCurrency={summary?.currency}
         />
       </div>
+    </div>
+
+    {calendarProperty && (
+      <div className="bg-white rounded-2xl border border-slate-100 p-4">
+        <h3 className="font-semibold text-slate-900 mb-3">Live prices</h3>
+        <PriceCalendarPanel property={calendarProperty} />
+      </div>
+    )}
     </div>
   );
 }

@@ -1,7 +1,11 @@
 "use client";
 import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { Landmark, ClipboardList, Sparkles, Images, Star, CreditCard, Layers, FolderOpen } from "lucide-react";
+import Link from "next/link";
+import {
+  Landmark, ClipboardList, Sparkles, Images, Star, CreditCard, Layers, FolderOpen,
+  Wifi, Key, BookOpen, MessageSquareText, FileText,
+} from "lucide-react";
 import CityTaxSettingsPanel from "@/components/properties/CityTaxSettingsPanel";
 import RateRevenueTab from "@/components/properties/RateRevenueTab";
 import {
@@ -11,35 +15,64 @@ import {
   ReviewsPanel,
   PaymentsSetupPanel,
 } from "@/components/properties/ListingContentPanels";
+import {
+  ChannelsPanel,
+  LocksPanel,
+  KnowledgePanel,
+  TemplatesPanel,
+  type ChannelSummary,
+  type LockSummary,
+  type TemplateSummary,
+} from "@/components/properties/OperationsPanels";
+import type { PriceCalendarProperty } from "@/components/pricing/PriceCalendarPanel";
 
-// The property page in two tiers.
+// The whole property page below the header, as one ribbon in three groups.
 //
-// Primary tabs are the things host24 is actually authoritative over - rate
-// plans (the product itself), taxes (the compliance wedge), reviews (the one
-// content type genuinely pulled from the OTAs), payments. Hotel policy,
-// facilities and photos are real, working panels, but for an already-listed
-// property they duplicate what Booking.com and Airbnb hold and cannot fetch
-// from them - so they live behind one visually demoted "Listing content" tab
-// with the optionality stated outright, instead of five tabs implying five
-// obligations.
+//   money       Rate plans · Taxes & fees · Reviews · Payments
+//   operations  Channels · Smart locks · Knowledge · Templates
+//   optional    Listing content (dashed, muted - deliberately second-class)
 //
-// "Taxes & fees" is the one tab that works for every property regardless of
-// channel manager; everything else is Channex-only.
-const PRIMARY_TABS = [
+// The groups encode authority: the money tabs are what host24 is the source
+// of truth for; the operations tabs used to be sidebar cards squeezing the
+// page into two columns; the optional tab duplicates what the OTAs already
+// hold for a live listing and says so. Separators between groups carry that
+// meaning - they are not decoration.
+const MONEY_TABS = [
   { id: "rateplans", label: "Rate plans", icon: Layers, channexOnly: true },
   { id: "taxes", label: "Taxes & fees", icon: Landmark, channexOnly: false },
   { id: "reviews", label: "Reviews", icon: Star, channexOnly: true },
   { id: "payments", label: "Payments", icon: CreditCard, channexOnly: true },
 ] as const;
 
+// Operations apply to every property regardless of channel manager - a
+// Smoobu property has locks, knowledge and templates too.
+const OPS_TABS = [
+  { id: "channels", label: "Channels", icon: Wifi },
+  { id: "locks", label: "Smart locks", icon: Key },
+  { id: "knowledge", label: "Knowledge", icon: BookOpen },
+  { id: "templates", label: "Templates", icon: MessageSquareText },
+] as const;
+
 const CONTENT_SUBTABS = [
+  { id: "description", label: "Description", icon: FileText },
   { id: "policy", label: "Hotel policy", icon: ClipboardList },
   { id: "facilities", label: "Facilities", icon: Sparkles },
   { id: "photos", label: "Photos", icon: Images },
 ] as const;
 
-type TabId = (typeof PRIMARY_TABS)[number]["id"] | "content";
+type TabId = (typeof MONEY_TABS)[number]["id"] | (typeof OPS_TABS)[number]["id"] | "content";
 type SubTabId = (typeof CONTENT_SUBTABS)[number]["id"];
+
+export interface PropertyTabsData {
+  propertyId: string;
+  propertyName: string;
+  isChannex: boolean;
+  calendarProperty: PriceCalendarProperty;
+  channels: ChannelSummary | null;
+  locks: LockSummary[];
+  templates: TemplateSummary[];
+  description: string | null;
+}
 
 function PaymentSetupBanner() {
   const params = useSearchParams();
@@ -55,9 +88,9 @@ function PaymentSetupBanner() {
   return <div className={`mb-4 text-sm px-3 py-2 rounded-lg border ${m.cls}`}>{m.text}</div>;
 }
 
-// Deep links kept stable across the redesign: ?tab=policy|facilities|photos
-// predate the grouped tab, so they resolve to it with the right sub-panel
-// selected rather than 404ing into a default.
+// Deep links kept stable across redesigns: ?tab=policy|facilities|photos
+// predate the grouped tab, so they resolve into it with the right sub-panel
+// selected rather than falling back to a default.
 function InitialTab({ onResolved }: { onResolved: (tab: TabId, sub?: SubTabId) => void }) {
   const params = useSearchParams();
   useEffect(() => {
@@ -65,7 +98,11 @@ function InitialTab({ onResolved }: { onResolved: (tab: TabId, sub?: SubTabId) =
     if (!requested) return;
     if ((CONTENT_SUBTABS as readonly { id: string }[]).some((s) => s.id === requested)) {
       onResolved("content", requested as SubTabId);
-    } else if (requested === "content" || PRIMARY_TABS.some((t) => t.id === requested)) {
+    } else if (
+      requested === "content" ||
+      MONEY_TABS.some((t) => t.id === requested) ||
+      OPS_TABS.some((t) => t.id === requested)
+    ) {
       onResolved(requested as TabId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -73,9 +110,23 @@ function InitialTab({ onResolved }: { onResolved: (tab: TabId, sub?: SubTabId) =
   return null;
 }
 
-export default function PropertyListingTabs({ propertyId, isChannex }: { propertyId: string; isChannex: boolean }) {
+export default function PropertyListingTabs({ data }: { data: PropertyTabsData }) {
+  const { propertyId, propertyName, isChannex } = data;
   const [tab, setTab] = useState<TabId>(isChannex ? "rateplans" : "taxes");
-  const [sub, setSub] = useState<SubTabId>("policy");
+  const [sub, setSub] = useState<SubTabId>("description");
+
+  const tabButton = (id: TabId, label: string, Icon: typeof Layers) => (
+    <button
+      key={id}
+      onClick={() => setTab(id)}
+      className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition ${
+        tab === id ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-100"
+      }`}
+    >
+      <Icon className="w-3.5 h-3.5" />
+      {label}
+    </button>
+  );
 
   return (
     <div>
@@ -90,18 +141,10 @@ export default function PropertyListingTabs({ propertyId, isChannex }: { propert
       </Suspense>
 
       <div className="flex items-center gap-1 mb-4 overflow-x-auto">
-        {PRIMARY_TABS.filter((t) => isChannex || !t.channexOnly).map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            onClick={() => setTab(id)}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition ${
-              tab === id ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-100"
-            }`}
-          >
-            <Icon className="w-3.5 h-3.5" />
-            {label}
-          </button>
-        ))}
+        {MONEY_TABS.filter((t) => isChannex || !t.channexOnly).map(({ id, label, icon }) => tabButton(id, label, icon))}
+
+        <div className="w-px self-stretch bg-slate-200 mx-1 shrink-0" aria-hidden />
+        {OPS_TABS.map(({ id, label, icon }) => tabButton(id, label, icon))}
 
         {isChannex && (
           <>
@@ -125,9 +168,18 @@ export default function PropertyListingTabs({ propertyId, isChannex }: { propert
       </div>
 
       {tab === "taxes" && <CityTaxSettingsPanel propertyId={propertyId} />}
-      {isChannex && tab === "rateplans" && <RateRevenueTab propertyId={propertyId} />}
+      {isChannex && tab === "rateplans" && (
+        <RateRevenueTab propertyId={propertyId} calendarProperty={data.calendarProperty} />
+      )}
       {isChannex && tab === "reviews" && <ReviewsPanel propertyId={propertyId} />}
       {isChannex && tab === "payments" && <PaymentsSetupPanel propertyId={propertyId} />}
+
+      {tab === "channels" && (
+        <ChannelsPanel propertyId={propertyId} propertyName={propertyName} channels={data.channels} />
+      )}
+      {tab === "locks" && <LocksPanel locks={data.locks} />}
+      {tab === "knowledge" && <KnowledgePanel propertyId={propertyId} />}
+      {tab === "templates" && <TemplatesPanel templates={data.templates} />}
 
       {isChannex && tab === "content" && (
         <div>
@@ -153,13 +205,28 @@ export default function PropertyListingTabs({ propertyId, isChannex }: { propert
               </button>
             ))}
           </div>
+          {sub === "description" && (
+            <div className="bg-white rounded-2xl border border-slate-100 p-5 max-w-2xl">
+              {data.description ? (
+                <p className="text-sm text-slate-600 whitespace-pre-line">{data.description}</p>
+              ) : (
+                <p className="text-sm text-slate-400">No description saved in host24.</p>
+              )}
+              <Link
+                href={`/properties/${propertyId}/edit`}
+                className="text-sm text-indigo-600 hover:underline mt-4 block"
+              >
+                Edit property &rarr;
+              </Link>
+            </div>
+          )}
           {sub === "policy" && <HotelPolicyPanel propertyId={propertyId} />}
           {sub === "facilities" && <FacilitiesPanel propertyId={propertyId} />}
           {sub === "photos" && <PhotosPanel propertyId={propertyId} />}
         </div>
       )}
 
-      {!isChannex && tab !== "taxes" && (
+      {!isChannex && (tab === "rateplans" || tab === "reviews" || tab === "payments" || tab === "content") && (
         <div className="bg-white rounded-2xl border border-slate-100 text-center py-8 text-slate-400">
           <p className="text-sm">This property isn&apos;t on Channex.</p>
           <p className="text-xs mt-1">
