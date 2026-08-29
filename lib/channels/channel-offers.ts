@@ -104,10 +104,29 @@ export function offersForStay(
 // /channels payload names a channel "AirBNB" while the documented code is
 // ABB, and both appear depending on the endpoint.
 
+// Channex is not consistent about this: GET /channels answers JSON:API-shaped,
+// with every field under `attributes`, while other endpoints answer flat. Read
+// as flat only, `properties` came back undefined for every row, no row ever
+// matched, and this function returned "no channels connected" for every
+// property on the account - a confident, wrong answer that the panel above it
+// renders differently from "couldn't check".
 export interface ChannelConnectionLike {
   channel?: string | null;
   is_active?: boolean | null;
   properties?: string[] | null;
+  attributes?: {
+    channel?: string | null;
+    is_active?: boolean | null;
+    properties?: string[] | null;
+  } | null;
+}
+
+function unwrap(c: ChannelConnectionLike): {
+  channel?: string | null;
+  is_active?: boolean | null;
+  properties?: string[] | null;
+} {
+  return c.attributes ?? c;
 }
 
 function normalizeChannel(raw: string): ChannelKey | null {
@@ -122,7 +141,8 @@ export function connectedChannels(
   channexPropertyId: string
 ): ChannelKey[] {
   const found = new Set<ChannelKey>();
-  for (const c of connections) {
+  for (const row of connections) {
+    const c = unwrap(row);
     if (c.is_active === false) continue;
     if (!c.properties?.includes(channexPropertyId)) continue;
     const key = c.channel ? normalizeChannel(c.channel) : null;

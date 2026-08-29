@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readChannelRatePlans, pickParentIndex, titleCase, channelDisplayName } from "./channel-rate-import";
+import {
+  readChannelRatePlans, pickParentIndex, titleCase, channelDisplayName, isListingOnlyPayload,
+} from "./channel-rate-import";
 
 // The exact body POST /channels/mapping_details returned for a live
 // Booking.com connection. Captured rather than imagined, because every
@@ -202,4 +204,39 @@ test("adapter codes are shown as the names operators know", () => {
   assert.equal(channelDisplayName("Airbnb"), "Airbnb");
   // Never mangled into something plausible-but-wrong.
   assert.equal(channelDisplayName("SomeNewOTA"), "SomeNewOTA");
+});
+
+// What Channex really returned for a live Airbnb connection. Airbnb has no
+// rate plans at all - it sells one price per listing - so mapping_details
+// answers a different question entirely and carries no rooms or rates.
+const LIVE_AIRBNB_PAYLOAD = {
+  listing_id_dictionary: {
+    values: [
+      {
+        id: "852609479292163730",
+        type: "apartment",
+        title: "Prague - Vltava River luxury view (2 BDRM+Living)",
+        city: "Praha 7",
+        quality_status: "good",
+        country_code: "CZ",
+        occupancies: [1, 2, 3, 4],
+        synchronization_category: null,
+      },
+    ],
+  },
+};
+
+test("an Airbnb payload is recognised as having no rate plans to give", () => {
+  assert.equal(isListingOnlyPayload(LIVE_AIRBNB_PAYLOAD), true);
+  assert.equal(isListingOnlyPayload(LIVE_BOOKING_PAYLOAD), false);
+});
+
+test("Airbnb is explained rather than blamed for a broken mapping", () => {
+  const r = readChannelRatePlans(LIVE_AIRBNB_PAYLOAD, "AirBNB");
+  assert.equal(r.rooms.length, 0);
+  assert.equal(r.problems.length, 1);
+  assert.match(r.problems[0], /Airbnb/);
+  assert.match(r.problems[0], /one price per listing/);
+  // The connection is fine - sending the operator to "fix" it is the bug.
+  assert.ok(!/Check the connection/.test(r.problems[0]));
 });

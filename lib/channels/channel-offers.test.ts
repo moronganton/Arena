@@ -1,4 +1,4 @@
-import { test, describe } from "node:test";
+import { test, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   connectedChannels,
@@ -143,6 +143,42 @@ describe("connectedChannels", () => {
   test("an unrecognised channel is ignored rather than guessed at", () => {
     assert.deepEqual(
       connectedChannels([{ channel: "Expedia", is_active: true, properties: [PROP] }], PROP),
+      []
+    );
+  });
+});
+
+describe("connectedChannels against the shape Channex really returns", () => {
+  // GET /channels wraps every field under `attributes`. Read as flat, this
+  // silently reported no connected channels for every property on the account.
+  const REAL_ROW = {
+    attributes: {
+      id: "0ddd61cb-39b1-466a-8f22-ea7751ce02d1",
+      title: "28th floor Bratislava2",
+      channel: "BookingCom",
+      properties: ["694e3e11-967c-4d3c-819d-a21c99121c02"],
+      is_active: true,
+    },
+  };
+
+  it("finds the channel inside attributes", () => {
+    assert.deepEqual(connectedChannels([REAL_ROW], "694e3e11-967c-4d3c-819d-a21c99121c02"), ["BOOKING"]);
+  });
+
+  it("still reads a flat row, which other endpoints return", () => {
+    assert.deepEqual(
+      connectedChannels([{ channel: "AirBNB", properties: ["p1"], is_active: true }], "p1"),
+      ["AIRBNB"]
+    );
+  });
+
+  it("does not claim a channel for a property it does not cover", () => {
+    assert.deepEqual(connectedChannels([REAL_ROW], "some-other-property"), []);
+  });
+
+  it("ignores a deactivated connection whatever the shape", () => {
+    assert.deepEqual(
+      connectedChannels([{ attributes: { ...REAL_ROW.attributes, is_active: false } }], "694e3e11-967c-4d3c-819d-a21c99121c02"),
       []
     );
   });

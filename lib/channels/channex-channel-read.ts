@@ -77,7 +77,7 @@ export async function readRatePlansFromChannel(channexPropertyId: string): Promi
 
   try {
     const res = await channexPost<unknown>("/channels/mapping_details", { channel, settings });
-    return { ok: true, channel, channelId, ...readChannelRatePlans(res.data) };
+    return { ok: true, channel, channelId, ...readChannelRatePlans(res.data, channel) };
   } catch (err) {
     const e = err as ChannexError;
     // A rejection here is nearly always the channel's own credentials going

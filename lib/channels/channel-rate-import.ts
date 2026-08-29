@@ -187,6 +187,24 @@ function readRoom(raw: RawRoom, warnings: string[]): ChannelRoom | null {
 }
 
 /**
+ * Whether a payload is Airbnb's answer rather than Booking.com's.
+ *
+ * Airbnb does not have rate plans. It sells one price per listing, so its
+ * mapping_details answers an entirely different question - "which of your
+ * listings is this property?" - and returns a listing_id_dictionary with no
+ * rooms and no rates anywhere in it. Detected by shape rather than by the
+ * channel code, because the shape is the thing that actually decides whether
+ * there is anything here to read.
+ */
+export function isListingOnlyPayload(payload: unknown): boolean {
+  return (
+    !!payload &&
+    typeof payload === "object" &&
+    "listing_id_dictionary" in (payload as Record<string, unknown>)
+  );
+}
+
+/**
  * Read a mapping_details payload into rooms of proposed plans.
  *
  * Returns rooms rather than one flat family on purpose. A Booking.com listing
@@ -194,9 +212,25 @@ function readRoom(raw: RawRoom, warnings: string[]): ChannelRoom | null {
  * importing the first would misrepresent the listing to the person who has to
  * trust it.
  */
-export function readChannelRatePlans(payload: unknown): ChannelReadResult {
+export function readChannelRatePlans(payload: unknown, channel?: string): ChannelReadResult {
   const problems: string[] = [];
   const warnings: string[] = [];
+
+  // Said plainly, because the alternative message - "check the connection is
+  // mapped in Channex" - sends an operator to fix a connection that is working
+  // perfectly. There is nothing wrong here and nothing to fix; this channel
+  // simply has no rate plans to give.
+  if (isListingOnlyPayload(payload)) {
+    const name = channel ? channelDisplayName(channel) : "This channel";
+    return {
+      rooms: [],
+      problems: [
+        `${name} doesn't use rate plans - it sells one price per listing, so there is nothing to import from it. ` +
+          `Read from Booking.com instead, or use a screenshot or the template.`,
+      ],
+      warnings,
+    };
+  }
 
   const rawRooms =
     payload && typeof payload === "object" && Array.isArray((payload as { rooms?: unknown }).rooms)
