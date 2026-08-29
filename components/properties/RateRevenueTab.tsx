@@ -6,6 +6,7 @@ import RatePlansPanel from "@/components/properties/RatePlansPanel";
 import PriceCalendarPanel, { type PriceCalendarProperty } from "@/components/pricing/PriceCalendarPanel";
 import ChannelOffersPanel from "@/components/properties/ChannelOffersPanel";
 import RatePlanSetup from "@/components/properties/RatePlanSetup";
+import ChannexMappingFrame from "@/components/channels/ChannexMappingFrame";
 import type { ChannelKey, PlanLike } from "@/lib/channels/channel-offers";
 
 // The Rate plans tab as cause and effect, side by side.
@@ -101,6 +102,11 @@ export default function RateRevenueTab({
   // property has no OTA connected yet, while an established one - the only
   // kind with a structure worth importing - could not reach it at all.
   const [reimporting, setReimporting] = useState(false);
+
+  // Opened from a "connect this channel" chip. Closing it re-reads the
+  // summary, so the chip it was opened from becomes a real badge without a
+  // manual refresh.
+  const [mapping, setMapping] = useState(false);
 
   useEffect(() => {
     if (needsChannexSetup) return;
@@ -296,6 +302,8 @@ export default function RateRevenueTab({
           previewBase={todayPrice}
           previewCurrency={summary?.currency}
           showChannelChips
+          connectedChannels={summary?.connectedChannels}
+          onConnect={() => setMapping(true)}
           onReimport={() => setReimporting(true)}
           onFamilyCleared={() => setReloadKey((n) => n + 1)}
         />
@@ -308,6 +316,17 @@ export default function RateRevenueTab({
         parentPrice={todayPrice}
         currency={summary.currency}
         connected={summary.connectedChannels}
+      />
+    )}
+
+    {mapping && (
+      <ChannexMappingFrame
+        propertyId={propertyId}
+        propertyName={propertyName}
+        onClose={() => {
+          setMapping(false);
+          setReloadKey((n) => n + 1);
+        }}
       />
     )}
 
