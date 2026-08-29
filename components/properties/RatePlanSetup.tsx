@@ -51,12 +51,18 @@ export default function RatePlanSetup({
   // "connect this property" reads as wrong to someone whose header already
   // says Channex connected.
   alreadyFlagged = false,
+  // Re-running the import on a property that already sells something. The
+  // family it produces REPLACES what is there, so the copy has to say so -
+  // an operator arriving here from "Re-read from the channel" is not setting
+  // a property up, they are about to overwrite a working configuration.
+  replacing = false,
 }: {
   propertyId: string;
   currency: string;
   onCreated: () => void;
   needsConnecting?: boolean;
   alreadyFlagged?: boolean;
+  replacing?: boolean;
 }) {
   const [stage, setStage] = useState<Stage>(needsConnecting ? "connect" : "choose");
   const [connecting, setConnecting] = useState(false);
@@ -303,10 +309,22 @@ export default function RatePlanSetup({
   if (stage === "choose") {
     return (
       <div className="bg-white rounded-2xl border border-slate-100 p-5 md:p-6">
-        <h2 className="text-lg font-bold text-slate-900">What does this property sell?</h2>
+        <h2 className="text-lg font-bold text-slate-900">
+          {replacing ? "Replace what this property sells" : "What does this property sell?"}
+        </h2>
         <p className="text-sm text-slate-600 mt-1 max-w-2xl">
-          A rate plan is a product a guest can book — your standard rate, a cheaper non-refundable
-          version, a weekly deal. If you already sell on Booking.com, you have these already.
+          {replacing ? (
+            <>
+              Whatever you create here <strong>replaces</strong> this property&apos;s current rate
+              plans. The old ones are renamed out of the way rather than deleted, so nothing that is
+              already booked is lost — you can remove them afterwards.
+            </>
+          ) : (
+            <>
+              A rate plan is a product a guest can book — your standard rate, a cheaper non-refundable
+              version, a weekly deal. If you already sell on Booking.com, you have these already.
+            </>
+          )}
         </p>
 
         {error && (

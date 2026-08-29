@@ -93,6 +93,13 @@ export default function RateRevenueTab({
   // Bumped after setup creates the family, to re-read the summary.
   const [reloadKey, setReloadKey] = useState(0);
 
+  // Re-running the import on a property that ALREADY has plans. The setup
+  // screen used to be reachable only when a property had none, which put the
+  // channel import in the one situation where it cannot work: a brand new
+  // property has no OTA connected yet, while an established one - the only
+  // kind with a structure worth importing - could not reach it at all.
+  const [reimporting, setReimporting] = useState(false);
+
   useEffect(() => {
     if (needsChannexSetup) return;
     let cancelled = false;
@@ -131,17 +138,36 @@ export default function RateRevenueTab({
 
   // A property with no rate plans cannot be finished from this screen until it
   // has some, so setup is the whole tab rather than a card among others.
-  if (needsChannexSetup || (summary && summary.plans.length === 0)) {
+  if (needsChannexSetup || reimporting || (summary && summary.plans.length === 0)) {
     return (
-      <RatePlanSetup
-        propertyId={propertyId}
-        currency={summary?.currency ?? "EUR"}
-        needsConnecting={needsChannexSetup}
-        alreadyFlagged={alreadyFlaggedChannex}
-        // A full reload: connecting changes channelProvider on the server, so
-        // the page's own props are stale until it re-renders.
-        onCreated={() => (needsChannexSetup ? window.location.reload() : setReloadKey((n) => n + 1))}
-      />
+      <div>
+        {reimporting && (
+          <button
+            onClick={() => setReimporting(false)}
+            className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-800 mb-3"
+          >
+            <X className="w-3.5 h-3.5" />
+            Keep the rate plans I have
+          </button>
+        )}
+        <RatePlanSetup
+          propertyId={propertyId}
+          currency={summary?.currency ?? "EUR"}
+          needsConnecting={needsChannexSetup && !reimporting}
+          alreadyFlagged={alreadyFlaggedChannex}
+          replacing={reimporting}
+          // A full reload: connecting changes channelProvider on the server, so
+          // the page's own props are stale until it re-renders.
+          onCreated={() => {
+            if (needsChannexSetup && !reimporting) {
+              window.location.reload();
+              return;
+            }
+            setReimporting(false);
+            setReloadKey((n) => n + 1);
+          }}
+        />
+      </div>
     );
   }
 
@@ -267,6 +293,7 @@ export default function RateRevenueTab({
           previewBase={todayPrice}
           previewCurrency={summary?.currency}
           showChannelChips
+          onReimport={() => setReimporting(true)}
         />
       </div>
     </div>

@@ -498,6 +498,52 @@ export async function addDerivedRatePlan(
 // plan - one this app may never have had a row for. This is the one a UI calls,
 // and it refuses to remove the parent: every other plan derives from it, so
 // deleting it would leave five products quoting nothing.
+/**
+ * Rate plans that exist on Channex for this property but are not tracked here.
+ *
+ * Provisioning a family deletes and recreates every RatePlan row for the
+ * listing, so a plan retired by an earlier run stops being tracked the moment
+ * the new family lands. It keeps existing on Channex under its "(retired ...)"
+ * title, invisible to this app and impossible to remove from it - which is how
+ * a property accumulates dead plans nobody can see, let alone clear.
+ *
+ * Read straight from Channex, so what comes back is what is really there.
+ */
+export async function listUntrackedRatePlans(
+  channexListingId: string,
+  channexPropertyId: string
+): Promise<{ id: string; title: string }[]> {
+  const tracked = await prisma.ratePlan.findMany({
+    where: { channexListingId },
+    select: { channexRatePlanId: true },
+  });
+  const known = new Set(tracked.map((t) => t.channexRatePlanId).filter((x): x is string => !!x));
+
+  const { byTitle } = await fetchExistingTitles(channexPropertyId);
+  const out: { id: string; title: string }[] = [];
+  for (const [title, id] of byTitle) {
+    if (!known.has(id)) out.push({ id, title });
+  }
+  return out;
+}
+
+/**
+ * Remove a plan by its CHANNEX id rather than a host24 row, for the untracked
+ * ones above. Still refuses the plan this listing pushes into - deleting the
+ * live price stream is never what anybody meant.
+ */
+export async function removeUntrackedRatePlan(
+  channexListingId: string,
+  channexPropertyId: string,
+  channexRatePlanId: string
+): Promise<{ ok: boolean; error?: string; details?: unknown }> {
+  const untracked = await listUntrackedRatePlans(channexListingId, channexPropertyId);
+  if (!untracked.some((p) => p.id === channexRatePlanId)) {
+    return { ok: false, error: "that rate plan is not an untracked plan on this property" };
+  }
+  return deleteRatePlan(channexListingId, channexRatePlanId);
+}
+
 export async function removeRatePlan(
   channexListingId: string,
   ratePlanId: string

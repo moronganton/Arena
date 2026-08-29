@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
-import { Layers, AlertTriangle, Check, Loader2, Pencil, Trash2, Plus, X } from "lucide-react";
+import { Layers, AlertTriangle, Check, Loader2, Pencil, Trash2, Plus, X, Download, Archive } from "lucide-react";
 import { derivedPriceFor } from "@/lib/channels/rate-plan-spec";
 
 // What this property sells on the OTAs, as opposed to what it charges per night.
@@ -36,6 +36,7 @@ export default function RatePlansPanel({
   previewBase,
   previewCurrency,
   showChannelChips = false,
+  onReimport,
 }: {
   propertyId: string;
   previewBase?: number;
@@ -43,9 +44,17 @@ export default function RatePlansPanel({
   // Marks each row with the channels that carry it. Off by default so the
   // panel stays honest wherever channel state isn't known.
   showChannelChips?: boolean;
+  // Re-read the family from the channel. Offered here rather than only during
+  // first-time setup because importing a channel's structure is not a one-off
+  // onboarding gesture - it is what you do again after adding a plan on
+  // Booking.com.
+  onReimport?: () => void;
 }) {
   const [plans, setPlans] = useState<RatePlan[]>([]);
   const [pushesInto, setPushesInto] = useState<string | null>(null);
+  // null means Channex could not be asked, which the panel renders differently
+  // from "there are none".
+  const [untracked, setUntracked] = useState<{ id: string; title: string }[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
@@ -65,6 +74,7 @@ export default function RatePlansPanel({
       .then((d) => {
         setPlans(d.ratePlans ?? []);
         setPushesInto(d.pushesInto ?? null);
+        setUntracked(d.untracked ?? null);
       })
       .catch((e) => setError(e instanceof Error ? e.message : "Couldn't load rate plans"))
       .finally(() => setLoading(false));
@@ -225,14 +235,65 @@ export default function RatePlansPanel({
         </div>
       ) : (
         parent && (
-          <button
-            onClick={() => { setActionError(null); setAdding(true); }}
-            className="flex items-center gap-1.5 text-sm font-medium text-indigo-600 hover:text-indigo-700 px-3 py-2"
-          >
-            <Plus className="w-4 h-4" />
-            Add a rate plan
-          </button>
+          <div className="flex items-center gap-1 flex-wrap">
+            <button
+              onClick={() => { setActionError(null); setAdding(true); }}
+              className="flex items-center gap-1.5 text-sm font-medium text-indigo-600 hover:text-indigo-700 px-3 py-2"
+            >
+              <Plus className="w-4 h-4" />
+              Add a rate plan
+            </button>
+            {onReimport && (
+              <button
+                onClick={onReimport}
+                className="flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-800 px-3 py-2"
+              >
+                <Download className="w-4 h-4" />
+                Re-read from the channel
+              </button>
+            )}
+          </div>
         )
+      )}
+
+      {/* Plans still on Channex that this app stopped tracking - what an
+          earlier provisioning run retired. Left unlisted they are invisible
+          here and unremovable from here, so a property quietly accumulates
+          dead plans under "(retired ...)" titles that only the Channex UI
+          ever shows. */}
+      {untracked && untracked.length > 0 && (
+        <div className="border border-slate-200 rounded-xl p-3">
+          <div className="flex items-start gap-2 text-sm text-slate-600">
+            <Archive className="w-4 h-4 mt-0.5 shrink-0 text-slate-400" />
+            <p>
+              <span className="font-medium text-slate-900">
+                {untracked.length} plan{untracked.length === 1 ? "" : "s"} left on Channex
+              </span>{" "}
+              that host24 no longer sells through — usually replaced by a later import. Removing them
+              is safe unless a channel still maps to one.
+            </p>
+          </div>
+          <div className="mt-2 space-y-1">
+            {untracked.map((u) => (
+              <div key={u.id} className="flex items-center gap-2 text-sm">
+                <span className="flex-1 min-w-0 truncate text-slate-500">{u.title}</span>
+                <button
+                  onClick={() => {
+                    if (!confirm(`Delete "${u.title}" from Channex? This cannot be undone.`)) return;
+                    send(`/api/channex/rate-plans/${encodeURIComponent(`channex:${u.id}`)}?propertyId=${propertyId}`, {
+                      method: "DELETE",
+                    });
+                  }}
+                  disabled={busy}
+                  aria-label={`Delete ${u.title} from Channex`}
+                  className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg hover:bg-red-50 disabled:opacity-40"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
       {parent && parent.channexRatePlanId !== pushesInto && (

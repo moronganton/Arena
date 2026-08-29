@@ -3,7 +3,9 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 import { requireChannexProperty } from "@/lib/channels/channex-property-guard";
-import { provisionRatePlanSet, deleteRatePlan, addDerivedRatePlan } from "@/lib/channels/channex-rate-plans";
+import {
+  provisionRatePlanSet, deleteRatePlan, addDerivedRatePlan, listUntrackedRatePlans,
+} from "@/lib/channels/channex-rate-plans";
 import { DEFAULT_RATE_PLAN_SET } from "@/lib/channels/rate-plan-spec";
 
 // Provisioning a rate plan family for ONE property.
@@ -70,10 +72,19 @@ export async function GET(req: NextRequest) {
     orderBy: { position: "asc" },
   });
 
+  // Plans left on Channex that this app no longer tracks - almost always ones
+  // an earlier provisioning run retired. Best-effort: a Channex outage must
+  // not take down the panel that lists the plans that ARE tracked, and the
+  // difference between "none" and "couldn't check" is carried by null.
+  const untracked = await listUntrackedRatePlans(guard.channexListingId, guard.channexPropertyId).catch(
+    () => null
+  );
+
   return NextResponse.json({
     property: guard.propertyName,
     pushesInto: guard.channexRatePlanId,
     ratePlans,
+    untracked: untracked ? untracked.filter((p) => p.id !== guard.channexRatePlanId) : null,
     defaultSetIfNotProvisioned: ratePlans.length === 0 ? DEFAULT_RATE_PLAN_SET : undefined,
   });
 }

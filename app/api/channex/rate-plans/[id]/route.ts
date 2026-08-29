@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 import { requireChannexProperty } from "@/lib/channels/channex-property-guard";
-import { updateRatePlan, removeRatePlan } from "@/lib/channels/channex-rate-plans";
+import { updateRatePlan, removeRatePlan, removeUntrackedRatePlan } from "@/lib/channels/channex-rate-plans";
 
 // Editing and removing one plan in a family.
 //
@@ -61,7 +61,11 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: stri
   const guard = await requireChannexProperty(propertyId, session.user.id);
   if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: guard.status });
 
-  const res = await removeRatePlan(guard.channexListingId, id);
+    // An id prefixed "channex:" addresses a plan that exists on Channex but is
+  // not tracked here - a retired one - which has no host24 row to look up.
+  const res = id.startsWith("channex:")
+    ? await removeUntrackedRatePlan(guard.channexListingId, guard.channexPropertyId, id.slice("channex:".length))
+    : await removeRatePlan(guard.channexListingId, id);
   if (!res.ok) return NextResponse.json({ error: res.error, details: res.details }, { status: 409 });
   return NextResponse.json({ ok: true });
 }
