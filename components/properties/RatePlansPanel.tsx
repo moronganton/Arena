@@ -143,7 +143,7 @@ export default function RatePlansPanel({
       <div className="text-sm text-slate-600 space-y-2">
         <p className="font-medium text-slate-900">No rate plans recorded yet.</p>
         <p>
-          This property sells through a single rate plan on Channex. Provisioning a family — a
+          This property sells through a single rate plan. Provisioning a family — a
           standard rate plus non-refundable, weekly and monthly variants — is done from the
           rate-plan API and will appear here once it has run.
         </p>
@@ -273,7 +273,7 @@ export default function RatePlansPanel({
                 if (
                   !confirm(
                     `Remove all ${plans.length} rate plans from this property?\n\n` +
-                      `The derived plans are deleted from Channex. Your main rate keeps receiving ` +
+                      `The derived plans are deleted. Your main rate keeps receiving ` +
                       `prices, and setup starts again so you can import or build a new set.`
                   )
                 )
@@ -306,7 +306,7 @@ export default function RatePlansPanel({
             <Archive className="w-4 h-4 mt-0.5 shrink-0 text-slate-400" />
             <p>
               <span className="font-medium text-slate-900">
-                {untracked.length} plan{untracked.length === 1 ? "" : "s"} left on Channex
+                {untracked.length} plan{untracked.length === 1 ? "" : "s"} no longer used
               </span>{" "}
               that host24 no longer sells through — usually replaced by a later import. Removing them
               is safe unless a channel still maps to one.
@@ -318,7 +318,7 @@ export default function RatePlansPanel({
                 <span className="flex-1 min-w-0 truncate text-slate-500">{u.title}</span>
                 <button
                   onClick={() => {
-                    if (!confirm(`Delete "${u.title}" from Channex? This cannot be undone.`)) return;
+                    if (!confirm(`Delete "${u.title}"? This cannot be undone.`)) return;
                     send(`/api/channex/rate-plans/${encodeURIComponent(`channex:${u.id}`)}?propertyId=${propertyId}`, {
                       method: "DELETE",
                     });

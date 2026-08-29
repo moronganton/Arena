@@ -1,15 +1,13 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
-  Upload, LayoutTemplate, Loader2, AlertTriangle, ArrowLeft, Check, Trash2, Info,
-  Download, Star, DoorOpen, ImageDown, Wrench,
+  LayoutTemplate, Loader2, AlertTriangle, ArrowLeft, Check, Trash2, Info,
+  Download, Star, DoorOpen, Wrench, Wifi,
 } from "lucide-react";
-import { compressImage } from "@/lib/image";
 import { DEFAULT_RATE_PLAN_SET } from "@/lib/channels/rate-plan-spec";
-import {
-  reviewProblems, mergeExtractionIntoPlans, type ImportedPlan, type ImportResult,
-} from "@/lib/rate-plan-import";
+import { reviewProblems, type ImportedPlan } from "@/lib/rate-plan-import";
 import { channelDisplayName, type ChannelReadResult, type ChannelRoom } from "@/lib/channels/channel-rate-import";
+import ChannexMappingFrame from "@/components/channels/ChannexMappingFrame";
 
 // Setting up what a property sells, for someone who has never seen a rate plan.
 //
@@ -43,6 +41,7 @@ function withKeys(plans: ImportedPlan[]): EditablePlan[] {
 
 export default function RatePlanSetup({
   propertyId,
+  propertyName,
   currency,
   onCreated,
   // True when the property has no Channex listing yet - a brand new property
@@ -60,6 +59,7 @@ export default function RatePlanSetup({
   replacing = false,
 }: {
   propertyId: string;
+  propertyName: string;
   currency: string;
   onCreated: () => void;
   needsConnecting?: boolean;
@@ -74,10 +74,9 @@ export default function RatePlanSetup({
   // Set only when the channel returned more than one room type, so the
   // operator picks which one this property is instead of host24 guessing.
   const [rooms, setRooms] = useState<ChannelRoom[]>([]);
-  // Result of filling a channel read's blanks from a screenshot, so the review
-  // screen can say what the screenshot actually answered.
-  const [mergeNote, setMergeNote] = useState<string | null>(null);
-  const [merging, setMerging] = useState(false);
+  const [channelName, setChannelName] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   // What host24 records about this property on Channex, checked against
   // Channex. null while unknown or unreachable - which must render as silence,
   // not as an alarm.
@@ -85,6 +84,13 @@ export default function RatePlanSetup({
     { propertyExists: boolean; roomTypeExists: boolean; ratePlanExists: boolean; ok: boolean } | null
   >(null);
   const [repairing, setRepairing] = useState(false);
+  // Opened straight from the "no channel connected" message. Sending someone
+  // to another tab to fix what this screen just told them is broken is a
+  // detour they have to remember to come back from.
+  const [mapping, setMapping] = useState(false);
+  // 409 from the read: the property is fine, it just has no channel attached
+  // yet. The only error here with a one-click fix.
+  const [needsChannel, setNeedsChannel] = useState(false);
 
   // Checked once, when setup opens on a property that already has a listing.
   // A listing pointing at a room type or rate plan that no longer exists is
@@ -115,49 +121,12 @@ export default function RatePlanSetup({
       });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok) {
-        setError(data?.error ?? "Couldn't repair this property's Channex setup.");
+        setError(data?.error ?? "Couldn't rebuild this property's channel setup.");
         return;
       }
       setHealth(data.health ?? null);
     } finally {
       setRepairing(false);
-    }
-  }
-  const [channelName, setChannelName] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
-  const fillRef = useRef<HTMLInputElement>(null);
-
-  async function readScreenshot(file: File) {
-    setError(null);
-    setStage("reading");
-    try {
-      const image = await compressImage(file);
-      const res = await fetch("/api/channex/rate-plans/import", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ propertyId, image }),
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        setError(data?.error ?? "Couldn't read that screenshot");
-        setStage("choose");
-        return;
-      }
-      const result = data as ImportResult;
-      if (result.plans.length === 0) {
-        setError(result.problems[0] ?? "No rate plans could be read from that image.");
-        setStage("choose");
-        return;
-      }
-      setPlans(withKeys(result.plans));
-      setWarnings(result.warnings);
-      setSource("import");
-      setStage("review");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't read that file");
-      setStage("choose");
     }
   }
 
@@ -166,6 +135,7 @@ export default function RatePlanSetup({
   // whatever the operator approves on the review screen.
   async function readFromChannel() {
     setError(null);
+    setNeedsChannel(false);
     setStage("reading");
     try {
       const res = await fetch("/api/channex/rate-plans/read-from-channel", {
@@ -176,6 +146,7 @@ export default function RatePlanSetup({
       const data = await res.json().catch(() => null);
       if (!res.ok) {
         setError(data?.error ?? "Couldn't read your rate plans from the channel");
+        setNeedsChannel(res.status === 409);
         setStage("choose");
         return;
       }
@@ -204,45 +175,6 @@ export default function RatePlanSetup({
     }
   }
 
-  // Numbers only. The channel already settled which plans exist and what they
-  // are called, so a screenshot read here may fill blanks and nothing else.
-  async function fillFromScreenshot(file: File) {
-    setError(null);
-    setMerging(true);
-    try {
-      const image = await compressImage(file);
-      const res = await fetch("/api/channex/rate-plans/import", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ propertyId, image }),
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        setError(data?.error ?? "Couldn't read that screenshot");
-        return;
-      }
-      const result = data as ImportResult;
-      const merged = mergeExtractionIntoPlans(plans, result.plans);
-      setPlans(withKeys(merged.plans));
-
-      const parts: string[] = [];
-      if (merged.filled.length > 0) parts.push(`Filled ${merged.filled.join("; ")}.`);
-      else parts.push("The screenshot didn't add anything new.");
-      if (merged.unmatched.length > 0) {
-        parts.push(
-          `Ignored ${merged.unmatched.map((t) => `"${t}"`).join(", ")} - not a plan the channel lists for this property.`
-        );
-      }
-      if (merged.stillMissing.length > 0) {
-        parts.push(`Still needs a percentage: ${merged.stillMissing.map((t) => `"${t}"`).join(", ")}.`);
-      }
-      setMergeNote(parts.join(" "));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't read that file");
-    } finally {
-      setMerging(false);
-    }
-  }
 
   function chooseRoom(room: ChannelRoom) {
     setPlans(withKeys(room.plans));
@@ -316,7 +248,7 @@ export default function RatePlanSetup({
         setError(
           (data?.problems ?? []).join("; ") ||
             data?.error ||
-            "Channex didn't accept these rate plans."
+            "Your channel manager didn't accept these rate plans."
         );
         return;
       }
@@ -341,7 +273,7 @@ export default function RatePlanSetup({
       });
       const flipData = await flip.json().catch(() => null);
       if (!flip.ok) {
-        setError(flipData?.error ?? "Couldn't connect this property");
+        setError(flipData?.error ?? "Couldn't set this property up");
         return;
       }
       // Creates the property, room type and Standard Rate on Channex. Separate
@@ -352,7 +284,7 @@ export default function RatePlanSetup({
         const step = Array.isArray(provData?.steps)
           ? provData.steps.find((s: { status?: string }) => s?.status === "failed")
           : null;
-        setError(step?.error?.message ?? provData?.error ?? "Couldn't set this property up on Channex");
+        setError(step?.error?.message ?? provData?.error ?? "Couldn't set this property up for sales channels");
         return;
       }
       setStage("choose");
@@ -371,13 +303,13 @@ export default function RatePlanSetup({
     return (
       <div className="bg-white rounded-2xl border border-slate-100 p-5 md:p-6">
         <h2 className="text-lg font-bold text-slate-900">
-          {alreadyFlagged ? "Finish setting this property up" : "Connect this property first"}
+          {alreadyFlagged ? "Finish setting this property up" : "Set this property up for sales channels"}
         </h2>
         <p className="text-sm text-slate-600 mt-1 max-w-2xl">
           {alreadyFlagged
-            ? "This property is set to use Channex but was never created there, so nothing can sync yet. host24 will create it, its room type and a standard rate now."
-            : "Rate plans live on your channel manager, so this property needs to exist there before it can sell anything. host24 will create it, its room type, and a standard rate."}{" "}
-          Nothing goes on sale until you set prices.
+            ? "This property was never finished, so nothing can sync yet. host24 will set up its room type and a standard rate now."
+            : "Before this property can sell on Booking.com or Airbnb, host24 sets it up for them — the property itself, its room type, and a standard rate."}{" "}
+          Nothing goes on sale until you set prices and connect a channel.
         </p>
 
         {error && (
@@ -393,7 +325,7 @@ export default function RatePlanSetup({
           className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition mt-5"
         >
           {connecting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-          {connecting ? "Setting up…" : alreadyFlagged ? "Create it on Channex" : "Set up on Channex"}
+          {connecting ? "Setting up…" : alreadyFlagged ? "Finish setting it up" : "Set up sales channels"}
         </button>
       </div>
     );
@@ -408,9 +340,9 @@ export default function RatePlanSetup({
   if (health && !health.ok) {
     return (
       <div className="bg-white rounded-2xl border border-slate-100 p-5 md:p-6">
-        <h2 className="text-lg font-bold text-slate-900">This property&apos;s Channex setup is incomplete</h2>
+        <h2 className="text-lg font-bold text-slate-900">This property&apos;s channel setup is incomplete</h2>
         <p className="text-sm text-slate-600 mt-1 max-w-2xl">
-          host24 has this property on Channex, but{" "}
+          host24 has this property set up for sales channels, but{" "}
           {!health.propertyExists
             ? "the property itself is no longer there."
             : !health.roomTypeExists && !health.ratePlanExists
@@ -418,8 +350,8 @@ export default function RatePlanSetup({
               : !health.roomTypeExists
                 ? "its room type is no longer there."
                 : "its rate plan is no longer there."}{" "}
-          Until that is fixed, nothing can be sold or mapped to a channel — Channex will show an empty
-          list when you try to map one.
+          Until that is fixed, nothing can be sold or mapped to a channel — you will see an empty list
+          when you try to connect one.
         </p>
 
         {error && (
@@ -441,8 +373,8 @@ export default function RatePlanSetup({
         ) : (
           <p className="text-sm text-slate-500 mt-4 max-w-2xl">
             Recreating it automatically would leave the old property&apos;s reservations and channel
-            connections behind and give you a second copy on your Channex account, so this one needs
-            setting up again deliberately.
+            connections behind and give you a second copy, so this one needs setting up again
+            deliberately.
           </p>
         )}
       </div>
@@ -472,13 +404,26 @@ export default function RatePlanSetup({
         </p>
 
         {error && (
-          <div className="flex items-start gap-2 text-sm px-3 py-2 rounded-lg border bg-red-50 border-red-200 text-red-700 mt-4">
-            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-            {error}
+          <div className="text-sm px-3.5 py-3 rounded-xl border bg-red-50 border-red-200 text-red-700 mt-4">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p>{error}</p>
+                {needsChannel && (
+                  <button
+                    onClick={() => setMapping(true)}
+                    className="flex items-center gap-1.5 bg-white hover:bg-red-100 border border-red-300 text-red-800 px-3 py-1.5 rounded-lg text-sm font-medium transition mt-2.5"
+                  >
+                    <Wifi className="w-3.5 h-3.5" />
+                    Connect a channel now
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-5">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-5">
           <div className="border border-indigo-200 bg-indigo-50/50 rounded-xl p-4 flex flex-col gap-2">
             <span className="text-[10px] font-bold uppercase tracking-wide text-white bg-indigo-600 px-2 py-0.5 rounded-full self-start">
               Recommended
@@ -494,21 +439,6 @@ export default function RatePlanSetup({
             >
               <Download className="w-4 h-4" />
               Read my rate plans
-            </button>
-          </div>
-
-          <div className="border border-slate-200 rounded-xl p-4 flex flex-col gap-2">
-            <h3 className="font-semibold text-slate-900">Upload a screenshot</h3>
-            <p className="text-sm text-slate-600 flex-1">
-              Not connected to Booking.com yet? Screenshot your rate plans page and host24 reads it —
-              names, discounts and minimum stays.
-            </p>
-            <button
-              onClick={() => fileRef.current?.click()}
-              className="flex items-center gap-2 border border-slate-200 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-xl text-sm font-medium transition self-start"
-            >
-              <Upload className="w-4 h-4" />
-              Upload a screenshot
             </button>
           </div>
 
@@ -529,21 +459,26 @@ export default function RatePlanSetup({
         </div>
 
         <p className="text-xs text-slate-500 mt-4">
-          For a screenshot, go to <strong>Property → Rates &amp; Availability → Rate plans</strong> in
-          Booking.com and capture the whole list.
+          Reading from Booking.com needs the channel connected first — that is the{" "}
+          <strong>Channels</strong> step, and you only do it once per property.
         </p>
 
-        <input
-          ref={fileRef}
-          type="file"
-          accept="image/*"
-          className="hidden"
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) readScreenshot(f);
-            e.target.value = "";
-          }}
-        />
+        {mapping && (
+          <ChannexMappingFrame
+            propertyId={propertyId}
+            propertyName={propertyName}
+            onClose={() => {
+              setMapping(false);
+              // Straight back into the read. Closing the mapping window is the
+              // moment the answer changes, and making someone press the same
+              // button again to find out is the detour this replaced.
+              setError(null);
+              setNeedsChannel(false);
+              readFromChannel();
+            }}
+          />
+        )}
+
       </div>
     );
   }
@@ -666,38 +601,27 @@ export default function RatePlanSetup({
       )}
 
       {source === "channel" && (
-        <div className="mt-4 rounded-xl border border-dashed border-indigo-200 bg-indigo-50/40 p-3.5">
-          <div className="flex items-start gap-2 flex-wrap">
-            <ImageDown className="w-4 h-4 mt-0.5 shrink-0 text-indigo-500" />
-            <div className="flex-1 min-w-[220px]">
-              <p className="text-sm font-semibold text-slate-900">Fill the numbers automatically</p>
-              <p className="text-sm text-slate-600 mt-0.5">
-                {channelName ?? "Your channel"} sends names and structure but no numbers. Screenshot
-                your rate plans page and host24 reads the discounts, minimum stays and policies onto
-                the plans above. It can only fill blanks — it cannot rename or add a plan.
+        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3.5">
+          <div className="flex items-start gap-2">
+            <Info className="w-4 h-4 mt-0.5 shrink-0 text-amber-600" />
+            <div className="text-sm text-amber-900">
+              <p className="font-semibold">Check these against Booking.com before you create them</p>
+              <p className="mt-1">
+                The names and structure below came straight from your channel, so those are right. The
+                numbers did not — your channel sends no prices, minimum stays or policies at all. Open{" "}
+                <strong>Property → Rates &amp; Availability → Rate plans</strong> in Booking.com and make
+                sure each plan here matches it:
+              </p>
+              <ul className="list-disc pl-5 mt-1.5 space-y-0.5">
+                <li>the price difference from your main rate — a percentage or a fixed amount</li>
+                <li>the minimum number of nights</li>
+                <li>which plans include breakfast</li>
+              </ul>
+              <p className="mt-1.5">
+                Anything wrong here sells at the wrong price on every channel this property is on.
               </p>
             </div>
-            <button
-              onClick={() => fillRef.current?.click()}
-              disabled={merging}
-              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-3.5 py-2 rounded-xl text-sm font-medium transition self-start"
-            >
-              {merging ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-              {merging ? "Reading…" : "Upload a screenshot"}
-            </button>
           </div>
-          {mergeNote && <p className="text-xs text-slate-600 mt-2.5 border-t border-indigo-100 pt-2">{mergeNote}</p>}
-          <input
-            ref={fillRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) fillFromScreenshot(f);
-              e.target.value = "";
-            }}
-          />
         </div>
       )}
 

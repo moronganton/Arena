@@ -133,17 +133,17 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
       ? channels!.connectedOtas!
           .map((o) => (o === "BOOKING" ? "Booking.com" : o === "AIRBNB" ? "Airbnb" : o))
           .join(", ")
-      : "Channex connected";
+      : "Ready for channels";
   const syncLine = isChannex
     ? channexGone
-      ? "Not on Channex any more · nothing is syncing"
+      ? "Channel setup incomplete · nothing is syncing"
       : noOtas
-        ? "On Channex · no OTA connected, so it isn't selling anywhere"
+        ? "No sales channel connected yet · this property isn't selling anywhere"
         : channels?.channex?.lastPushAt
         ? `${otaNames} · last push ${new Date(channels.channex.lastPushAt).toLocaleDateString()}`
           : `${otaNames} · not pushed yet`
-    : channels?.manager === "SMOOBU"
-      ? channels.smoobu?.lastSyncAt
+    : channels?.manager === "SMOOBU" && channels.smoobu
+      ? channels.smoobu.lastSyncAt
         ? `Smoobu connected · synced ${new Date(channels.smoobu.lastSyncAt).toLocaleDateString()}`
         : "Smoobu connected · not synced yet"
       : null;

@@ -71,11 +71,13 @@ function rulePeriod(r: RuleRow): string {
 
 export default function RateRevenueTab({
   propertyId,
+  propertyName,
   calendarProperty,
   needsChannexSetup = false,
   alreadyFlaggedChannex = false,
 }: {
   propertyId: string;
+  propertyName: string;
   // When provided, the live price calendar renders full-width below the
   // cause/effect columns - the month view is the same rules made visible
   // thirty days at a time instead of seven.
@@ -152,6 +154,7 @@ export default function RateRevenueTab({
         )}
         <RatePlanSetup
           propertyId={propertyId}
+          propertyName={propertyName}
           currency={summary?.currency ?? "EUR"}
           needsConnecting={needsChannexSetup && !reimporting}
           alreadyFlagged={alreadyFlaggedChannex}

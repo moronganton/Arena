@@ -179,6 +179,7 @@ export default function PropertyListingTabs({ data }: { data: PropertyTabsData }
       {(isChannex || data.canSetUpChannex) && tab === "rateplans" && (
         <RateRevenueTab
           propertyId={propertyId}
+          propertyName={propertyName}
           calendarProperty={data.calendarProperty}
           needsChannexSetup={data.needsChannexSetup}
           alreadyFlaggedChannex={data.alreadyFlaggedChannex}
@@ -242,9 +243,9 @@ export default function PropertyListingTabs({ data }: { data: PropertyTabsData }
       {!isChannex && !(data.canSetUpChannex && tab === "rateplans") &&
         (tab === "rateplans" || tab === "reviews" || tab === "payments" || tab === "content") && (
         <div className="bg-white rounded-2xl border border-slate-100 text-center py-8 text-slate-400">
-          <p className="text-sm">This property isn&apos;t on Channex.</p>
+          <p className="text-sm">This property isn&apos;t set up for sales channels yet.</p>
           <p className="text-xs mt-1">
-            Rate plans, reviews, card payments and listing content only apply to Channex-managed listings.
+            Rate plans, reviews, card payments and listing content need a connected channel manager.
           </p>
         </div>
       )}
