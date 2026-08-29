@@ -9,6 +9,7 @@ import {
   validateRatePlanChanges,
   buildDerivedRatePlanPayload,
   buildParentRatePlanPayload,
+  buildParentReusePayload,
   derivedRateOption,
   isParent,
   validateRatePlanSet,
@@ -381,5 +382,60 @@ describe("deriving by a fixed amount", () => {
       { channexPropertyId: "p", channexRoomTypeId: "r", currency: "EUR", occupancy: 4 }
     );
     assert.ok(!("meal_type" in payload.rate_plan));
+  });
+});
+
+describe("buildParentReusePayload", () => {
+  const ctx = { channexPropertyId: "p", channexRoomTypeId: "r", currency: "EUR", occupancy: 4 };
+
+  it("renames a plan into the parent role without recreating it", () => {
+    const p = buildParentReusePayload(
+      { title: "Standard Rate", derivedPercent: null, minStayArrival: 3 },
+      ctx
+    ).rate_plan;
+    assert.equal(p.title, "Standard Rate");
+    assert.deepEqual(p.min_stay_arrival, [3, 3, 3, 3, 3, 3, 3]);
+  });
+
+  it("stops the plan deriving from anything, so Channex no longer recomputes it", () => {
+    const p = buildParentReusePayload(
+      { title: "Standard Rate", derivedPercent: null, minStayArrival: 1 },
+      ctx
+    ).rate_plan;
+    assert.equal(p.parent_rate_plan_id, null);
+    assert.equal(p.options[0].derived_option, null);
+  });
+
+  it("never resends the structural fields a channel maps through", () => {
+    // Resending these on an update is how a rename detaches a plan from the
+    // room type a channel is mapped to.
+    const p = buildParentReusePayload(
+      { title: "Standard Rate", derivedPercent: null, minStayArrival: 1 },
+      ctx
+    ).rate_plan as Record<string, unknown>;
+    for (const key of ["property_id", "room_type_id", "sell_mode", "rate_mode", "currency"]) {
+      assert.ok(!(key in p), `${key} must not be resent`);
+    }
+  });
+
+  it("never resets the rate, which would blank a live listing", () => {
+    const p = buildParentReusePayload(
+      { title: "Standard Rate", derivedPercent: null, minStayArrival: 1 },
+      ctx
+    ).rate_plan;
+    assert.ok(!("rate" in p.options[0]));
+  });
+
+  it("carries a meal type only when the plan has one", () => {
+    const withMeal = buildParentReusePayload(
+      { title: "B&B Rate", derivedPercent: null, minStayArrival: 1, mealType: "breakfast" },
+      ctx
+    ).rate_plan as Record<string, unknown>;
+    assert.equal(withMeal.meal_type, "breakfast");
+    const without = buildParentReusePayload(
+      { title: "Standard Rate", derivedPercent: null, minStayArrival: 1 },
+      ctx
+    ).rate_plan as Record<string, unknown>;
+    assert.ok(!("meal_type" in without));
   });
 });

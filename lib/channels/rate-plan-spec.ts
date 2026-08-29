@@ -297,6 +297,31 @@ export function buildParentRatePlanPayload(spec: RatePlanSpec, ctx: RatePlanPayl
   };
 }
 
+// Turning a plan that already exists into this family's parent, without
+// creating anything.
+//
+// Only the fields a parent needs, and deliberately NOT property_id,
+// room_type_id or sell_mode: those are structural, already correct on a plan
+// this listing has been pushing into, and resending them on an update is how a
+// rename detaches a plan from the room type a channel maps to.
+//
+// The rate is not sent either. The plan is already carrying real prices from
+// earlier pushes, and resetting it to 0 would blank a live listing until the
+// next ARI cycle.
+export function buildParentReusePayload(spec: RatePlanSpec, ctx: RatePlanPayloadContext) {
+  return {
+    rate_plan: {
+      title: spec.title,
+      min_stay_arrival: weeklyDefault(spec.minStayArrival),
+      // A plan that was derived from something else must stop being derived
+      // when it becomes the parent, or Channex would go on recomputing it.
+      parent_rate_plan_id: null,
+      options: [{ occupancy: ctx.occupancy, is_primary: true, derived_option: null }],
+      ...(spec.mealType ? { meal_type: spec.mealType } : {}),
+    },
+  };
+}
+
 export function buildDerivedRatePlanPayload(
   spec: RatePlanSpec,
   parentChannexRatePlanId: string,

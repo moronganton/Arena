@@ -5,6 +5,7 @@ import {
   DEFAULT_RATE_PLAN_SET,
   buildDerivedRatePlanPayload,
   buildParentRatePlanPayload,
+  buildParentReusePayload,
   buildRatePlanUpdatePayload,
   derivationOf,
   describeDerivation,
@@ -124,8 +125,9 @@ const MAX_PAGES = 20; // 2000 plans for one property is a runaway, not a portfol
 
 async function fetchExistingTitles(
   channexPropertyId: string
-): Promise<{ titles: string[]; byTitle: Map<string, string> }> {
+): Promise<{ titles: string[]; byTitle: Map<string, string>; titleById: Map<string, string> }> {
   const byTitle = new Map<string, string>();
+  const titleById = new Map<string, string>();
 
   for (let page = 1; page <= MAX_PAGES; page++) {
     const res = await channexGet<ChannexRatePlanRow[]>(
@@ -139,12 +141,15 @@ async function fetchExistingTitles(
       const owner = r.relationships?.property?.data?.id;
       if (owner && owner !== channexPropertyId) continue;
       const t = r.attributes?.title;
-      if (t) byTitle.set(t.trim().toLowerCase(), r.id);
+      if (t) {
+        byTitle.set(t.trim().toLowerCase(), r.id);
+        titleById.set(r.id, t);
+      }
     }
     if (rows.length < PAGE_LIMIT) break;
   }
 
-  return { titles: [...byTitle.keys()], byTitle };
+  return { titles: [...byTitle.keys()], byTitle, titleById };
 }
 
 export async function provisionRatePlanSet(
@@ -185,7 +190,32 @@ export async function provisionRatePlanSet(
   // failed on the first call - which is the opposite of what a dry run is for.
   // It costs one GET to tell the truth instead.
   const existing = await fetchExistingTitles(opts.channexPropertyId);
-  const collisions = findTitleCollisions(specs, existing.titles);
+
+  // The plan this listing already pushes into is REUSED as the new parent
+  // rather than retired and replaced.
+  //
+  // Retiring it was silently destructive. A channel maps to a rate plan by id,
+  // so renaming the mapped plan to "(retired ...)" and creating a fresh parent
+  // left Booking.com reading a plan nothing pushes to, while host24 pushed to
+  // a plan Booking.com had never heard of. Seen live: a property quoting
+  // EUR 1000 in host24 whose channel was still mapped to the retired plan, so
+  // the price reached nobody. It also made the retired plan undeletable, since
+  // Channex refuses to delete a plan a channel still maps to - which is how it
+  // shows up to an operator: an error on a plan they cannot get rid of.
+  //
+  // Reusing the id keeps every existing mapping valid through an import.
+  const reuseParentId =
+    opts.currentChannexRatePlanId && existing.titleById.has(opts.currentChannexRatePlanId)
+      ? opts.currentChannexRatePlanId
+      : null;
+  const reusedCurrentTitle = reuseParentId ? existing.titleById.get(reuseParentId)! : null;
+
+  // A title held by the plan being reused is not a collision - that plan is
+  // about to become the parent and carry the new title itself.
+  const collisionTitles = existing.titles.filter(
+    (t) => !(reusedCurrentTitle && t === reusedCurrentTitle.trim().toLowerCase())
+  );
+  const collisions = findTitleCollisions(specs, collisionTitles);
   const retireSteps: RatePlanStep[] = collisions.map((title) => {
     const id = existing.byTitle.get(title.trim().toLowerCase()) ?? "(unknown)";
     return {
@@ -207,12 +237,21 @@ export async function provisionRatePlanSet(
       );
       result.steps.push(...retireSteps);
     }
-    result.steps.push({
-      step: `create parent "${parentSpec.title}"`,
-      path: "/rate_plans",
-      payload: buildParentRatePlanPayload(parentSpec, ctx),
-      status: "planned",
-    });
+    result.steps.push(
+      reuseParentId
+        ? {
+            step: `reuse existing plan as parent "${parentSpec.title}" (was "${reusedCurrentTitle}") - keeps channel mappings intact`,
+            path: `/rate_plans/${reuseParentId}`,
+            payload: buildParentReusePayload(parentSpec, ctx),
+            status: "planned",
+          }
+        : {
+            step: `create parent "${parentSpec.title}"`,
+            path: "/rate_plans",
+            payload: buildParentRatePlanPayload(parentSpec, ctx),
+            status: "planned",
+          }
+    );
     for (const spec of derivedSpecs) {
       result.steps.push({
         step: `create derived "${spec.title}" (${describeDerivation(spec)}, min stay ${spec.minStayArrival})`,
@@ -267,8 +306,35 @@ export async function provisionRatePlanSet(
   }
 
   // --- 1. parent ---
-  const parentPayload = buildParentRatePlanPayload(parentSpec, ctx);
   let parentId: string;
+  if (reuseParentId) {
+    const payload = buildParentReusePayload(parentSpec, ctx);
+    try {
+      await channexPut(`/rate_plans/${reuseParentId}`, payload);
+      parentId = reuseParentId;
+      result.steps.push({
+        step: `reuse existing plan as parent "${parentSpec.title}" (was "${reusedCurrentTitle}")`,
+        path: `/rate_plans/${reuseParentId}`, payload, status: "ok",
+      });
+    } catch (err) {
+      const e = err as ChannexError;
+      result.steps.push({
+        step: `reuse existing plan as parent "${parentSpec.title}"`,
+        path: `/rate_plans/${reuseParentId}`, payload, status: "failed",
+        error: { message: e.message, status: e.status, code: e.code, details: e.details },
+      });
+      // Nothing else has been touched - the plan keeps its name and keeps
+      // selling through whatever maps to it.
+      return result;
+    }
+    result.parentChannexRatePlanId = parentId;
+    result.created.push({
+      title: parentSpec.title, channexRatePlanId: parentId,
+      derivedPercent: null, derivedAmount: null, minStayArrival: parentSpec.minStayArrival,
+      mealType: parentSpec.mealType ?? null,
+    });
+  } else {
+  const parentPayload = buildParentRatePlanPayload(parentSpec, ctx);
   try {
     const created = await channexPost<{ id: string }>("/rate_plans", parentPayload);
     parentId = created.data.id;
@@ -292,6 +358,7 @@ export async function provisionRatePlanSet(
     derivedPercent: null, derivedAmount: null, minStayArrival: parentSpec.minStayArrival,
     mealType: parentSpec.mealType ?? null,
   });
+  }
 
   // --- 2. derived children ---
   for (const spec of derivedSpecs) {
@@ -398,6 +465,30 @@ export async function deleteRatePlan(
     // nothing. Channex puts the actual reason in details - a rate plan with
     // bookings against it, or one still mapped to a channel, cannot be
     // removed, and knowing which changes what you do next.
+    //
+    // The mapped case is the one an operator actually hits and the one they can
+    // fix, so it is named rather than relayed: Channex's own wording is about
+    // an association, which reads as a bug in host24 rather than as a step
+    // they have to take in the Channels tab.
+    const raw = `${e.message} ${JSON.stringify(e.details ?? "")}`.toLowerCase();
+    if (/channel|mapping|mapped|association/.test(raw)) {
+      return {
+        ok: false,
+        error:
+          "A channel still sells through this rate plan, so Channex will not delete it. " +
+          "Open the Channels tab, point that channel's mapping at a different plan, then remove this one.",
+        details: e.details,
+      };
+    }
+    if (/booking|reservation/.test(raw)) {
+      return {
+        ok: false,
+        error:
+          "This rate plan has bookings against it, so Channex will not delete it. " +
+          "It can stay - it is not being sold through any more.",
+        details: e.details,
+      };
+    }
     return { ok: false, error: e.message, details: e.details };
   }
 }
