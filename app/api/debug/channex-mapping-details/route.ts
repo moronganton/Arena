@@ -34,6 +34,14 @@ export async function GET(req: NextRequest) {
 
   const params = new URL(req.url).searchParams;
 
+  // Straight to the read, for a Channex property id taken from
+  // /api/debug/verify-channel-provider. Same function, one less lookup.
+  const channexPropertyId = params.get("channexPropertyId");
+  if (channexPropertyId) {
+    const result = await readRatePlansFromChannel(channexPropertyId);
+    return NextResponse.json({ channexPropertyId, ...result }, { status: result.ok ? 200 : result.status });
+  }
+
   const propertyId = params.get("propertyId");
   if (propertyId) {
     const listing = await prisma.channexListing.findUnique({
@@ -52,7 +60,7 @@ export async function GET(req: NextRequest) {
 
   const channelId = params.get("channelId");
   if (!channelId) {
-    return NextResponse.json({ error: "channelId or propertyId is required" }, { status: 400 });
+    return NextResponse.json({ error: "channelId, propertyId or channexPropertyId is required" }, { status: 400 });
   }
 
   let channel: string;
