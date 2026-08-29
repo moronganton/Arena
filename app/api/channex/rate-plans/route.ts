@@ -39,6 +39,20 @@ const provisionSchema = z.object({
       minStayArrival: z.number().int().min(1),
     })
     .optional(),
+  // The family to create, when it is not the default one - what the operator
+  // approved on the import review screen. provisionRatePlanSet already takes
+  // `specs`; the route simply never offered it, so every property got the
+  // template whether or not it matched what they actually sell.
+  specs: z
+    .array(
+      z.object({
+        title: z.string().min(1),
+        derivedPercent: z.number().nullable(),
+        minStayArrival: z.number().int().min(1),
+      })
+    )
+    .min(1)
+    .optional(),
 });
 
 export async function GET(req: NextRequest) {
@@ -72,7 +86,7 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid body", details: parsed.error.flatten() }, { status: 400 });
   }
-  const { propertyId, apply, retireExisting, deleteRatePlanId, addPlan } = parsed.data;
+  const { propertyId, apply, retireExisting, deleteRatePlanId, addPlan, specs } = parsed.data;
 
   const guard = await requireChannexProperty(propertyId, session.user.id);
   if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: guard.status });
@@ -119,6 +133,9 @@ export async function POST(req: NextRequest) {
     currentChannexRatePlanId: guard.channexRatePlanId,
     apply,
     retireExisting,
+    // Undefined falls through to DEFAULT_RATE_PLAN_SET, so the template path
+    // is unchanged.
+    specs,
   });
 
   if (result.problems.length > 0) {

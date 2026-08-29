@@ -52,11 +52,23 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
 
   const isChannex = channels?.manager === "CHANNEX";
 
+  // A brand new property is created with channelProvider "SMOOBU" and no
+  // mapping at all, so it is indistinguishable from a real Smoobu listing by
+  // that flag alone. The discriminator is a SMOOBU channel row carrying a
+  // listingId: a genuinely mapped property has one, an unconnected new one
+  // does not - and converting a live Smoobu listing would cut its bookings
+  // off. Only the latter may be offered Channex setup.
+  const smoobuMapped = await prisma.channelConfig.count({
+    where: { propertyId: id, channel: "SMOOBU", listingId: { not: null } },
+  });
+  const canSetUpChannex = !isChannex && smoobuMapped === 0;
+
   // Everything the client tabs need, serialized (dates become ISO strings).
   const tabsData = {
     propertyId: property.id,
     propertyName: property.name,
     isChannex,
+    canSetUpChannex,
     calendarProperty: {
       id: property.id,
       name: property.name,

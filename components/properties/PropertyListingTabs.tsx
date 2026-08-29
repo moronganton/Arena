@@ -67,6 +67,8 @@ export interface PropertyTabsData {
   propertyId: string;
   propertyName: string;
   isChannex: boolean;
+  /** Unconnected and safe to set up - not a live Smoobu listing. */
+  canSetUpChannex: boolean;
   calendarProperty: PriceCalendarProperty;
   channels: ChannelSummary | null;
   locks: LockSummary[];
@@ -112,7 +114,7 @@ function InitialTab({ onResolved }: { onResolved: (tab: TabId, sub?: SubTabId) =
 
 export default function PropertyListingTabs({ data }: { data: PropertyTabsData }) {
   const { propertyId, propertyName, isChannex } = data;
-  const [tab, setTab] = useState<TabId>(isChannex ? "rateplans" : "taxes");
+  const [tab, setTab] = useState<TabId>(isChannex || data.canSetUpChannex ? "rateplans" : "taxes");
   const [sub, setSub] = useState<SubTabId>("description");
 
   const tabButton = (id: TabId, label: string, Icon: typeof Layers) => (
@@ -141,7 +143,9 @@ export default function PropertyListingTabs({ data }: { data: PropertyTabsData }
       </Suspense>
 
       <div className="flex items-center gap-1 mb-4 overflow-x-auto">
-        {MONEY_TABS.filter((t) => isChannex || !t.channexOnly).map(({ id, label, icon }) => tabButton(id, label, icon))}
+        {MONEY_TABS.filter(
+          (t) => isChannex || !t.channexOnly || (t.id === "rateplans" && data.canSetUpChannex)
+        ).map(({ id, label, icon }) => tabButton(id, label, icon))}
 
         <div className="w-px self-stretch bg-slate-200 mx-1 shrink-0" aria-hidden />
         {OPS_TABS.map(({ id, label, icon }) => tabButton(id, label, icon))}
@@ -168,8 +172,12 @@ export default function PropertyListingTabs({ data }: { data: PropertyTabsData }
       </div>
 
       {tab === "taxes" && <CityTaxSettingsPanel propertyId={propertyId} />}
-      {isChannex && tab === "rateplans" && (
-        <RateRevenueTab propertyId={propertyId} calendarProperty={data.calendarProperty} />
+      {(isChannex || data.canSetUpChannex) && tab === "rateplans" && (
+        <RateRevenueTab
+          propertyId={propertyId}
+          calendarProperty={data.calendarProperty}
+          needsChannexSetup={!isChannex}
+        />
       )}
       {isChannex && tab === "reviews" && <ReviewsPanel propertyId={propertyId} />}
       {isChannex && tab === "payments" && <PaymentsSetupPanel propertyId={propertyId} />}
@@ -226,7 +234,8 @@ export default function PropertyListingTabs({ data }: { data: PropertyTabsData }
         </div>
       )}
 
-      {!isChannex && (tab === "rateplans" || tab === "reviews" || tab === "payments" || tab === "content") && (
+      {!isChannex && !(data.canSetUpChannex && tab === "rateplans") &&
+        (tab === "rateplans" || tab === "reviews" || tab === "payments" || tab === "content") && (
         <div className="bg-white rounded-2xl border border-slate-100 text-center py-8 text-slate-400">
           <p className="text-sm">This property isn&apos;t on Channex.</p>
           <p className="text-xs mt-1">

@@ -1,10 +1,11 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, ArrowDown, CalendarDays, Loader2, Pencil } from "lucide-react";
+import { ArrowRight, ArrowDown, CalendarDays, Loader2, Pencil, Settings2, X } from "lucide-react";
 import RatePlansPanel from "@/components/properties/RatePlansPanel";
 import PriceCalendarPanel, { type PriceCalendarProperty } from "@/components/pricing/PriceCalendarPanel";
 import ChannelOffersPanel from "@/components/properties/ChannelOffersPanel";
+import RatePlanSetup from "@/components/properties/RatePlanSetup";
 import type { ChannelKey, PlanLike } from "@/lib/channels/channel-offers";
 
 // The Rate plans tab as cause and effect, side by side.
@@ -71,17 +72,25 @@ function rulePeriod(r: RuleRow): string {
 export default function RateRevenueTab({
   propertyId,
   calendarProperty,
+  needsChannexSetup = false,
 }: {
   propertyId: string;
   // When provided, the live price calendar renders full-width below the
   // cause/effect columns - the month view is the same rules made visible
   // thirty days at a time instead of seven.
   calendarProperty?: PriceCalendarProperty;
+  // The property is not on Channex yet, so nothing Channex-shaped can be
+  // fetched for it - setup runs before any of the usual reads.
+  needsChannexSetup?: boolean;
 }) {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Bumped after setup creates the family, to re-read the summary.
+  const [reloadKey, setReloadKey] = useState(0);
+
   useEffect(() => {
+    if (needsChannexSetup) return;
     let cancelled = false;
     setSummary(null);
     setError(null);
@@ -100,17 +109,43 @@ export default function RateRevenueTab({
     return () => {
       cancelled = true;
     };
-  }, [propertyId]);
+  }, [propertyId, reloadKey, needsChannexSetup]);
 
   // The week's floor price, so nights lifted by a rule (weekend, season) read
   // as elevated at a glance without inventing a weekend concept here.
   const floor = summary ? Math.min(...summary.week.map((d) => d.price)) : 0;
   const todayPrice = summary?.week[0]?.price;
 
+  // Rules are hidden until they have earned their place. A property that
+  // already has some has clearly found them, so they stay open; a brand new
+  // one meets its rate plans first and nothing else - neither Booking.com nor
+  // Airbnb has taught this operator what a pricing rule is, and asking them to
+  // learn one while they are still working out what a rate plan is loses them.
+  const hasRules = (summary?.rules.length ?? 0) > 0;
+  const [rulesOpen, setRulesOpen] = useState<boolean | null>(null);
+  const showRules = rulesOpen ?? hasRules;
+
+  // A property with no rate plans cannot be finished from this screen until it
+  // has some, so setup is the whole tab rather than a card among others.
+  if (needsChannexSetup || (summary && summary.plans.length === 0)) {
+    return (
+      <RatePlanSetup
+        propertyId={propertyId}
+        currency={summary?.currency ?? "EUR"}
+        needsConnecting={needsChannexSetup}
+        // A full reload: connecting changes channelProvider on the server, so
+        // the page's own props are stale until it re-renders.
+        onCreated={() => (needsChannexSetup ? window.location.reload() : setReloadKey((n) => n + 1))}
+      />
+    );
+  }
+
   return (
     <div className="space-y-4">
-    <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto_1fr] gap-4 items-start">
-      {/* ---- Cause ---- */}
+    <div className={`grid grid-cols-1 gap-4 items-start ${showRules ? "lg:grid-cols-[1fr_auto_1fr]" : ""}`}>
+      {showRules && (
+        <>
+        {/* ---- Cause ---- */}
       <div className="bg-white rounded-2xl border border-slate-100 p-4">
         <div className="flex items-center justify-between gap-2 mb-3">
           <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
@@ -193,25 +228,34 @@ export default function RateRevenueTab({
           </>
         )}
       </div>
+        </>
+      )}
 
-      {/* ---- Connector ---- */}
-      <div className="hidden lg:flex flex-col items-center justify-center gap-1.5 pt-16 px-1">
-        <ArrowRight className="w-7 h-7 text-indigo-600" />
-        <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 text-center leading-tight">
-          flows
-          <br />
-          into
-        </span>
-      </div>
-      <div className="flex lg:hidden items-center justify-center gap-2 -my-1">
-        <ArrowDown className="w-5 h-5 text-indigo-600" />
-        <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600">flows into</span>
-      </div>
+      {showRules && (
+        <>
+          {/* ---- Connector ---- */}
+          <div className="hidden lg:flex flex-col items-center justify-center gap-1.5 pt-16 px-1">
+            <ArrowRight className="w-7 h-7 text-indigo-600" />
+            <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 text-center leading-tight">
+              flows
+              <br />
+              into
+            </span>
+          </div>
+          <div className="flex lg:hidden items-center justify-center gap-2 -my-1">
+            <ArrowDown className="w-5 h-5 text-indigo-600" />
+            <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600">flows into</span>
+          </div>
+        </>
+      )}
 
       {/* ---- Effect ---- */}
       <div className="bg-white rounded-2xl border border-slate-100 p-4">
-        <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-3">
-          Effect — what sells
+        <div className="flex items-start justify-between gap-3 mb-3">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+            {showRules ? "Effect — what sells" : "What this property sells"}
+          </span>
+          <AdvancedPricingToggle open={showRules} onToggle={() => setRulesOpen(!showRules)} />
         </div>
         <RatePlansPanel
           propertyId={propertyId}
@@ -237,6 +281,70 @@ export default function RateRevenueTab({
         <PriceCalendarPanel property={calendarProperty} />
       </div>
     )}
+    </div>
+  );
+}
+
+// The gear on "what this property sells", and the only route to pricing rules
+// for an operator who has just set the property up.
+//
+// Its job is not to label a feature but to explain, in the words a host
+// already has, that this is capability the OTAs do not give them - and that
+// ignoring it costs nothing. Hence the sentence about setting one price at a
+// time by hand: it frames rules as something they already lack rather than
+// something new to learn, and it happens to be true.
+function AdvancedPricingToggle({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  const [explain, setExplain] = useState(false);
+
+  return (
+    <div className="relative shrink-0">
+      <button
+        onClick={() => (open ? onToggle() : setExplain((v) => !v))}
+        onMouseEnter={() => !open && setExplain(true)}
+        aria-label={open ? "Hide automatic pricing" : "Automatic pricing"}
+        aria-expanded={open}
+        className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border transition ${
+          open
+            ? "border-indigo-200 bg-indigo-50 text-indigo-700"
+            : "border-slate-200 text-slate-500 hover:text-indigo-600 hover:border-indigo-200"
+        }`}
+      >
+        <Settings2 className="w-3.5 h-3.5" />
+        {open ? "Hide rules" : "Automatic pricing"}
+      </button>
+
+      {explain && !open && (
+        <div
+          className="absolute right-0 top-full mt-2 w-[19rem] z-20 bg-slate-900 text-slate-100 rounded-xl p-4 shadow-xl"
+          onMouseLeave={() => setExplain(false)}
+        >
+          <div className="flex items-start justify-between gap-2 mb-2">
+            <p className="font-semibold text-white text-sm">Change this price automatically</p>
+            <button onClick={() => setExplain(false)} aria-label="Close" className="text-slate-400 hover:text-white">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <p className="text-xs leading-relaxed mb-2">
+            Booking.com and Airbnb let you set one price at a time, by hand. host24 can also change it
+            for you — a <strong className="text-white">season</strong>,{" "}
+            <strong className="text-white">weekends</strong>, or{" "}
+            <strong className="text-white">specific dates</strong> you pick on a calendar.
+          </p>
+          <p className="text-xs leading-relaxed text-slate-400 mb-3">
+            Everything you set feeds your main rate. The other plans follow automatically, because
+            they are a percentage of it. Entirely optional — your plans already sell as they are.
+          </p>
+          <button
+            onClick={() => {
+              setExplain(false);
+              onToggle();
+            }}
+            className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition"
+          >
+            Set up automatic pricing
+          </button>
+        </div>
+      )}
     </div>
   );
 }
