@@ -1,8 +1,8 @@
 "use client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Upload, LayoutTemplate, Loader2, AlertTriangle, ArrowLeft, Check, Trash2, Info,
-  Download, Star, DoorOpen, ImageDown,
+  Download, Star, DoorOpen, ImageDown, Wrench,
 } from "lucide-react";
 import { compressImage } from "@/lib/image";
 import { DEFAULT_RATE_PLAN_SET } from "@/lib/channels/rate-plan-spec";
@@ -78,6 +78,51 @@ export default function RatePlanSetup({
   // screen can say what the screenshot actually answered.
   const [mergeNote, setMergeNote] = useState<string | null>(null);
   const [merging, setMerging] = useState(false);
+  // What host24 records about this property on Channex, checked against
+  // Channex. null while unknown or unreachable - which must render as silence,
+  // not as an alarm.
+  const [health, setHealth] = useState<
+    { propertyExists: boolean; roomTypeExists: boolean; ratePlanExists: boolean; ok: boolean } | null
+  >(null);
+  const [repairing, setRepairing] = useState(false);
+
+  // Checked once, when setup opens on a property that already has a listing.
+  // A listing pointing at a room type or rate plan that no longer exists is
+  // the difference between "read your rate plans" working and Channex's own
+  // mapping screen saying "No data" with no explanation anywhere.
+  useEffect(() => {
+    if (needsConnecting) return;
+    let cancelled = false;
+    fetch(`/api/channex/repair?propertyId=${propertyId}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancelled && d?.health) setHealth(d.health);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [propertyId, needsConnecting]);
+
+  async function repair() {
+    setRepairing(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/channex/repair", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ propertyId }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) {
+        setError(data?.error ?? "Couldn't repair this property's Channex setup.");
+        return;
+      }
+      setHealth(data.health ?? null);
+    } finally {
+      setRepairing(false);
+    }
+  }
   const [channelName, setChannelName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -348,6 +393,56 @@ export default function RatePlanSetup({
           {connecting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
           {connecting ? "Setting up…" : alreadyFlagged ? "Create it on Channex" : "Set up on Channex"}
         </button>
+      </div>
+    );
+  }
+
+  // ---------- broken listing ----------
+  // Reached before the doors, because none of them can work: reading rate
+  // plans, creating them and mapping a channel all need a room type and a rate
+  // plan that really exist. Channex says "No data" in its mapping dropdown and
+  // nothing else says anything, which reads as "a channel cannot be mapped
+  // without a default rate" rather than "the objects are missing".
+  if (health && !health.ok) {
+    return (
+      <div className="bg-white rounded-2xl border border-slate-100 p-5 md:p-6">
+        <h2 className="text-lg font-bold text-slate-900">This property&apos;s Channex setup is incomplete</h2>
+        <p className="text-sm text-slate-600 mt-1 max-w-2xl">
+          host24 has this property on Channex, but{" "}
+          {!health.propertyExists
+            ? "the property itself is no longer there."
+            : !health.roomTypeExists && !health.ratePlanExists
+              ? "its room type and rate plan are no longer there."
+              : !health.roomTypeExists
+                ? "its room type is no longer there."
+                : "its rate plan is no longer there."}{" "}
+          Until that is fixed, nothing can be sold or mapped to a channel — Channex will show an empty
+          list when you try to map one.
+        </p>
+
+        {error && (
+          <div className="flex items-start gap-2 text-sm px-3 py-2 rounded-lg border bg-red-50 border-red-200 text-red-700 mt-4">
+            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+            {error}
+          </div>
+        )}
+
+        {health.propertyExists ? (
+          <button
+            onClick={repair}
+            disabled={repairing}
+            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition mt-5"
+          >
+            {repairing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wrench className="w-4 h-4" />}
+            {repairing ? "Rebuilding…" : "Rebuild what's missing"}
+          </button>
+        ) : (
+          <p className="text-sm text-slate-500 mt-4 max-w-2xl">
+            Recreating it automatically would leave the old property&apos;s reservations and channel
+            connections behind and give you a second copy on your Channex account, so this one needs
+            setting up again deliberately.
+          </p>
+        )}
       </div>
     );
   }
