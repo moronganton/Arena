@@ -294,6 +294,7 @@ export default function RateRevenueTab({
           previewCurrency={summary?.currency}
           showChannelChips
           onReimport={() => setReimporting(true)}
+          onFamilyCleared={() => setReloadKey((n) => n + 1)}
         />
       </div>
     </div>

@@ -5,6 +5,7 @@ import { z } from "zod";
 import { requireChannexProperty } from "@/lib/channels/channex-property-guard";
 import {
   provisionRatePlanSet, deleteRatePlan, addDerivedRatePlan, listUntrackedRatePlans,
+  resetRatePlanFamily,
 } from "@/lib/channels/channex-rate-plans";
 import { DEFAULT_RATE_PLAN_SET } from "@/lib/channels/rate-plan-spec";
 
@@ -32,6 +33,9 @@ const provisionSchema = z.object({
   // Removing a plan the family replaced. Refused if it is the one currently
   // being pushed into - see deleteRatePlan.
   deleteRatePlanId: z.string().min(1).optional(),
+  // Clear the whole family so this property can be set up again. The parent
+  // stays on Channex receiving prices - see resetRatePlanFamily.
+  resetFamily: z.boolean().optional(),
   // Adding ONE derived plan to a family that already exists, as opposed to
   // provisioning a whole set.
   addPlan: z
@@ -97,10 +101,31 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid body", details: parsed.error.flatten() }, { status: 400 });
   }
-  const { propertyId, apply, retireExisting, deleteRatePlanId, addPlan, specs } = parsed.data;
+  const { propertyId, apply, retireExisting, deleteRatePlanId, addPlan, specs, resetFamily } =
+    parsed.data;
 
   const guard = await requireChannexProperty(propertyId, session.user.id);
   if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: guard.status });
+
+  if (resetFamily) {
+    const res = await resetRatePlanFamily(guard.channexListingId);
+    return NextResponse.json(
+      {
+        property: guard.propertyName,
+        deleted: res.deleted,
+        failed: res.failed,
+        // Partial success is still success for the operator's purpose - the
+        // family is cleared and setup returns - so this is 200 with the
+        // refusals named, not a 409 that hides what did happen.
+        error: res.ok
+          ? undefined
+          : `Some plans couldn't be removed from Channex: ${res.failed
+              .map((f) => `${f.title} (${f.error})`)
+              .join("; ")}`,
+      },
+      { status: 200 }
+    );
+  }
 
   if (deleteRatePlanId) {
     const res = await deleteRatePlan(guard.channexListingId, deleteRatePlanId);

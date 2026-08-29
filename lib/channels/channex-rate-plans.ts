@@ -544,6 +544,54 @@ export async function removeUntrackedRatePlan(
   return deleteRatePlan(channexListingId, channexRatePlanId);
 }
 
+/**
+ * Clear the whole family so the property can be set up again from scratch.
+ *
+ * The parent cannot simply be deleted: it is the plan this listing pushes
+ * prices into, ChannexListing.channexRatePlanId is not nullable, and removing
+ * it would leave the property with no price stream at all. So the parent stays
+ * on Channex, untouched and still receiving prices - what goes is host24's
+ * record of the family.
+ *
+ * That is exactly the state a freshly provisioned property is in: a listing, a
+ * Standard Rate on Channex, and no RatePlan rows here. The Rate plans tab
+ * shows setup again, and the next import retires that parent by title and
+ * builds a new family over it - the same path provisioning already takes for a
+ * property being re-imported.
+ *
+ * Derived plans ARE deleted from Channex, because nothing else will ever
+ * remove them: once their rows are gone they are untracked, and an untracked
+ * plan whose parent is about to be retired is dead weight on the property.
+ */
+export async function resetRatePlanFamily(
+  channexListingId: string
+): Promise<{ ok: boolean; deleted: string[]; failed: { title: string; error: string }[] }> {
+  const plans = await prisma.ratePlan.findMany({
+    where: { channexListingId },
+    orderBy: { position: "desc" },
+  });
+
+  const deleted: string[] = [];
+  const failed: { title: string; error: string }[] = [];
+
+  for (const plan of plans) {
+    if (plan.kind === "PARENT" || !plan.channexRatePlanId) continue;
+    const res = await deleteRatePlan(channexListingId, plan.channexRatePlanId);
+    if (res.ok) deleted.push(plan.title);
+    else failed.push({ title: plan.title, error: res.error ?? "couldn't be removed" });
+  }
+
+  // A derived plan that Channex refused - one with a booking against it, or
+  // still mapped to a channel - keeps its row, so the panel goes on showing
+  // something true rather than losing track of a plan that still exists.
+  const failedTitles = new Set(failed.map((f) => f.title));
+  await prisma.ratePlan.deleteMany({
+    where: { channexListingId, title: { notIn: [...failedTitles] } },
+  });
+
+  return { ok: failed.length === 0, deleted, failed };
+}
+
 export async function removeRatePlan(
   channexListingId: string,
   ratePlanId: string

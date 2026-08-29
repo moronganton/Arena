@@ -37,6 +37,7 @@ export default function RatePlansPanel({
   previewCurrency,
   showChannelChips = false,
   onReimport,
+  onFamilyCleared,
 }: {
   propertyId: string;
   previewBase?: number;
@@ -49,6 +50,11 @@ export default function RatePlansPanel({
   // onboarding gesture - it is what you do again after adding a plan on
   // Booking.com.
   onReimport?: () => void;
+  // Clearing the family changes what the TAB should render - setup rather than
+  // this panel - and that decision is made from a different endpoint, so
+  // re-reading this panel alone would leave the operator looking at an empty
+  // list instead of the setup screen they just asked for.
+  onFamilyCleared?: () => void;
 }) {
   const [plans, setPlans] = useState<RatePlan[]>([]);
   const [pushesInto, setPushesInto] = useState<string | null>(null);
@@ -252,6 +258,34 @@ export default function RatePlansPanel({
                 Re-read from the channel
               </button>
             )}
+            {/* Clearing the family, as opposed to removing one plan. The
+                parent has no delete of its own because everything derives
+                from it and it is the plan prices are pushed into - so the
+                only honest way to undo a bad import is to say plainly that
+                this removes all of them and starts setup again. */}
+            <button
+              onClick={() => {
+                if (
+                  !confirm(
+                    `Remove all ${plans.length} rate plans from this property?\n\n` +
+                      `The derived plans are deleted from Channex. Your main rate keeps receiving ` +
+                      `prices, and setup starts again so you can import or build a new set.`
+                  )
+                )
+                  return;
+                send(`/api/channex/rate-plans`, {
+                  method: "POST",
+                  body: JSON.stringify({ propertyId, resetFamily: true }),
+                }).then((ok) => {
+                  if (ok) onFamilyCleared?.();
+                });
+              }}
+              disabled={busy}
+              className="flex items-center gap-1.5 text-sm font-medium text-slate-400 hover:text-red-600 px-3 py-2 disabled:opacity-40"
+            >
+              <Trash2 className="w-4 h-4" />
+              Remove all and start over
+            </button>
           </div>
         )
       )}
