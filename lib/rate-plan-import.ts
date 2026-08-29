@@ -33,6 +33,61 @@ export interface ImportedPlan extends RatePlanSpec {
   cancellationPolicy: string | null;
   /** False when minStayArrival is host24's suggestion rather than something read. */
   minStayWasRead: boolean;
+  /**
+   * True for a plan known to be priced against the main rate, where the source
+   * did not say by how much - a child missing its one number, not a parent.
+   * Only the channel read sets this; a screenshot either shows a percentage or
+   * shows nothing.
+   */
+  needsPercent?: boolean;
+}
+
+/**
+ * Everything blocking about a proposed family, recomputed from the plans
+ * themselves.
+ *
+ * This is shared with the review screen deliberately. Problems used to be
+ * decided once on the server and held as state, which is wrong the moment the
+ * screen lets you edit: an operator could fix the thing the message named and
+ * watch the message - and the disabled Create button - stay exactly as they
+ * were, with no way forward but starting over.
+ */
+export function reviewProblems(plans: ImportedPlan[]): string[] {
+  const problems: string[] = [];
+  if (plans.length === 0) return ["There are no rate plans to create."];
+
+  // A plan the channel told us is priced off another, without saying by how
+  // much. Reported before anything else and on its own: until a human supplies
+  // the number, it is indistinguishable from a second parent, and complaining
+  // about two parents would name a problem the operator does not have.
+  const pending = plans.filter((p) => p.needsPercent && p.derivedPercent === null);
+  if (pending.length > 0) {
+    const base = plans.find((p) => !p.needsPercent && p.derivedPercent === null)?.title ?? "your main rate";
+    for (const p of pending) {
+      problems.push(
+        `"${p.title}": the channel doesn't say how this is priced against "${base}". Enter the percentage - negative if it is cheaper.`
+      );
+    }
+    return problems;
+  }
+
+  const parents = plans.filter((p) => p.derivedPercent === null);
+  if (parents.length === 0) {
+    problems.push(
+      "None of these looks like your main rate. One plan must be the standard rate that the others are a percentage of."
+    );
+  } else if (parents.length > 1) {
+    problems.push(
+      `${parents.length} plans have no percentage, so host24 cannot tell which is your main rate: ${parents
+        .map((p) => `"${p.title}"`)
+        .join(", ")}.`
+    );
+  }
+
+  // The same validator provisioning uses, so a set that passes here cannot
+  // fail for a structural reason at create time.
+  problems.push(...validateRatePlanSet(plans));
+  return problems;
 }
 
 export interface ImportResult {
@@ -138,19 +193,6 @@ export function normalizeExtraction(raw: unknown): ImportResult {
   const parentIndex = plans.findIndex((p) => p.derivedPercent === null);
   if (parentIndex > 0) plans.unshift(...plans.splice(parentIndex, 1));
 
-  const parents = plans.filter((p) => p.derivedPercent === null);
-  if (parents.length === 0) {
-    problems.push(
-      "None of these looks like your main rate. One plan must be the standard rate that the others are a percentage of."
-    );
-  } else if (parents.length > 1) {
-    problems.push(
-      `${parents.length} plans have no percentage, so host24 cannot tell which is your main rate: ${parents
-        .map((p) => `"${p.title}"`)
-        .join(", ")}.`
-    );
-  }
-
   if (!plans.some((p) => p.cancellationPolicy)) {
     // Silence here is fine; noise is not.
   } else {
@@ -159,9 +201,9 @@ export function normalizeExtraction(raw: unknown): ImportResult {
     );
   }
 
-  // Reuse the same validator provisioning uses, so a set that passes here
-  // cannot fail for a structural reason at create time.
-  problems.push(...validateRatePlanSet(plans));
+  // The same checks the review screen re-runs on every edit, so what blocks
+  // creation here and what blocks it there can never disagree.
+  problems.push(...reviewProblems(plans));
 
   return { plans, problems, warnings };
 }

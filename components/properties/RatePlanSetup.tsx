@@ -2,10 +2,12 @@
 import { useRef, useState } from "react";
 import {
   Upload, LayoutTemplate, Loader2, AlertTriangle, ArrowLeft, Check, Trash2, Info,
+  Download, Star, DoorOpen,
 } from "lucide-react";
 import { compressImage } from "@/lib/image";
 import { DEFAULT_RATE_PLAN_SET } from "@/lib/channels/rate-plan-spec";
-import type { ImportedPlan, ImportResult } from "@/lib/rate-plan-import";
+import { reviewProblems, type ImportedPlan, type ImportResult } from "@/lib/rate-plan-import";
+import { channelDisplayName, type ChannelReadResult, type ChannelRoom } from "@/lib/channels/channel-rate-import";
 
 // Setting up what a property sells, for someone who has never seen a rate plan.
 //
@@ -13,15 +15,21 @@ import type { ImportedPlan, ImportResult } from "@/lib/rate-plan-import";
 // the rate-plan API" - true, and useless to anyone who is not holding a
 // terminal. A property could not be finished from the UI at all.
 //
-// Two doors, and the recommended one asks for no understanding of rate plans:
-// screenshot what Booking.com already shows and confirm it. The template is
-// there for a property that is not on Booking.com yet.
+// Three doors, and the recommended one asks for no understanding of rate plans
+// and no typing: Booking.com already tells Channex this property's room types,
+// plan names and which plan the others hang off, so host24 reads that straight
+// from the channel. What the channel does NOT send is any number - percentage,
+// minimum stay, cancellation policy - so those are asked for here, marked as
+// unanswered rather than filled with a guess.
+//
+// The screenshot is the fallback for a property whose channel is not connected
+// yet, and the template for one that is not on Booking.com at all.
 //
 // Nothing is created until the operator presses the button on the review
 // screen, because the cost of a confident mistake is a property selling wrong
 // on two channels.
 
-type Stage = "connect" | "choose" | "reading" | "review";
+type Stage = "connect" | "choose" | "reading" | "rooms" | "review";
 
 interface EditablePlan extends ImportedPlan {
   key: string;
@@ -53,9 +61,12 @@ export default function RatePlanSetup({
   const [stage, setStage] = useState<Stage>(needsConnecting ? "connect" : "choose");
   const [connecting, setConnecting] = useState(false);
   const [plans, setPlans] = useState<EditablePlan[]>([]);
-  const [problems, setProblems] = useState<string[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
-  const [source, setSource] = useState<"import" | "template">("template");
+  const [source, setSource] = useState<"channel" | "import" | "template">("template");
+  // Set only when the channel returned more than one room type, so the
+  // operator picks which one this property is instead of host24 guessing.
+  const [rooms, setRooms] = useState<ChannelRoom[]>([]);
+  const [channelName, setChannelName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -77,8 +88,12 @@ export default function RatePlanSetup({
         return;
       }
       const result = data as ImportResult;
+      if (result.plans.length === 0) {
+        setError(result.problems[0] ?? "No rate plans could be read from that image.");
+        setStage("choose");
+        return;
+      }
       setPlans(withKeys(result.plans));
-      setProblems(result.problems);
       setWarnings(result.warnings);
       setSource("import");
       setStage("review");
@@ -86,6 +101,76 @@ export default function RatePlanSetup({
       setError(e instanceof Error ? e.message : "Couldn't read that file");
       setStage("choose");
     }
+  }
+
+  // Asks the channel itself what this property sells. Creates nothing - the
+  // endpoint behind this is a read, and provisioning still happens from
+  // whatever the operator approves on the review screen.
+  async function readFromChannel() {
+    setError(null);
+    setStage("reading");
+    try {
+      const res = await fetch("/api/channex/rate-plans/read-from-channel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ propertyId }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setError(data?.error ?? "Couldn't read your rate plans from the channel");
+        setStage("choose");
+        return;
+      }
+      const result = data as ChannelReadResult & { channel?: string };
+      if (result.problems.length > 0 || result.rooms.length === 0) {
+        setError(result.problems[0] ?? "The channel didn't return any rate plans.");
+        setStage("choose");
+        return;
+      }
+      setChannelName(result.channel ? channelDisplayName(result.channel) : null);
+      setWarnings(result.warnings);
+      setSource("channel");
+      setRooms(result.rooms);
+      // One room type is the ordinary case and needs no question asked. Several
+      // is a real fork - host24 maps one room type per property - so it is put
+      // to the operator rather than resolved by taking the first.
+      if (result.rooms.length === 1) {
+        setPlans(withKeys(result.rooms[0].plans));
+        setStage("review");
+      } else {
+        setStage("rooms");
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't reach the server");
+      setStage("choose");
+    }
+  }
+
+  function chooseRoom(room: ChannelRoom) {
+    setPlans(withKeys(room.plans));
+    setStage("review");
+  }
+
+  /**
+   * Repoint the family at a different main rate.
+   *
+   * The channel does not say which plan the others are priced against - it is
+   * inferred - so the inference has to be correctable. Without this, a wrong
+   * guess leaves the operator no move but starting over.
+   */
+  function makeParent(key: string) {
+    setPlans((prev) => {
+      const next = prev.map((p) =>
+        p.key === key
+          ? { ...p, derivedPercent: null, needsPercent: false }
+          : p.derivedPercent === null
+            ? { ...p, needsPercent: true }
+            : p
+      );
+      const at = next.findIndex((p) => p.key === key);
+      if (at > 0) next.unshift(...next.splice(at, 1));
+      return next;
+    });
   }
 
   function useTemplate() {
@@ -98,7 +183,6 @@ export default function RatePlanSetup({
         }))
       )
     );
-    setProblems([]);
     setWarnings([]);
     setSource("template");
     setStage("review");
@@ -232,19 +316,34 @@ export default function RatePlanSetup({
           </div>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-5">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-5">
           <div className="border border-indigo-200 bg-indigo-50/50 rounded-xl p-4 flex flex-col gap-2">
             <span className="text-[10px] font-bold uppercase tracking-wide text-white bg-indigo-600 px-2 py-0.5 rounded-full self-start">
               Recommended
             </span>
-            <h3 className="font-semibold text-slate-900">Copy from Booking.com</h3>
+            <h3 className="font-semibold text-slate-900">Read from Booking.com</h3>
             <p className="text-sm text-slate-600 flex-1">
-              Screenshot your rate plans page and host24 reads it — names, discounts and minimum stays,
-              exactly as you already have them.
+              Your channel already tells host24 which rate plans this property sells. Names and
+              structure come across exactly — you only confirm the discounts.
+            </p>
+            <button
+              onClick={readFromChannel}
+              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-sm font-medium transition self-start"
+            >
+              <Download className="w-4 h-4" />
+              Read my rate plans
+            </button>
+          </div>
+
+          <div className="border border-slate-200 rounded-xl p-4 flex flex-col gap-2">
+            <h3 className="font-semibold text-slate-900">Upload a screenshot</h3>
+            <p className="text-sm text-slate-600 flex-1">
+              Not connected to Booking.com yet? Screenshot your rate plans page and host24 reads it —
+              names, discounts and minimum stays.
             </p>
             <button
               onClick={() => fileRef.current?.click()}
-              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-sm font-medium transition self-start"
+              className="flex items-center gap-2 border border-slate-200 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-xl text-sm font-medium transition self-start"
             >
               <Upload className="w-4 h-4" />
               Upload a screenshot
@@ -268,8 +367,8 @@ export default function RatePlanSetup({
         </div>
 
         <p className="text-xs text-slate-500 mt-4">
-          In Booking.com go to <strong>Property → Rates &amp; Availability → Rate plans</strong>, then
-          capture the whole list.
+          For a screenshot, go to <strong>Property → Rates &amp; Availability → Rate plans</strong> in
+          Booking.com and capture the whole list.
         </p>
 
         <input
@@ -298,7 +397,57 @@ export default function RatePlanSetup({
     );
   }
 
+  // ---------- rooms ----------
+  // Only reached when the channel returned more than one room type. host24
+  // manages one room type per property, so this is a question, not a step that
+  // can be skipped by taking the first.
+  if (stage === "rooms") {
+    return (
+      <div className="bg-white rounded-2xl border border-slate-100 p-5 md:p-6">
+        <button
+          onClick={() => { setStage("choose"); setError(null); }}
+          className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-800 mb-3"
+        >
+          <ArrowLeft className="w-3.5 h-3.5" />
+          Start over
+        </button>
+
+        <h2 className="text-lg font-bold text-slate-900">Which room is this property?</h2>
+        <p className="text-sm text-slate-600 mt-1 max-w-2xl">
+          {channelName ?? "Your channel"} lists {rooms.length} room types under this connection. host24
+          manages one per property, so pick the one this is — the others belong to their own properties.
+        </p>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-5">
+          {rooms.map((room) => (
+            <button
+              key={room.channelRoomId ?? room.title}
+              onClick={() => chooseRoom(room)}
+              className="border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/40 rounded-xl p-4 text-left transition"
+            >
+              <div className="flex items-center gap-2">
+                <DoorOpen className="w-4 h-4 text-slate-400" />
+                <span className="font-semibold text-slate-900">{room.title}</span>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                {room.plans.length} rate plan{room.plans.length === 1 ? "" : "s"}
+                {room.channelRoomId && ` · id ${room.channelRoomId}`}
+              </p>
+              <p className="text-sm text-slate-600 mt-2">
+                {room.plans.map((pl) => pl.title).join(", ")}
+              </p>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   // ---------- review ----------
+  // Recomputed from the plans on every edit rather than held from the read.
+  // A message that cannot clear when the operator fixes what it names is worse
+  // than no message: it disables Create with no way forward but starting over.
+  const problems = reviewProblems(plans);
   const blocked = problems.length > 0 || plans.length === 0;
   return (
     <div className="bg-white rounded-2xl border border-slate-100 p-5 md:p-6">
@@ -311,12 +460,22 @@ export default function RatePlanSetup({
       </button>
 
       <h2 className="text-lg font-bold text-slate-900">
-        {source === "import" ? `Found ${plans.length} rate plan${plans.length === 1 ? "" : "s"}` : "The standard template"}
+        {source === "template"
+          ? "The standard template"
+          : `Found ${plans.length} rate plan${plans.length === 1 ? "" : "s"}`}
       </h2>
-      <p className="text-sm text-slate-600 mt-1">
-        {source === "import"
-          ? "Check these against your extranet, change anything that's wrong, then create them."
-          : "Change anything you like before creating them."}
+      <p className="text-sm text-slate-600 mt-1 max-w-2xl">
+        {source === "channel" ? (
+          <>
+            These names came straight from {channelName ?? "your channel"}, so they are exactly right.
+            What it doesn&apos;t send is the numbers — fill in how each plan is priced against your main
+            rate, and check the minimum stays.
+          </>
+        ) : source === "import" ? (
+          "Check these against your extranet, change anything that's wrong, then create them."
+        ) : (
+          "Change anything you like before creating them."
+        )}
       </p>
 
       {problems.length > 0 && (
@@ -357,17 +516,32 @@ export default function RatePlanSetup({
             </div>
             <div>
               <label className="block text-[11px] font-medium text-slate-500 mb-1">Price</label>
-              {p.derivedPercent === null ? (
+              {p.derivedPercent === null && !p.needsPercent ? (
                 <span className="inline-block text-xs font-bold uppercase tracking-wide px-2 py-1.5 rounded bg-indigo-50 text-indigo-700">
                   Your main rate
                 </span>
               ) : (
                 <div className="flex items-center gap-1">
+                  {/* Empty, not zero. A blank box is the honest rendering of a
+                      number the channel never sent; 0 would read as "same price
+                      as the main rate", which is a claim nobody made. */}
                   <input
                     type="number"
-                    value={p.derivedPercent}
-                    onChange={(e) => update(p.key, { derivedPercent: Number(e.target.value) })}
-                    className="w-20 border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    value={p.derivedPercent ?? ""}
+                    placeholder="?"
+                    onChange={(e) => {
+                      // Number("-") and Number("") are NaN and 0 - one slips
+                      // past every structural check and reaches Channex as
+                      // null (a second parent), the other claims a price
+                      // nobody entered. Anything not yet a real number is
+                      // "still unanswered", which is what needsPercent means.
+                      const n = Number(e.target.value);
+                      const ok = e.target.value !== "" && Number.isFinite(n);
+                      update(p.key, { derivedPercent: ok ? n : null, needsPercent: !ok });
+                    }}
+                    className={`w-20 border rounded-lg px-2.5 py-1.5 text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+                      p.derivedPercent === null ? "border-amber-300 bg-amber-50" : "border-slate-200"
+                    }`}
                   />
                   <span className="text-xs text-slate-500">% of main</span>
                 </div>
@@ -393,6 +567,16 @@ export default function RatePlanSetup({
                 <span className="block font-medium text-slate-600">{p.cancellationPolicy}</span>
                 stays on Booking.com
               </div>
+            )}
+            {plans.length > 1 && (p.derivedPercent !== null || p.needsPercent) && (
+              <button
+                onClick={() => makeParent(p.key)}
+                title="Make this the main rate"
+                aria-label={`Make ${p.title} the main rate`}
+                className="p-1.5 text-slate-400 hover:text-indigo-600 rounded-lg hover:bg-indigo-50 self-center"
+              >
+                <Star className="w-4 h-4" />
+              </button>
             )}
             {plans.length > 1 && (
               <button

@@ -1,6 +1,6 @@
-import { test, describe } from "node:test";
+import { test, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { normalizeExtraction, suggestMinStay } from "./rate-plan-import";
+import { normalizeExtraction, suggestMinStay, reviewProblems } from "./rate-plan-import";
 
 describe("suggestMinStay", () => {
   test("reads the intent out of conventional names", () => {
@@ -136,5 +136,58 @@ describe("normalizeExtraction", () => {
     const r = normalizeExtraction([{ title: "Standard", isStandard: true }, { percentOfStandard: -10 }]);
     assert.equal(r.plans.length, 1);
     assert.ok(r.warnings.some((w) => w.includes("no readable name")));
+  });
+});
+
+describe("reviewProblems", () => {
+  const base = { cancellationPolicy: null, minStayWasRead: true };
+  const parent = { ...base, title: "Standard Rate", derivedPercent: null, minStayArrival: 3 };
+
+  it("blocks on a child whose percentage the channel never supplied", () => {
+    const problems = reviewProblems([
+      parent,
+      { ...base, title: "Non-Refundable Rate", derivedPercent: null, minStayArrival: 3, needsPercent: true },
+    ]);
+    assert.equal(problems.length, 1);
+    assert.match(problems[0], /Non-Refundable Rate/);
+    assert.match(problems[0], /Enter the percentage/);
+  });
+
+  it("names the real parent in that message rather than a placeholder", () => {
+    const problems = reviewProblems([
+      { ...parent, title: "Flexible Rate" },
+      { ...base, title: "NR", derivedPercent: null, minStayArrival: 1, needsPercent: true },
+    ]);
+    assert.match(problems[0], /"Flexible Rate"/);
+  });
+
+  it("does not also complain about two parents while a percentage is pending", () => {
+    const problems = reviewProblems([
+      parent,
+      { ...base, title: "NR", derivedPercent: null, minStayArrival: 1, needsPercent: true },
+    ]);
+    assert.ok(!problems.some((p) => /cannot tell which is your main rate/.test(p)));
+  });
+
+  it("clears once the operator supplies the number", () => {
+    assert.deepEqual(
+      reviewProblems([
+        parent,
+        { ...base, title: "Non-Refundable Rate", derivedPercent: -10, minStayArrival: 3, needsPercent: true },
+      ]),
+      []
+    );
+  });
+
+  it("still catches structural faults once nothing is pending", () => {
+    const problems = reviewProblems([
+      parent,
+      { ...base, title: "Standard Rate", derivedPercent: -10, minStayArrival: 3 },
+    ]);
+    assert.ok(problems.some((p) => /unique/.test(p)));
+  });
+
+  it("an empty set is blocking", () => {
+    assert.equal(reviewProblems([]).length, 1);
   });
 });
