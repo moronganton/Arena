@@ -166,7 +166,7 @@ export default function RatePlansPanel({
         <Layers className="w-4 h-4 mt-0.5 shrink-0 text-slate-400" />
         <p>
           The products this listing sells. Prices are pushed to the <strong>parent</strong> only —
-          every other plan is derived from it by a percentage, so one price stream produces{" "}
+          every other plan follows it by a percentage or a fixed amount, so one price stream produces{" "}
           {plans.length} offers.
         </p>
       </div>

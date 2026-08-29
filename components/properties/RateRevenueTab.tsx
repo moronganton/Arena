@@ -292,9 +292,9 @@ export default function RateRevenueTab({
       {/* ---- Effect ---- */}
       <div className="bg-white rounded-2xl border border-slate-100 p-4">
         <div className="flex items-start justify-between gap-3 mb-3">
-          <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+          <h3 className="font-semibold text-slate-900">
             {showRules ? "Effect — what sells" : "What this property sells"}
-          </span>
+          </h3>
           <AdvancedPricingToggle open={showRules} onToggle={() => setRulesOpen(!showRules)} />
         </div>
         <RatePlansPanel
@@ -356,7 +356,7 @@ function AdvancedPricingToggle({ open, onToggle }: { open: boolean; onToggle: ()
       <button
         onClick={() => (open ? onToggle() : setExplain((v) => !v))}
         onMouseEnter={() => !open && setExplain(true)}
-        aria-label={open ? "Hide automatic pricing" : "Automatic pricing"}
+        aria-label={open ? "Hide advanced pricing rules" : "Advanced pricing rules"}
         aria-expanded={open}
         className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border transition ${
           open
@@ -365,7 +365,7 @@ function AdvancedPricingToggle({ open, onToggle }: { open: boolean; onToggle: ()
         }`}
       >
         <Settings2 className="w-3.5 h-3.5" />
-        {open ? "Hide rules" : "Automatic pricing"}
+        {open ? "Hide rules" : "Advanced pricing rules"}
       </button>
 
       {explain && !open && (
@@ -374,7 +374,7 @@ function AdvancedPricingToggle({ open, onToggle }: { open: boolean; onToggle: ()
           onMouseLeave={() => setExplain(false)}
         >
           <div className="flex items-start justify-between gap-2 mb-2">
-            <p className="font-semibold text-white text-sm">Change this price automatically</p>
+            <p className="font-semibold text-white text-sm">Set prices by season, weekend or date</p>
             <button onClick={() => setExplain(false)} aria-label="Close" className="text-slate-400 hover:text-white">
               <X className="w-3.5 h-3.5" />
             </button>
@@ -387,7 +387,7 @@ function AdvancedPricingToggle({ open, onToggle }: { open: boolean; onToggle: ()
           </p>
           <p className="text-xs leading-relaxed text-slate-400 mb-3">
             Everything you set feeds your main rate. The other plans follow automatically, because
-            they are a percentage of it. Entirely optional — your plans already sell as they are.
+            each one follows it by a set percentage or amount. Entirely optional — your plans already sell as they are.
           </p>
           <button
             onClick={() => {
@@ -396,7 +396,7 @@ function AdvancedPricingToggle({ open, onToggle }: { open: boolean; onToggle: ()
             }}
             className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition"
           >
-            Set up automatic pricing
+            Set up pricing rules
           </button>
         </div>
       )}

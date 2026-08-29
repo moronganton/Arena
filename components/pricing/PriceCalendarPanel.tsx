@@ -246,7 +246,7 @@ export default function PriceCalendarPanel({ property }: { property: PriceCalend
       <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
         <p className="text-slate-500 text-sm">
           {isChannex
-            ? "Tap dates to select them - tap again to deselect. One price applies to everything selected, and pushes to Channex automatically."
+            ? "Tap dates to select them - tap again to deselect. One price applies to everything selected, and goes out to your channels automatically."
             : "A read-only view of your current rates in Smoobu (managed by PriceLabs)."}
         </p>
         <div className="flex items-center gap-2 ml-auto">
