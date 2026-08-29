@@ -29,10 +29,22 @@ interface PropertyChannelRow {
     failedUpdates: number;
   } | null;
   smoobu: { apartmentId: string | null; lastSyncAt: string | null } | null;
+  /** null when Channex could not be asked - rendered as silence, not as gone. */
+  channexPropertyMissing?: boolean | null;
 }
 
-function ManagerBadge({ manager }: { manager: string }) {
+function ManagerBadge({ manager, missing }: { manager: string; missing?: boolean | null }) {
   if (manager === "CHANNEX") {
+    // The badge used to read straight off channelProvider, so it went on
+    // saying "Channex" for a property that had been removed there - the flag
+    // is local and survives anything done on the Channex side.
+    if (missing) {
+      return (
+        <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-red-100 text-red-700 shrink-0">
+          Not on Channex
+        </span>
+      );
+    }
     return <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-teal-100 text-teal-800 shrink-0">Channex</span>;
   }
   if (manager === "SMOOBU") {
@@ -126,10 +138,14 @@ export default function ChannelsPage() {
               <div key={p.id} className="py-3 first:pt-0 last:pb-0">
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-sm text-slate-800 min-w-0 truncate">{p.name}</span>
-                  <ManagerBadge manager={p.manager} />
+                  <ManagerBadge manager={p.manager} missing={p.channexPropertyMissing} />
                 </div>
                 {p.warning && (
-                  <p className="mt-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                  <p className={`mt-1.5 text-xs rounded-lg px-2.5 py-1.5 border ${
+                    p.channexPropertyMissing
+                      ? "text-red-700 bg-red-50 border-red-200"
+                      : "text-amber-700 bg-amber-50 border-amber-200"
+                  }`}>
                     {p.warning}
                   </p>
                 )}
@@ -160,8 +176,17 @@ export default function ChannelsPage() {
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-sm text-slate-800 min-w-0 truncate">{p.name}</span>
                     <div className="flex items-center gap-3 shrink-0">
-                      <span className="text-xs text-slate-500 text-right">
-                        {!p.channex
+                      <span
+                        className={`text-xs text-right ${
+                          p.channexPropertyMissing ? "text-red-600 font-medium" : "text-slate-500"
+                        }`}
+                      >
+                        {/* A last-push date is historically true and, once the
+                            property is gone from Channex, completely
+                            misleading - it reads as a working connection. */}
+                        {p.channexPropertyMissing
+                          ? "Not on Channex any more"
+                          : !p.channex
                           ? "Not provisioned"
                           : p.channex.lastPushAt
                           ? `Last push ${new Date(p.channex.lastPushAt).toLocaleDateString()}`

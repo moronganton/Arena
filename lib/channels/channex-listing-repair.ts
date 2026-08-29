@@ -171,3 +171,36 @@ export async function repairListing(propertyId: string): Promise<RepairResult> {
     return { ok: false, health, actions, error: `${e.message}` };
   }
 }
+
+/**
+ * Which of these Channex property ids still exist, in ONE call for the whole
+ * account rather than one per property.
+ *
+ * The cheap half of checkListingHealth, for screens that list every property.
+ * A per-property health check costs three requests each, which on a portfolio
+ * turns a settings page into a rate-limit problem; asking "which properties
+ * exist" once catches the case that actually strands an operator - the Channex
+ * property gone from under a listing that still claims to be connected.
+ *
+ * Returns null when Channex could not be asked, which callers must render as
+ * silence rather than as "nothing exists".
+ */
+export async function existingChannexPropertyIds(): Promise<Set<string> | null> {
+  const found = new Set<string>();
+  try {
+    for (let page = 1; page <= 20; page++) {
+      const res = await channexGet<{ id?: string; attributes?: { id?: string } }[]>(
+        `/properties?pagination[page]=${page}&pagination[limit]=100`
+      );
+      const rows = res.data ?? [];
+      for (const r of rows) {
+        const id = r.attributes?.id ?? r.id;
+        if (id) found.add(id);
+      }
+      if (rows.length < 100) break;
+    }
+    return found;
+  } catch {
+    return null;
+  }
+}

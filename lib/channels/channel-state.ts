@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { existingChannexPropertyIds } from "./channex-listing-repair";
 
 // What actually manages each property's OTA connectivity, in one place.
 //
@@ -35,6 +36,18 @@ export interface PropertyChannelState {
     lastPushAt: Date | null;
   } | null;
   smoobu: { apartmentId: string | null; lastSyncAt: Date | null } | null;
+  /**
+   * Whether the Channex property this listing points at still exists there.
+   *
+   * Everything else here is read from host24's own database, so "Channex
+   * connected" only ever meant "host24 believes it is" - and went on saying so
+   * after the property was removed on the Channex side, next to a last-push
+   * date that was historically true and by then meaningless.
+   *
+   * null means Channex could not be asked, which must render as silence rather
+   * than as a broken connection.
+   */
+  channexPropertyMissing: boolean | null;
   icalFeeds: Array<{ channel: string; icalUrl: string | null; lastSyncAt: Date | null; isActive: boolean }>;
 }
 
@@ -57,7 +70,11 @@ export async function getChannelState(ownerId: string, propertyId?: string): Pro
   // How the ARI queue is doing per property: anything still waiting, anything
   // that gave up, and when a push last completed. This is the difference
   // between "Channex is configured" and "Channex is actually being fed".
-  const [pending, failed, lastDone] = await Promise.all([
+  // Asked once for the whole account, in parallel with the queue counts, and
+  // best-effort: a Channex outage must not take down a settings page, and
+  // "couldn't check" has to stay distinguishable from "it's gone".
+  const anyChannexListing = properties.some((p) => p.channexListing);
+  const [pending, failed, lastDone, liveChannexIds] = await Promise.all([
     prisma.ariOutbox.groupBy({
       by: ["propertyId"],
       where: { propertyId: { in: propertyIds }, status: "PENDING" },
@@ -73,6 +90,7 @@ export async function getChannelState(ownerId: string, propertyId?: string): Pro
       where: { propertyId: { in: propertyIds }, status: "DONE" },
       _max: { updatedAt: true },
     }),
+    anyChannexListing ? existingChannexPropertyIds() : Promise.resolve(null),
   ]);
   const pendingBy = new Map(pending.map((r) => [r.propertyId, r._count._all]));
   const failedBy = new Map(failed.map((r) => [r.propertyId, r._count._all]));
@@ -85,10 +103,20 @@ export async function getChannelState(ownerId: string, propertyId?: string): Pro
       .filter((c) => c.channel !== "SMOOBU" && c.channel !== "BEDS24" && c.icalUrl)
       .map((c) => ({ channel: c.channel, icalUrl: c.icalUrl, lastSyncAt: c.lastSyncAt, isActive: c.isActive }));
 
+    // Gone from Channex entirely, under a listing that still records its ids.
+    // Checked live because nothing local can know it: the flag, the listing row
+    // and the last-push date all survive the property being removed there.
+    const channexPropertyMissing =
+      p.channexListing && liveChannexIds
+        ? !liveChannexIds.has(p.channexListing.channexPropertyId)
+        : null;
+
     // A property flagged for a manager it has no mapping for is misconfigured
     // rather than merely unmapped, and is worth saying so out loud.
     let warning: string | null = null;
-    if (p.channelProvider === "CHANNEX" && !p.channexListing) {
+    if (channexPropertyMissing) {
+      warning = "No longer exists on Channex - nothing is syncing, whatever the last push says.";
+    } else if (p.channelProvider === "CHANNEX" && !p.channexListing) {
       warning = "Set to Channex but not provisioned there yet - nothing will sync.";
     } else if (p.channelProvider === "SMOOBU" && !smoobu) {
       warning = "Set to Smoobu but no apartment is mapped - bookings will not import.";
@@ -120,6 +148,7 @@ export async function getChannelState(ownerId: string, propertyId?: string): Pro
             }
           : null,
       smoobu: smoobu ? { apartmentId: smoobu.listingId, lastSyncAt: smoobu.lastSyncAt } : null,
+      channexPropertyMissing,
       icalFeeds,
     };
   });

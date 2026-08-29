@@ -114,10 +114,18 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
     description: property.description,
   };
 
+  // A last-push date survives the property being removed on the Channex side,
+  // so on its own it kept asserting a working connection for a listing that
+  // had nothing left to push to - next to a Rate plans tab saying the setup
+  // was incomplete. Both were reading different things and only one was asking
+  // Channex.
+  const channexGone = channels?.channexPropertyMissing === true;
   const syncLine = isChannex
-    ? channels?.channex?.lastPushAt
-      ? `Channex connected · last push ${new Date(channels.channex.lastPushAt).toLocaleDateString()}`
-      : "Channex connected · not pushed yet"
+    ? channexGone
+      ? "Not on Channex any more · nothing is syncing"
+      : channels?.channex?.lastPushAt
+        ? `Channex connected · last push ${new Date(channels.channex.lastPushAt).toLocaleDateString()}`
+        : "Channex connected · not pushed yet"
     : channels?.manager === "SMOOBU"
       ? channels.smoobu?.lastSyncAt
         ? `Smoobu connected · synced ${new Date(channels.smoobu.lastSyncAt).toLocaleDateString()}`
@@ -160,7 +168,9 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
             <span className="flex items-center gap-1.5"><Bath className="w-4 h-4" /> {property.bathrooms} bathrooms</span>
             <span className="flex items-center gap-1.5"><Users className="w-4 h-4" /> {property.maxGuests} guests</span>
             {syncLine && (
-              <span className="text-emerald-700 font-medium">{syncLine}</span>
+              <span className={channexGone ? "text-red-600 font-medium" : "text-emerald-700 font-medium"}>
+                {syncLine}
+              </span>
             )}
           </div>
         </div>
