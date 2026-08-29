@@ -207,3 +207,97 @@ export function normalizeExtraction(raw: unknown): ImportResult {
 
   return { plans, problems, warnings };
 }
+
+/**
+ * Fill the numbers a channel could not give from a screenshot of the same
+ * property's rate plan page.
+ *
+ * This exists because the two sources are good at opposite things, and neither
+ * is good at both. mapping_details gives names, channel ids and the parent
+ * relationship exactly - a machine read, incapable of a typo. What it carries
+ * no field for is any commercial term: percentage, minimum stay, cancellation
+ * policy. A screenshot carries all three and can misread any of them,
+ * including the names.
+ *
+ * So the channel stays authoritative for WHICH plans exist and what they are
+ * called, and the screenshot is allowed to supply only the numbers against
+ * them. A plan the screenshot shows but the channel does not is NOT added -
+ * the channel knows what this property sells, and a misread name inventing a
+ * fourth product is exactly the failure this whole design avoids.
+ */
+export interface MergeResult {
+  plans: ImportedPlan[];
+  /** Named so the operator can see what the screenshot did and did not answer. */
+  filled: string[];
+  unmatched: string[];
+  stillMissing: string[];
+}
+
+/** Titles come from two systems that case and punctuate differently. */
+function matchKey(title: string): string {
+  return title.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+export function mergeExtractionIntoPlans(
+  channelPlans: ImportedPlan[],
+  extracted: ImportedPlan[]
+): MergeResult {
+  const byKey = new Map<string, ImportedPlan>();
+  for (const e of extracted) {
+    const k = matchKey(e.title);
+    // First writer wins: a screenshot listing the same name twice is a read
+    // error, and silently taking the second reading would hide it.
+    if (!byKey.has(k)) byKey.set(k, e);
+  }
+
+  const filled: string[] = [];
+  const usedKeys = new Set<string>();
+  const stillMissing: string[] = [];
+
+  const plans = channelPlans.map((p) => {
+    const match = byKey.get(matchKey(p.title));
+    if (!match) {
+      if (p.needsPercent && p.derivedPercent === null) stillMissing.push(p.title);
+      return p;
+    }
+    usedKeys.add(matchKey(p.title));
+
+    const next: ImportedPlan = { ...p };
+    const gained: string[] = [];
+
+    // Only a plan the channel said is a child may take a percentage. The
+    // parent receives its price from the pricing rules and has nothing to
+    // derive from, so a screenshot claiming a percentage for it is wrong
+    // about which plan is the base - a claim the channel already settled.
+    if (p.needsPercent && p.derivedPercent === null && match.derivedPercent !== null) {
+      next.derivedPercent = match.derivedPercent;
+      next.needsPercent = false;
+      gained.push(`${match.derivedPercent > 0 ? "+" : ""}${match.derivedPercent}%`);
+    }
+
+    // A minimum stay is taken only when the screenshot genuinely showed one.
+    // mapping_details never carries one, so every channel-read plan arrives
+    // with a suggestion - and replacing a suggestion with a guess from
+    // somewhere else is not an improvement.
+    if (!p.minStayWasRead && match.minStayWasRead) {
+      next.minStayArrival = match.minStayArrival;
+      next.minStayWasRead = true;
+      gained.push(`min ${match.minStayArrival} nights`);
+    }
+
+    if (!p.cancellationPolicy && match.cancellationPolicy) {
+      next.cancellationPolicy = match.cancellationPolicy;
+      gained.push(match.cancellationPolicy);
+    }
+
+    if (gained.length > 0) filled.push(`${p.title}: ${gained.join(", ")}`);
+    if (next.needsPercent && next.derivedPercent === null) stillMissing.push(p.title);
+    return next;
+  });
+
+  const unmatched = extracted
+    .filter((e) => !usedKeys.has(matchKey(e.title)))
+    .map((e) => e.title);
+
+  return { plans, filled, unmatched, stillMissing };
+}

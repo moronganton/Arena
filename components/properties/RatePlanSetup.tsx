@@ -2,11 +2,13 @@
 import { useRef, useState } from "react";
 import {
   Upload, LayoutTemplate, Loader2, AlertTriangle, ArrowLeft, Check, Trash2, Info,
-  Download, Star, DoorOpen,
+  Download, Star, DoorOpen, ImageDown,
 } from "lucide-react";
 import { compressImage } from "@/lib/image";
 import { DEFAULT_RATE_PLAN_SET } from "@/lib/channels/rate-plan-spec";
-import { reviewProblems, type ImportedPlan, type ImportResult } from "@/lib/rate-plan-import";
+import {
+  reviewProblems, mergeExtractionIntoPlans, type ImportedPlan, type ImportResult,
+} from "@/lib/rate-plan-import";
 import { channelDisplayName, type ChannelReadResult, type ChannelRoom } from "@/lib/channels/channel-rate-import";
 
 // Setting up what a property sells, for someone who has never seen a rate plan.
@@ -72,10 +74,15 @@ export default function RatePlanSetup({
   // Set only when the channel returned more than one room type, so the
   // operator picks which one this property is instead of host24 guessing.
   const [rooms, setRooms] = useState<ChannelRoom[]>([]);
+  // Result of filling a channel read's blanks from a screenshot, so the review
+  // screen can say what the screenshot actually answered.
+  const [mergeNote, setMergeNote] = useState<string | null>(null);
+  const [merging, setMerging] = useState(false);
   const [channelName, setChannelName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const fillRef = useRef<HTMLInputElement>(null);
 
   async function readScreenshot(file: File) {
     setError(null);
@@ -149,6 +156,46 @@ export default function RatePlanSetup({
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't reach the server");
       setStage("choose");
+    }
+  }
+
+  // Numbers only. The channel already settled which plans exist and what they
+  // are called, so a screenshot read here may fill blanks and nothing else.
+  async function fillFromScreenshot(file: File) {
+    setError(null);
+    setMerging(true);
+    try {
+      const image = await compressImage(file);
+      const res = await fetch("/api/channex/rate-plans/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ propertyId, image }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setError(data?.error ?? "Couldn't read that screenshot");
+        return;
+      }
+      const result = data as ImportResult;
+      const merged = mergeExtractionIntoPlans(plans, result.plans);
+      setPlans(withKeys(merged.plans));
+
+      const parts: string[] = [];
+      if (merged.filled.length > 0) parts.push(`Filled ${merged.filled.join("; ")}.`);
+      else parts.push("The screenshot didn't add anything new.");
+      if (merged.unmatched.length > 0) {
+        parts.push(
+          `Ignored ${merged.unmatched.map((t) => `"${t}"`).join(", ")} - not a plan the channel lists for this property.`
+        );
+      }
+      if (merged.stillMissing.length > 0) {
+        parts.push(`Still needs a percentage: ${merged.stillMissing.map((t) => `"${t}"`).join(", ")}.`);
+      }
+      setMergeNote(parts.join(" "));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't read that file");
+    } finally {
+      setMerging(false);
     }
   }
 
@@ -521,7 +568,50 @@ export default function RatePlanSetup({
         </div>
       )}
 
-      <div className="mt-4 space-y-2">
+      {source === "channel" && (
+        <div className="mt-4 rounded-xl border border-dashed border-indigo-200 bg-indigo-50/40 p-3.5">
+          <div className="flex items-start gap-2 flex-wrap">
+            <ImageDown className="w-4 h-4 mt-0.5 shrink-0 text-indigo-500" />
+            <div className="flex-1 min-w-[220px]">
+              <p className="text-sm font-semibold text-slate-900">Fill the numbers automatically</p>
+              <p className="text-sm text-slate-600 mt-0.5">
+                {channelName ?? "Your channel"} sends names and structure but no numbers. Screenshot
+                your rate plans page and host24 reads the discounts, minimum stays and policies onto
+                the plans above. It can only fill blanks — it cannot rename or add a plan.
+              </p>
+            </div>
+            <button
+              onClick={() => fillRef.current?.click()}
+              disabled={merging}
+              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-3.5 py-2 rounded-xl text-sm font-medium transition self-start"
+            >
+              {merging ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+              {merging ? "Reading…" : "Upload a screenshot"}
+            </button>
+          </div>
+          {mergeNote && <p className="text-xs text-slate-600 mt-2.5 border-t border-indigo-100 pt-2">{mergeNote}</p>}
+          <input
+            ref={fillRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) fillFromScreenshot(f);
+              e.target.value = "";
+            }}
+          />
+        </div>
+      )}
+
+      <p className="mt-4 text-xs text-slate-500">
+        The percentage is the <strong>difference</strong> from your main rate, not a share of it:{" "}
+        <span className="tabular-nums font-medium text-slate-700">-10</span> is 10% cheaper,{" "}
+        <span className="tabular-nums font-medium text-slate-700">+20</span> is 20% dearer. Same price
+        as the main rate is not a separate product, so 0 is not allowed.
+      </p>
+
+      <div className="mt-3 space-y-2">
         {plans.map((p) => (
           <div key={p.key} className="border border-slate-200 rounded-xl p-3 flex flex-wrap items-end gap-3">
             <div className="flex-1 min-w-[160px]">
@@ -533,7 +623,9 @@ export default function RatePlanSetup({
               />
             </div>
             <div>
-              <label className="block text-[11px] font-medium text-slate-500 mb-1">Price</label>
+              <label className="block text-[11px] font-medium text-slate-500 mb-1">
+                Cheaper / dearer
+              </label>
               {p.derivedPercent === null && !p.needsPercent ? (
                 <span className="inline-block text-xs font-bold uppercase tracking-wide px-2 py-1.5 rounded bg-indigo-50 text-indigo-700">
                   Your main rate
@@ -546,7 +638,7 @@ export default function RatePlanSetup({
                   <input
                     type="number"
                     value={p.derivedPercent ?? ""}
-                    placeholder="?"
+                    placeholder="-10"
                     onChange={(e) => {
                       // Number("-") and Number("") are NaN and 0 - one slips
                       // past every structural check and reaches Channex as
@@ -561,7 +653,7 @@ export default function RatePlanSetup({
                       p.derivedPercent === null ? "border-amber-300 bg-amber-50" : "border-slate-200"
                     }`}
                   />
-                  <span className="text-xs text-slate-500">% of main</span>
+                  <span className="text-xs text-slate-500">% vs main</span>
                 </div>
               )}
             </div>

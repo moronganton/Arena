@@ -389,8 +389,9 @@ function PlanRow({
               pct !== null && pct < 0 ? "text-emerald-600" : "text-amber-600"
             }`}
           >
-            {pct !== null && pct > 0 ? "+" : ""}
-            {pct}% of parent
+            {pct !== null && pct < 0
+              ? `${Math.abs(pct)}% cheaper than parent`
+              : `${pct}% dearer than parent`}
           </span>
         )}
       </div>

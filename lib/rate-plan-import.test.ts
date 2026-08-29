@@ -1,6 +1,9 @@
 import { test, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { normalizeExtraction, suggestMinStay, reviewProblems } from "./rate-plan-import";
+import {
+  normalizeExtraction, suggestMinStay, reviewProblems, mergeExtractionIntoPlans,
+  type ImportedPlan,
+} from "./rate-plan-import";
 
 describe("suggestMinStay", () => {
   test("reads the intent out of conventional names", () => {
@@ -189,5 +192,88 @@ describe("reviewProblems", () => {
 
   it("an empty set is blocking", () => {
     assert.equal(reviewProblems([]).length, 1);
+  });
+});
+
+describe("mergeExtractionIntoPlans", () => {
+  const base = { cancellationPolicy: null, minStayWasRead: false };
+  // What a channel read produces: exact names, no numbers at all.
+  const fromChannel: ImportedPlan[] = [
+    { ...base, title: "Standard Rate", derivedPercent: null, minStayArrival: 1, needsPercent: false },
+    { ...base, title: "Non-Refundable Rate", derivedPercent: null, minStayArrival: 1, needsPercent: true },
+    { ...base, title: "Partial Refund Rate", derivedPercent: null, minStayArrival: 1, needsPercent: true },
+  ];
+
+  it("fills the percentages the channel could not give", () => {
+    const r = mergeExtractionIntoPlans(fromChannel, [
+      { title: "Non-Refundable Rate", derivedPercent: -10, minStayArrival: 1, cancellationPolicy: null, minStayWasRead: false },
+      { title: "Partial Refund Rate", derivedPercent: -5, minStayArrival: 1, cancellationPolicy: null, minStayWasRead: false },
+    ]);
+    assert.equal(r.plans[1].derivedPercent, -10);
+    assert.equal(r.plans[1].needsPercent, false);
+    assert.equal(r.plans[2].derivedPercent, -5);
+    assert.deepEqual(r.stillMissing, []);
+  });
+
+  it("matches across casing and punctuation differences", () => {
+    const r = mergeExtractionIntoPlans(fromChannel, [
+      { title: "non refundable rate", derivedPercent: -10, minStayArrival: 1, cancellationPolicy: null, minStayWasRead: false },
+    ]);
+    assert.equal(r.plans[1].derivedPercent, -10);
+  });
+
+  it("never invents a plan the channel did not list", () => {
+    const r = mergeExtractionIntoPlans(fromChannel, [
+      { title: "Weekly Rate", derivedPercent: -15, minStayArrival: 7, cancellationPolicy: null, minStayWasRead: true },
+    ]);
+    assert.equal(r.plans.length, 3);
+    assert.deepEqual(r.unmatched, ["Weekly Rate"]);
+  });
+
+  it("takes a minimum stay only when the screenshot genuinely read one", () => {
+    const r = mergeExtractionIntoPlans(fromChannel, [
+      { title: "Non-Refundable Rate", derivedPercent: -10, minStayArrival: 9, cancellationPolicy: null, minStayWasRead: false },
+    ]);
+    // A suggestion replacing a suggestion is not an improvement.
+    assert.equal(r.plans[1].minStayArrival, 1);
+    assert.equal(r.plans[1].minStayWasRead, false);
+  });
+
+  it("takes a minimum stay that WAS read", () => {
+    const r = mergeExtractionIntoPlans(fromChannel, [
+      { title: "Non-Refundable Rate", derivedPercent: -10, minStayArrival: 4, cancellationPolicy: null, minStayWasRead: true },
+    ]);
+    assert.equal(r.plans[1].minStayArrival, 4);
+    assert.equal(r.plans[1].minStayWasRead, true);
+  });
+
+  it("refuses to give the parent a percentage, whatever the screenshot says", () => {
+    const r = mergeExtractionIntoPlans(fromChannel, [
+      { title: "Standard Rate", derivedPercent: -20, minStayArrival: 1, cancellationPolicy: null, minStayWasRead: false },
+    ]);
+    assert.equal(r.plans[0].derivedPercent, null);
+    assert.equal(r.plans[0].needsPercent, false);
+  });
+
+  it("reports what is still unanswered after the merge", () => {
+    const r = mergeExtractionIntoPlans(fromChannel, [
+      { title: "Non-Refundable Rate", derivedPercent: -10, minStayArrival: 1, cancellationPolicy: null, minStayWasRead: false },
+    ]);
+    assert.deepEqual(r.stillMissing, ["Partial Refund Rate"]);
+  });
+
+  it("carries a cancellation policy across", () => {
+    const r = mergeExtractionIntoPlans(fromChannel, [
+      { title: "Non-Refundable Rate", derivedPercent: -10, minStayArrival: 1, cancellationPolicy: "Non-refundable", minStayWasRead: false },
+    ]);
+    assert.equal(r.plans[1].cancellationPolicy, "Non-refundable");
+  });
+
+  it("a duplicated name in the screenshot does not silently pick the second", () => {
+    const r = mergeExtractionIntoPlans(fromChannel, [
+      { title: "Non-Refundable Rate", derivedPercent: -10, minStayArrival: 1, cancellationPolicy: null, minStayWasRead: false },
+      { title: "Non-Refundable Rate", derivedPercent: -40, minStayArrival: 1, cancellationPolicy: null, minStayWasRead: false },
+    ]);
+    assert.equal(r.plans[1].derivedPercent, -10);
   });
 });
