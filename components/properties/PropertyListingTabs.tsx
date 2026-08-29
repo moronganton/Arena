@@ -67,8 +67,12 @@ export interface PropertyTabsData {
   propertyId: string;
   propertyName: string;
   isChannex: boolean;
-  /** Unconnected and safe to set up - not a live Smoobu listing. */
+  /** No Channex listing yet, and safe to set up - not a live Smoobu listing. */
   canSetUpChannex: boolean;
+  /** No Channex listing yet, whatever channelProvider says. */
+  needsChannexSetup: boolean;
+  /** Already flagged CHANNEX - so setup finishes provisioning rather than connecting. */
+  alreadyFlaggedChannex: boolean;
   calendarProperty: PriceCalendarProperty;
   channels: ChannelSummary | null;
   locks: LockSummary[];
@@ -176,7 +180,8 @@ export default function PropertyListingTabs({ data }: { data: PropertyTabsData }
         <RateRevenueTab
           propertyId={propertyId}
           calendarProperty={data.calendarProperty}
-          needsChannexSetup={!isChannex}
+          needsChannexSetup={data.needsChannexSetup}
+          alreadyFlaggedChannex={data.alreadyFlaggedChannex}
         />
       )}
       {isChannex && tab === "reviews" && <ReviewsPanel propertyId={propertyId} />}

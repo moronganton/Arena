@@ -38,11 +38,17 @@ export default function RatePlanSetup({
   // True when the property has no Channex listing yet - a brand new property
   // starts here, because rate plans cannot exist before the listing does.
   needsConnecting = false,
+  // Already flagged CHANNEX but never provisioned: the flag flip is a no-op,
+  // only the Channex objects are missing. Worth saying differently, because
+  // "connect this property" reads as wrong to someone whose header already
+  // says Channex connected.
+  alreadyFlagged = false,
 }: {
   propertyId: string;
   currency: string;
   onCreated: () => void;
   needsConnecting?: boolean;
+  alreadyFlagged?: boolean;
 }) {
   const [stage, setStage] = useState<Stage>(needsConnecting ? "connect" : "choose");
   const [connecting, setConnecting] = useState(false);
@@ -171,11 +177,14 @@ export default function RatePlanSetup({
   if (stage === "connect") {
     return (
       <div className="bg-white rounded-2xl border border-slate-100 p-5 md:p-6">
-        <h2 className="text-lg font-bold text-slate-900">Connect this property first</h2>
+        <h2 className="text-lg font-bold text-slate-900">
+          {alreadyFlagged ? "Finish setting this property up" : "Connect this property first"}
+        </h2>
         <p className="text-sm text-slate-600 mt-1 max-w-2xl">
-          Rate plans live on your channel manager, so this property needs to exist there before it can
-          sell anything. host24 will create it, its room type, and a standard rate — nothing goes on sale
-          until you set prices.
+          {alreadyFlagged
+            ? "This property is set to use Channex but was never created there, so nothing can sync yet. host24 will create it, its room type and a standard rate now."
+            : "Rate plans live on your channel manager, so this property needs to exist there before it can sell anything. host24 will create it, its room type, and a standard rate."}{" "}
+          Nothing goes on sale until you set prices.
         </p>
 
         {error && (
@@ -191,7 +200,7 @@ export default function RatePlanSetup({
           className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition mt-5"
         >
           {connecting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-          {connecting ? "Setting up…" : "Set up on Channex"}
+          {connecting ? "Setting up…" : alreadyFlagged ? "Create it on Channex" : "Set up on Channex"}
         </button>
       </div>
     );

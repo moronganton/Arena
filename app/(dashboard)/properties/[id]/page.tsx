@@ -52,16 +52,27 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
 
   const isChannex = channels?.manager === "CHANNEX";
 
-  // A brand new property is created with channelProvider "SMOOBU" and no
-  // mapping at all, so it is indistinguishable from a real Smoobu listing by
-  // that flag alone. The discriminator is a SMOOBU channel row carrying a
-  // listingId: a genuinely mapped property has one, an unconnected new one
-  // does not - and converting a live Smoobu listing would cut its bookings
-  // off. Only the latter may be offered Channex setup.
+  // What decides whether setup is needed is the ABSENCE OF A LISTING, not the
+  // channelProvider flag. The two come apart in practice: a property can be
+  // flagged CHANNEX and never provisioned - a provisioning call that failed
+  // after the flag was set, or a flag changed by hand - and keying on the flag
+  // left exactly that property with no way back. It rendered "Channex
+  // connected" in the header and "isn't on Channex" in the panel, both true,
+  // with no route to fix it.
+  const hasChannexListing = !!(await prisma.channexListing.findUnique({
+    where: { propertyId: id },
+    select: { id: true },
+  }));
+
+  // Converting a LIVE Smoobu listing would cut its bookings off. A new
+  // property defaults to channelProvider "SMOOBU" with no mapping, so the
+  // flag cannot tell them apart - a SMOOBU channel row carrying a listingId
+  // can. Only a property without one may be offered Channex setup.
   const smoobuMapped = await prisma.channelConfig.count({
     where: { propertyId: id, channel: "SMOOBU", listingId: { not: null } },
   });
-  const canSetUpChannex = !isChannex && smoobuMapped === 0;
+  const needsChannexSetup = !hasChannexListing;
+  const canSetUpChannex = needsChannexSetup && smoobuMapped === 0;
 
   // Everything the client tabs need, serialized (dates become ISO strings).
   const tabsData = {
@@ -69,6 +80,8 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
     propertyName: property.name,
     isChannex,
     canSetUpChannex,
+    needsChannexSetup,
+    alreadyFlaggedChannex: isChannex,
     calendarProperty: {
       id: property.id,
       name: property.name,

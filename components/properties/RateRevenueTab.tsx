@@ -73,15 +73,19 @@ export default function RateRevenueTab({
   propertyId,
   calendarProperty,
   needsChannexSetup = false,
+  alreadyFlaggedChannex = false,
 }: {
   propertyId: string;
   // When provided, the live price calendar renders full-width below the
   // cause/effect columns - the month view is the same rules made visible
   // thirty days at a time instead of seven.
   calendarProperty?: PriceCalendarProperty;
-  // The property is not on Channex yet, so nothing Channex-shaped can be
-  // fetched for it - setup runs before any of the usual reads.
+  // No Channex listing exists yet, so nothing Channex-shaped can be fetched
+  // for it - setup runs before any of the usual reads.
   needsChannexSetup?: boolean;
+  // Flagged CHANNEX already: the flag flip is a no-op and only provisioning
+  // is missing, so the setup step says "finish" rather than "connect".
+  alreadyFlaggedChannex?: boolean;
 }) {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -133,6 +137,7 @@ export default function RateRevenueTab({
         propertyId={propertyId}
         currency={summary?.currency ?? "EUR"}
         needsConnecting={needsChannexSetup}
+        alreadyFlagged={alreadyFlaggedChannex}
         // A full reload: connecting changes channelProvider on the server, so
         // the page's own props are stale until it re-renders.
         onCreated={() => (needsChannexSetup ? window.location.reload() : setReloadKey((n) => n + 1))}
