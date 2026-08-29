@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { channexGet, channexPost, ChannexError } from "./channex-core";
+import { connectedChannels, type ChannelConnectionLike, type ChannelKey } from "./channel-offers";
 
 // Checking that what host24 RECORDS about a property on Channex is still true
 // there, and rebuilding the pieces that are not.
@@ -169,6 +170,44 @@ export async function repairListing(propertyId: string): Promise<RepairResult> {
   } catch (err) {
     const e = err as ChannexError;
     return { ok: false, health, actions, error: `${e.message}` };
+  }
+}
+
+/**
+ * The two account-wide facts every listing screen needs, in two calls total
+ * rather than two per property: which Channex properties still exist, and
+ * which OTAs are actually connected to each.
+ *
+ * The second is the one an operator means by "connected". A property can sit
+ * on Channex perfectly well with no channel attached to it at all - which is
+ * what deleting a Booking.com connection leaves behind - and every local
+ * signal (the flag, the listing row, the last push) goes on looking healthy,
+ * because locally nothing changed. Only Channex knows, and only per channel:
+ * connections are reported account-wide with the property ids each covers.
+ */
+export async function fetchChannexOverview(): Promise<{
+  propertyIds: Set<string>;
+  otasByProperty: Map<string, ChannelKey[]>;
+} | null> {
+  const propertyIds = await existingChannexPropertyIds();
+  if (propertyIds === null) return null;
+
+  try {
+    const rows: ChannelConnectionLike[] = [];
+    for (let page = 1; page <= 20; page++) {
+      const res = await channexGet<ChannelConnectionLike[]>(
+        `/channels?pagination[page]=${page}&pagination[limit]=100`
+      );
+      const batch = res.data ?? [];
+      rows.push(...batch);
+      if (batch.length < 100) break;
+    }
+    const otasByProperty = new Map<string, ChannelKey[]>();
+    for (const id of propertyIds) otasByProperty.set(id, connectedChannels(rows, id));
+    return { propertyIds, otasByProperty };
+  } catch {
+    // The existence answer is still worth having on its own.
+    return { propertyIds, otasByProperty: new Map() };
   }
 }
 

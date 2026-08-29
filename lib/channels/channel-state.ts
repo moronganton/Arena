@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { existingChannexPropertyIds } from "./channex-listing-repair";
+import { fetchChannexOverview } from "./channex-listing-repair";
 
 // What actually manages each property's OTA connectivity, in one place.
 //
@@ -48,6 +48,19 @@ export interface PropertyChannelState {
    * than as a broken connection.
    */
   channexPropertyMissing: boolean | null;
+  /**
+   * Which OTAs are actually connected to this property on Channex.
+   *
+   * The distinction the Channels page was missing: a property can be on
+   * Channex, flagged, provisioned, pushing happily - and have no channel
+   * attached, so it sells nowhere. Deleting a Booking.com connection leaves
+   * exactly that, and changes nothing locally, so every host24 signal went on
+   * reading "connected".
+   *
+   * null means Channex could not be asked. An empty array means asked, and
+   * genuinely none.
+   */
+  connectedOtas: string[] | null;
   icalFeeds: Array<{ channel: string; icalUrl: string | null; lastSyncAt: Date | null; isActive: boolean }>;
 }
 
@@ -74,7 +87,7 @@ export async function getChannelState(ownerId: string, propertyId?: string): Pro
   // best-effort: a Channex outage must not take down a settings page, and
   // "couldn't check" has to stay distinguishable from "it's gone".
   const anyChannexListing = properties.some((p) => p.channexListing);
-  const [pending, failed, lastDone, liveChannexIds] = await Promise.all([
+  const [pending, failed, lastDone, channexOverview] = await Promise.all([
     prisma.ariOutbox.groupBy({
       by: ["propertyId"],
       where: { propertyId: { in: propertyIds }, status: "PENDING" },
@@ -90,7 +103,7 @@ export async function getChannelState(ownerId: string, propertyId?: string): Pro
       where: { propertyId: { in: propertyIds }, status: "DONE" },
       _max: { updatedAt: true },
     }),
-    anyChannexListing ? existingChannexPropertyIds() : Promise.resolve(null),
+    anyChannexListing ? fetchChannexOverview() : Promise.resolve(null),
   ]);
   const pendingBy = new Map(pending.map((r) => [r.propertyId, r._count._all]));
   const failedBy = new Map(failed.map((r) => [r.propertyId, r._count._all]));
@@ -107,8 +120,12 @@ export async function getChannelState(ownerId: string, propertyId?: string): Pro
     // Checked live because nothing local can know it: the flag, the listing row
     // and the last-push date all survive the property being removed there.
     const channexPropertyMissing =
-      p.channexListing && liveChannexIds
-        ? !liveChannexIds.has(p.channexListing.channexPropertyId)
+      p.channexListing && channexOverview
+        ? !channexOverview.propertyIds.has(p.channexListing.channexPropertyId)
+        : null;
+    const connectedOtas =
+      p.channexListing && channexOverview && !channexPropertyMissing
+        ? channexOverview.otasByProperty.get(p.channexListing.channexPropertyId) ?? []
         : null;
 
     // A property flagged for a manager it has no mapping for is misconfigured
@@ -116,6 +133,10 @@ export async function getChannelState(ownerId: string, propertyId?: string): Pro
     let warning: string | null = null;
     if (channexPropertyMissing) {
       warning = "No longer exists on Channex - nothing is syncing, whatever the last push says.";
+    } else if (connectedOtas && connectedOtas.length === 0) {
+      warning =
+        "On Channex, but no OTA is connected to it - prices and availability are being kept up to date " +
+        "and sold nowhere. Connect Booking.com or Airbnb in Manage channels.";
     } else if (p.channelProvider === "CHANNEX" && !p.channexListing) {
       warning = "Set to Channex but not provisioned there yet - nothing will sync.";
     } else if (p.channelProvider === "SMOOBU" && !smoobu) {
@@ -149,6 +170,7 @@ export async function getChannelState(ownerId: string, propertyId?: string): Pro
           : null,
       smoobu: smoobu ? { apartmentId: smoobu.listingId, lastSyncAt: smoobu.lastSyncAt } : null,
       channexPropertyMissing,
+      connectedOtas,
       icalFeeds,
     };
   });

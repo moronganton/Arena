@@ -31,7 +31,11 @@ interface PropertyChannelRow {
   smoobu: { apartmentId: string | null; lastSyncAt: string | null } | null;
   /** null when Channex could not be asked - rendered as silence, not as gone. */
   channexPropertyMissing?: boolean | null;
+  /** Empty means asked and genuinely none; null means not asked. */
+  connectedOtas?: string[] | null;
 }
+
+const OTA_LABEL: Record<string, string> = { BOOKING: "Booking.com", AIRBNB: "Airbnb" };
 
 function ManagerBadge({ manager, missing }: { manager: string; missing?: boolean | null }) {
   if (manager === "CHANNEX") {
@@ -138,7 +142,22 @@ export default function ChannelsPage() {
               <div key={p.id} className="py-3 first:pt-0 last:pb-0">
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-sm text-slate-800 min-w-0 truncate">{p.name}</span>
-                  <ManagerBadge manager={p.manager} missing={p.channexPropertyMissing} />
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {p.connectedOtas?.map((o) => (
+                      <span
+                        key={o}
+                        className="text-xs font-medium px-2 py-1 rounded-full bg-slate-100 text-slate-600"
+                      >
+                        {OTA_LABEL[o] ?? o}
+                      </span>
+                    ))}
+                    {p.connectedOtas?.length === 0 && !p.channexPropertyMissing && (
+                      <span className="text-xs font-medium px-2 py-1 rounded-full bg-amber-100 text-amber-800">
+                        No OTA
+                      </span>
+                    )}
+                    <ManagerBadge manager={p.manager} missing={p.channexPropertyMissing} />
+                  </div>
                 </div>
                 {p.warning && (
                   <p className={`mt-1.5 text-xs rounded-lg px-2.5 py-1.5 border ${
@@ -178,7 +197,11 @@ export default function ChannelsPage() {
                     <div className="flex items-center gap-3 shrink-0">
                       <span
                         className={`text-xs text-right ${
-                          p.channexPropertyMissing ? "text-red-600 font-medium" : "text-slate-500"
+                          p.channexPropertyMissing
+                            ? "text-red-600 font-medium"
+                            : p.connectedOtas?.length === 0
+                              ? "text-amber-700 font-medium"
+                              : "text-slate-500"
                         }`}
                       >
                         {/* A last-push date is historically true and, once the
@@ -186,6 +209,8 @@ export default function ChannelsPage() {
                             misleading - it reads as a working connection. */}
                         {p.channexPropertyMissing
                           ? "Not on Channex any more"
+                          : p.connectedOtas?.length === 0
+                          ? "No OTA connected"
                           : !p.channex
                           ? "Not provisioned"
                           : p.channex.lastPushAt

@@ -120,12 +120,28 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
   // was incomplete. Both were reading different things and only one was asking
   // Channex.
   const channexGone = channels?.channexPropertyMissing === true;
+  // On Channex with nothing attached to it. Every local signal reads healthy -
+  // the flag, the listing, the last push - because locally nothing changed
+  // when the channel was deleted. Said plainly, because "connected" here would
+  // be true of Channex and false of the thing the operator cares about.
+  const noOtas = !channexGone && channels?.connectedOtas?.length === 0;
+  // Falls back to the old wording when Channex could not be asked: an outage
+  // must not imply a property sells nowhere, and an empty list would read as
+  // exactly that.
+  const otaNames =
+    (channels?.connectedOtas ?? []).length > 0
+      ? channels!.connectedOtas!
+          .map((o) => (o === "BOOKING" ? "Booking.com" : o === "AIRBNB" ? "Airbnb" : o))
+          .join(", ")
+      : "Channex connected";
   const syncLine = isChannex
     ? channexGone
       ? "Not on Channex any more · nothing is syncing"
-      : channels?.channex?.lastPushAt
-        ? `Channex connected · last push ${new Date(channels.channex.lastPushAt).toLocaleDateString()}`
-        : "Channex connected · not pushed yet"
+      : noOtas
+        ? "On Channex · no OTA connected, so it isn't selling anywhere"
+        : channels?.channex?.lastPushAt
+        ? `${otaNames} · last push ${new Date(channels.channex.lastPushAt).toLocaleDateString()}`
+          : `${otaNames} · not pushed yet`
     : channels?.manager === "SMOOBU"
       ? channels.smoobu?.lastSyncAt
         ? `Smoobu connected · synced ${new Date(channels.smoobu.lastSyncAt).toLocaleDateString()}`
@@ -168,7 +184,15 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
             <span className="flex items-center gap-1.5"><Bath className="w-4 h-4" /> {property.bathrooms} bathrooms</span>
             <span className="flex items-center gap-1.5"><Users className="w-4 h-4" /> {property.maxGuests} guests</span>
             {syncLine && (
-              <span className={channexGone ? "text-red-600 font-medium" : "text-emerald-700 font-medium"}>
+              <span
+                className={
+                  channexGone
+                    ? "text-red-600 font-medium"
+                    : noOtas
+                      ? "text-amber-700 font-medium"
+                      : "text-emerald-700 font-medium"
+                }
+              >
                 {syncLine}
               </span>
             )}
