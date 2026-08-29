@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, MapPin, Bed, Bath, Users } from "lucide-react";
 import PropertyActions from "./PropertyActions";
+import { countDeleteBlockers, hasBlockers, describeBlockers } from "@/lib/properties/delete-property";
 import PropertyListingTabs from "@/components/properties/PropertyListingTabs";
 import PropertyPhoto from "@/components/properties/PropertyPhoto";
 
@@ -30,6 +31,12 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
   // Same source of truth the Channels settings page uses, so the two screens
   // can never disagree about who manages this property.
   const channels = (await getChannelState(property.ownerId, property.id))[0] ?? null;
+
+  // Whether a permanent delete can even be offered. Computed here so the
+  // dialog can say what is holding the property rather than offering a button
+  // that fails, which is how someone learns their reservations are the reason
+  // only after pressing it.
+  const blockers = await countDeleteBlockers(id);
 
   const [upcomingReservations, templates] = await Promise.all([
     prisma.reservation.findMany({
@@ -198,7 +205,11 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
             )}
           </div>
         </div>
-        <PropertyActions id={property.id} />
+        <PropertyActions
+          id={property.id}
+          canDelete={!hasBlockers(blockers)}
+          holds={hasBlockers(blockers) ? describeBlockers(blockers) : null}
+        />
       </div>
 
       <PropertyListingTabs data={tabsData} />

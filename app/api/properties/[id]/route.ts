@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { deletePropertyForGood, describeBlockers } from "@/lib/properties/delete-property";
 import { enqueueAriUpdate, defaultHorizon } from "@/lib/channels/ari-outbox";
 import { upsertCityTax, deleteChannexTax } from "@/lib/channels/channex-taxes";
 import { isAcceptableImageSrc } from "@/lib/image";
@@ -139,6 +140,26 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   });
   if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
+  // ?purge=true is a real delete; without it this stays what it always was,
+  // a deactivation. Two very different outcomes should not share one button
+  // by default - a listing that stops trading is hidden, a property created
+  // by mistake is removed.
+  if (new URL(req.url).searchParams.get("purge") === "true") {
+    const res = await deletePropertyForGood(id, session!.user!.id);
+    if (!res.ok) {
+      return NextResponse.json(
+        {
+          error: res.blockers
+            ? `This property still has ${describeBlockers(res.blockers)}. Deleting it would take those with it, so it can only be deactivated.`
+            : res.error,
+          blockers: res.blockers,
+        },
+        { status: res.blockers ? 409 : 404 }
+      );
+    }
+    return NextResponse.json({ success: true, deleted: true, channexNote: res.channexNote });
+  }
+
   await prisma.property.update({ where: { id }, data: { active: false } });
-  return NextResponse.json({ success: true });
+  return NextResponse.json({ success: true, deleted: false });
 }
