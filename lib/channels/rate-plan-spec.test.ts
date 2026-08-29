@@ -1,4 +1,4 @@
-import { test, describe } from "node:test";
+import { test, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   DEFAULT_RATE_PLAN_SET,
@@ -299,5 +299,87 @@ describe("derivedPriceFor", () => {
 
   test("−15% off 115 rounds to cents", () => {
     assert.equal(derivedPriceFor(115, -15), 97.75);
+  });
+});
+
+describe("deriving by a fixed amount", () => {
+  // Booking.com's "Price difference" control offers a currency and a percent
+  // side by side, so a mirrored plan can carry either. Breakfast is the case
+  // that needs the amount: EUR 12 a night is a fixed cost.
+  it("emits Channex's amount modifier, not a percent one", () => {
+    assert.deepEqual(derivedRateOption({ derivedPercent: null, derivedAmount: 12 }), [
+      ["increase_by_amount", "12.00"],
+    ]);
+    assert.deepEqual(derivedRateOption({ derivedPercent: null, derivedAmount: -5 }), [
+      ["decrease_by_amount", "5.00"],
+    ]);
+  });
+
+  it("still emits percent when that is what the plan uses", () => {
+    assert.deepEqual(derivedRateOption({ derivedPercent: -15, derivedAmount: null }), [
+      ["decrease_by_percent", "15.00"],
+    ]);
+    // The bare-number form the rest of the app still uses.
+    assert.deepEqual(derivedRateOption(-15), [["decrease_by_percent", "15.00"]]);
+  });
+
+  it("adds the amount rather than scaling by it", () => {
+    assert.equal(derivedPriceFor(120, { derivedPercent: null, derivedAmount: 12 }), 132);
+    // The whole point: the same plan on a dearer night adds the same 12.
+    assert.equal(derivedPriceFor(200, { derivedPercent: null, derivedAmount: 12 }), 212);
+    // Where a percent would have drifted.
+    assert.equal(derivedPriceFor(200, { derivedPercent: 10, derivedAmount: null }), 220);
+  });
+
+  it("never previews a negative price", () => {
+    assert.equal(derivedPriceFor(10, { derivedPercent: null, derivedAmount: -50 }), 0);
+  });
+
+  it("the parent is still whatever the rules resolved", () => {
+    assert.equal(derivedPriceFor(115, { derivedPercent: null, derivedAmount: null }), 115);
+    assert.equal(derivedPriceFor(115, null), 115);
+  });
+
+  it("a plan cannot follow its parent by both at once", () => {
+    const problems = validateRatePlanSet([
+      { title: "Standard Rate", derivedPercent: null, derivedAmount: null, minStayArrival: 1 },
+      { title: "Breakfast", derivedPercent: 10, derivedAmount: 12, minStayArrival: 1 },
+    ]);
+    assert.ok(problems.some((p) => /percentage OR a fixed amount/.test(p)));
+  });
+
+  it("a zero difference is a duplicate whichever unit it is in", () => {
+    const problems = validateRatePlanSet([
+      { title: "Standard Rate", derivedPercent: null, derivedAmount: null, minStayArrival: 1 },
+      { title: "Breakfast", derivedPercent: null, derivedAmount: 0, minStayArrival: 1 },
+    ]);
+    assert.ok(problems.some((p) => /duplicate of it/.test(p)));
+  });
+
+  it("an amount-derived plan is not mistaken for the parent", () => {
+    const problems = validateRatePlanSet([
+      { title: "Standard Rate", derivedPercent: null, derivedAmount: null, minStayArrival: 1 },
+      { title: "Breakfast", derivedPercent: null, derivedAmount: 12, minStayArrival: 1 },
+    ]);
+    assert.deepEqual(problems, []);
+  });
+
+  it("builds a derived payload carrying the amount and the meal type", () => {
+    const payload = buildDerivedRatePlanPayload(
+      { title: "Rate with breakfast", derivedPercent: null, derivedAmount: 12, minStayArrival: 3, mealType: "breakfast" },
+      "parent-id",
+      { channexPropertyId: "p", channexRoomTypeId: "r", currency: "EUR", occupancy: 4 }
+    );
+    assert.deepEqual(payload.rate_plan.options[0].derived_option.rate, [["increase_by_amount", "12.00"]]);
+    assert.equal(payload.rate_plan.meal_type, "breakfast");
+  });
+
+  it("a plan with no meal carries no meal_type at all", () => {
+    const payload = buildDerivedRatePlanPayload(
+      { title: "Non-refundable", derivedPercent: -10, minStayArrival: 3 },
+      "parent-id",
+      { channexPropertyId: "p", channexRoomTypeId: "r", currency: "EUR", occupancy: 4 }
+    );
+    assert.ok(!("meal_type" in payload.rate_plan));
   });
 });

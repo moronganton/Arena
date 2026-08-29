@@ -7,10 +7,47 @@
 
 export interface RatePlanSpec {
   title: string;
-  // Null on the parent. Positive is a surcharge, negative a discount - a weekly
-  // rate at -15%, a single night at +60%.
+  // How this plan follows the parent. Exactly one of derivedPercent and
+  // derivedAmount is set on a derived plan; both are null on the parent.
+  //
+  // Percent: positive is a surcharge, negative a discount - a weekly rate at
+  // -15%, a single night at +60%.
   derivedPercent: number | null;
+  // A flat amount in the property's currency. Breakfast is the case that needs
+  // it: EUR 12 a night is a fixed cost, and expressing it as a percent is right
+  // at one base price and wrong at every other. Booking.com's own "Price
+  // difference" control offers a currency and a percent side by side.
+  derivedAmount?: number | null;
   minStayArrival: number;
+  // Channex's meal_type. Only set when the plan actually includes a meal, so
+  // an ordinary plan carries nothing rather than an explicit "none" this app
+  // never asked anyone about.
+  mealType?: string | null;
+}
+
+/** How a plan's price difference reads in a log line or a step description. */
+export function describeDerivation(spec: {
+  derivedPercent: number | null;
+  derivedAmount?: number | null;
+}): string {
+  const d = derivationOf(spec);
+  if (d === null) return "the main rate";
+  const sign = d.value > 0 ? "+" : "";
+  return d.kind === "amount" ? `${sign}${d.value}` : `${sign}${d.value}%`;
+}
+
+/** A derived plan follows its parent by exactly one of these. */
+export function derivationOf(spec: {
+  derivedPercent: number | null;
+  derivedAmount?: number | null;
+}): { kind: "percent" | "amount"; value: number } | null {
+  if (spec.derivedAmount !== null && spec.derivedAmount !== undefined) {
+    return { kind: "amount", value: spec.derivedAmount };
+  }
+  if (spec.derivedPercent !== null && spec.derivedPercent !== undefined) {
+    return { kind: "percent", value: spec.derivedPercent };
+  }
+  return null;
 }
 
 // The default family, mirroring the structure this operator already runs on
@@ -29,7 +66,7 @@ export const DEFAULT_RATE_PLAN_SET: RatePlanSpec[] = [
 ];
 
 export function isParent(spec: RatePlanSpec): boolean {
-  return spec.derivedPercent === null;
+  return derivationOf(spec) === null;
 }
 
 export function validateRatePlanSet(specs: RatePlanSpec[]): string[] {
@@ -44,11 +81,18 @@ export function validateRatePlanSet(specs: RatePlanSpec[]): string[] {
   for (const s of specs) {
     if (!s.title.trim()) problems.push("every rate plan needs a title");
     if (s.minStayArrival < 1) problems.push(`${s.title}: minimum stay must be at least 1`);
-    if (s.derivedPercent !== null && s.derivedPercent === 0) {
-      problems.push(`${s.title}: a 0% derived plan is a duplicate of its parent`);
+    if (s.derivedPercent !== null && s.derivedPercent !== undefined &&
+        s.derivedAmount !== null && s.derivedAmount !== undefined) {
+      problems.push(
+        `${s.title}: a plan follows its parent by a percentage OR a fixed amount, not both`
+      );
     }
-    if (s.derivedPercent !== null && s.derivedPercent <= -100) {
-      problems.push(`${s.title}: a discount of ${s.derivedPercent}% would price the room at or below zero`);
+    const d = derivationOf(s);
+    if (d?.value === 0) {
+      problems.push(`${s.title}: a plan priced the same as its parent is a duplicate of it`);
+    }
+    if (d?.kind === "percent" && d.value <= -100) {
+      problems.push(`${s.title}: a discount of ${d.value}% would price the room at or below zero`);
     }
   }
   const titles = specs.map((s) => s.title.trim().toLowerCase());
@@ -87,16 +131,40 @@ export function retiredTitle(currentTitle: string, channexRatePlanId: string): s
 // to SHOW the operator what their one price becomes across the family. Rounded
 // to cents the same way resolvePrice rounds, so the preview and the real number
 // agree.
-export function derivedPriceFor(parentPrice: number, percent: number | null): number {
-  if (percent === null) return Math.round(parentPrice * 100) / 100;
-  return Math.round(parentPrice * (1 + percent / 100) * 100) / 100;
+export function derivedPriceFor(
+  parentPrice: number,
+  derivation: { derivedPercent: number | null; derivedAmount?: number | null } | number | null
+): number {
+  // The old signature took a bare percent, and enough call sites still read
+  // naturally that way to keep it working rather than churn them all.
+  const spec =
+    typeof derivation === "number"
+      ? { derivedPercent: derivation, derivedAmount: null }
+      : derivation === null
+        ? { derivedPercent: null, derivedAmount: null }
+        : derivation;
+
+  const d = derivationOf(spec);
+  if (d === null) return Math.round(parentPrice * 100) / 100;
+  const raw = d.kind === "amount" ? parentPrice + d.value : parentPrice * (1 + d.value / 100);
+  // A fixed discount larger than the night's price would quote a negative
+  // number. Channex would reject it, but showing it as a preview is worse -
+  // it reads as a real offer rather than a misconfiguration.
+  return Math.round(Math.max(0, raw) * 100) / 100;
 }
 
 // Channex expresses a modifier as a direction plus a positive magnitude, not as
 // a signed number. -15 becomes ["decrease_by_percent", "15.00"].
-export function derivedRateOption(percent: number): [string, string][] {
-  const direction = percent < 0 ? "decrease_by_percent" : "increase_by_percent";
-  return [[direction, Math.abs(percent).toFixed(2)]];
+export function derivedRateOption(
+  derivation: { derivedPercent: number | null; derivedAmount?: number | null } | number
+): [string, string][] {
+  const spec =
+    typeof derivation === "number" ? { derivedPercent: derivation, derivedAmount: null } : derivation;
+  const d = derivationOf(spec);
+  if (d === null) throw new Error("derivedRateOption: nothing to derive by");
+  const unit = d.kind === "amount" ? "amount" : "percent";
+  const direction = d.value < 0 ? `decrease_by_${unit}` : `increase_by_${unit}`;
+  return [[direction, Math.abs(d.value).toFixed(2)]];
 }
 
 // min_stay_arrival on a rate plan is seven defaults, one per weekday, applied
@@ -115,8 +183,10 @@ export function weeklyDefault(value: number): number[] {
 // only ever break the family.
 export interface RatePlanChanges {
   title?: string;
-  derivedPercent?: number;
+  derivedPercent?: number | null;
+  derivedAmount?: number | null;
   minStayArrival?: number;
+  mealType?: string | null;
 }
 
 export function validateRatePlanChanges(
@@ -138,15 +208,29 @@ export function validateRatePlanChanges(
     problems.push("minimum stay must be at least 1");
   }
 
-  if (changes.derivedPercent !== undefined) {
+  const changingDerivation =
+    changes.derivedPercent !== undefined || changes.derivedAmount !== undefined;
+  if (changingDerivation) {
     // The parent is where prices arrive from the pricing rules; it has nothing
-    // to derive from, and giving it a percentage would silently do nothing.
+    // to derive from, and giving it a difference would silently do nothing.
     if (isParentPlan) {
-      problems.push("the parent plan has no percentage - it receives prices from your pricing rules");
+      problems.push(
+        "the parent plan has no price difference - it receives prices from your pricing rules"
+      );
     }
-    if (changes.derivedPercent === 0) problems.push("a 0% plan is a duplicate of its parent");
-    if (changes.derivedPercent <= -100) {
-      problems.push(`a discount of ${changes.derivedPercent}% would price the room at or below zero`);
+    if (
+      changes.derivedPercent !== undefined && changes.derivedPercent !== null &&
+      changes.derivedAmount !== undefined && changes.derivedAmount !== null
+    ) {
+      problems.push("a plan follows its parent by a percentage OR a fixed amount, not both");
+    }
+    const d = derivationOf({
+      derivedPercent: changes.derivedPercent ?? null,
+      derivedAmount: changes.derivedAmount ?? null,
+    });
+    if (d?.value === 0) problems.push("a plan priced the same as its parent is a duplicate of it");
+    if (d?.kind === "percent" && d.value <= -100) {
+      problems.push(`a discount of ${d.value}% would price the room at or below zero`);
     }
   }
 
@@ -165,12 +249,18 @@ export function buildRatePlanUpdatePayload(
   if (changes.minStayArrival !== undefined) {
     rate_plan.min_stay_arrival = weeklyDefault(changes.minStayArrival);
   }
-  if (changes.derivedPercent !== undefined) {
+  if (changes.mealType !== undefined) rate_plan.meal_type = changes.mealType ?? "none";
+  if (changes.derivedPercent !== undefined || changes.derivedAmount !== undefined) {
     rate_plan.options = [
       {
         occupancy,
         is_primary: true,
-        derived_option: { rate: derivedRateOption(changes.derivedPercent) },
+        derived_option: {
+          rate: derivedRateOption({
+            derivedPercent: changes.derivedPercent ?? null,
+            derivedAmount: changes.derivedAmount ?? null,
+          }),
+        },
       },
     ];
   }
@@ -202,6 +292,7 @@ export function buildParentRatePlanPayload(spec: RatePlanSpec, ctx: RatePlanPayl
       // that push never happens.
       options: [{ occupancy: ctx.occupancy, is_primary: true, rate: 0 }],
       min_stay_arrival: weeklyDefault(spec.minStayArrival),
+      ...(spec.mealType ? { meal_type: spec.mealType } : {}),
     },
   };
 }
@@ -211,8 +302,8 @@ export function buildDerivedRatePlanPayload(
   parentChannexRatePlanId: string,
   ctx: RatePlanPayloadContext
 ) {
-  if (spec.derivedPercent === null) {
-    throw new Error(`buildDerivedRatePlanPayload: ${spec.title} has no derivedPercent`);
+  if (derivationOf(spec) === null) {
+    throw new Error(`buildDerivedRatePlanPayload: ${spec.title} has no price difference`);
   }
   return {
     rate_plan: {
@@ -231,11 +322,12 @@ export function buildDerivedRatePlanPayload(
       // collapse six products back into one.
       inherit_min_stay_arrival: false,
       min_stay_arrival: weeklyDefault(spec.minStayArrival),
+      ...(spec.mealType ? { meal_type: spec.mealType } : {}),
       options: [
         {
           occupancy: ctx.occupancy,
           is_primary: true,
-          derived_option: { rate: derivedRateOption(spec.derivedPercent) },
+          derived_option: { rate: derivedRateOption(spec) },
         },
       ],
     },

@@ -7,7 +7,8 @@ import { updateRatePlan, removeRatePlan, removeUntrackedRatePlan } from "@/lib/c
 
 // Editing and removing one plan in a family.
 //
-//   PATCH  /api/channex/rate-plans/{id}   { propertyId, title?, derivedPercent?, minStayArrival? }
+//   PATCH  /api/channex/rate-plans/{id}
+//     { propertyId, title?, derivedPercent?|derivedAmount?, minStayArrival?, mealType? }
 //   DELETE /api/channex/rate-plans/{id}?propertyId=...
 //
 // Both go through requireChannexProperty, so a plan can only be touched by the
@@ -17,8 +18,12 @@ import { updateRatePlan, removeRatePlan, removeUntrackedRatePlan } from "@/lib/c
 const patchSchema = z.object({
   propertyId: z.string().min(1),
   title: z.string().min(1).optional(),
-  derivedPercent: z.number().optional(),
+  // One of these, matching how Booking.com states a price difference: a
+  // percentage or a fixed amount in the property's currency.
+  derivedPercent: z.number().nullable().optional(),
+  derivedAmount: z.number().nullable().optional(),
   minStayArrival: z.number().int().optional(),
+  mealType: z.string().nullable().optional(),
 });
 
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {

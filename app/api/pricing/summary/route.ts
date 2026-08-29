@@ -46,7 +46,10 @@ export async function GET(req: NextRequest) {
     prisma.ratePlan.findMany({
       where: { channexListingId: guard.channexListingId, active: true },
       orderBy: { position: "asc" },
-      select: { id: true, title: true, kind: true, derivedPercent: true, minStayArrival: true },
+      select: {
+        id: true, title: true, kind: true, derivedPercent: true, derivedAmount: true,
+        minStayArrival: true, mealType: true,
+      },
     }),
     // Which OTAs actually sell this property. Channex reports connections
     // account-wide with the property ids each covers, so this is the only way

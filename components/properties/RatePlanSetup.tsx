@@ -300,6 +300,8 @@ export default function RatePlanSetup({
           specs: plans.map((p) => ({
             title: p.title,
             derivedPercent: p.derivedPercent,
+            derivedAmount: p.derivedAmount ?? null,
+            mealType: p.mealType ?? null,
             minStayArrival: p.minStayArrival,
           })),
         }),
@@ -721,7 +723,7 @@ export default function RatePlanSetup({
               <label className="block text-[11px] font-medium text-slate-500 mb-1">
                 Cheaper / dearer
               </label>
-              {p.derivedPercent === null && !p.needsPercent ? (
+              {p.derivedPercent === null && p.derivedAmount == null && !p.needsPercent ? (
                 <span className="inline-block text-xs font-bold uppercase tracking-wide px-2 py-1.5 rounded bg-indigo-50 text-indigo-700">
                   Your main rate
                 </span>
@@ -732,8 +734,8 @@ export default function RatePlanSetup({
                       as the main rate", which is a claim nobody made. */}
                   <input
                     type="number"
-                    value={p.derivedPercent ?? ""}
-                    placeholder="-10"
+                    value={(p.derivedAmount ?? p.derivedPercent) ?? ""}
+                    placeholder={p.derivedAmount != null ? "12" : "-10"}
                     onChange={(e) => {
                       // Number("-") and Number("") are NaN and 0 - one slips
                       // past every structural check and reaches Channex as
@@ -742,13 +744,39 @@ export default function RatePlanSetup({
                       // "still unanswered", which is what needsPercent means.
                       const n = Number(e.target.value);
                       const ok = e.target.value !== "" && Number.isFinite(n);
-                      update(p.key, { derivedPercent: ok ? n : null, needsPercent: !ok });
+                      const asAmount = p.derivedAmount != null;
+                      update(p.key, {
+                        derivedPercent: ok && !asAmount ? n : null,
+                        derivedAmount: ok && asAmount ? n : null,
+                        needsPercent: !ok,
+                      });
                     }}
                     className={`w-20 border rounded-lg px-2.5 py-1.5 text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
-                      p.derivedPercent === null ? "border-amber-300 bg-amber-50" : "border-slate-200"
+                      p.derivedPercent === null && p.derivedAmount == null
+                        ? "border-amber-300 bg-amber-50"
+                        : "border-slate-200"
                     }`}
                   />
-                  <span className="text-xs text-slate-500">% vs main</span>
+                  {/* Which unit the number is in. Booking.com states a price
+                      difference as one or the other, so this mirrors it rather
+                      than asking for both. */}
+                  <select
+                    value={p.derivedAmount != null ? "amount" : "percent"}
+                    aria-label={`Price difference unit for ${p.title}`}
+                    onChange={(e) => {
+                      const toAmount = e.target.value === "amount";
+                      const current = p.derivedAmount ?? p.derivedPercent;
+                      update(p.key, {
+                        derivedPercent: toAmount ? null : current,
+                        derivedAmount: toAmount ? current : null,
+                      });
+                    }}
+                    className="border border-slate-200 rounded-lg px-1.5 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="percent">%</option>
+                    <option value="amount">{currency}</option>
+                  </select>
+                  <span className="text-xs text-slate-500">vs main</span>
                 </div>
               )}
             </div>

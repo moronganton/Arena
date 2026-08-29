@@ -277,3 +277,59 @@ describe("mergeExtractionIntoPlans", () => {
     assert.equal(r.plans[1].derivedPercent, -10);
   });
 });
+
+describe("reading a price difference stated in money", () => {
+  // Booking.com's "Price difference" control offers a currency and a percent
+  // side by side, so a screenshot can carry either.
+  it("takes an amount as the difference, not a percentage", () => {
+    const r = normalizeExtraction([
+      { title: "Standard Rate", isStandard: true },
+      { title: "Rate with breakfast", amountOfStandard: 10, mealPlan: "Breakfast" },
+    ]);
+    assert.equal(r.plans[1].derivedAmount, 10);
+    assert.equal(r.plans[1].derivedPercent, null);
+    assert.deepEqual(r.problems, []);
+  });
+
+  it("carries the meal plan through", () => {
+    const r = normalizeExtraction([
+      { title: "Standard Rate", isStandard: true },
+      { title: "Rate with breakfast", percentOfStandard: 10, mealPlan: "Breakfast" },
+      { title: "Weekly Rate", percentOfStandard: -15, mealPlan: "No meals" },
+    ]);
+    assert.equal(r.plans[1].mealType, "breakfast");
+    assert.equal(r.plans[2].mealType, null);
+  });
+
+  it("an amount wins over a percentage read alongside it", () => {
+    const r = normalizeExtraction([
+      { title: "Standard Rate", isStandard: true },
+      { title: "Breakfast", amountOfStandard: 10, percentOfStandard: 8 },
+    ]);
+    assert.equal(r.plans[1].derivedAmount, 10);
+    assert.equal(r.plans[1].derivedPercent, null);
+  });
+
+  it("an amount-derived plan is not mistaken for a second main rate", () => {
+    const r = normalizeExtraction([
+      { title: "Standard Rate", isStandard: true },
+      { title: "Breakfast", amountOfStandard: 10 },
+    ]);
+    assert.ok(!r.problems.some((p) => /main rate/.test(p)));
+  });
+
+  it("the merge fills an amount from a screenshot onto a channel read", () => {
+    const fromChannel: ImportedPlan[] = [
+      { title: "Standard Rate", derivedPercent: null, minStayArrival: 1, cancellationPolicy: null, minStayWasRead: false, needsPercent: false },
+      { title: "Rate with breakfast", derivedPercent: null, minStayArrival: 1, cancellationPolicy: null, minStayWasRead: false, needsPercent: true },
+    ];
+    const r = mergeExtractionIntoPlans(fromChannel, [
+      { title: "Rate with breakfast", derivedPercent: null, derivedAmount: 10, mealType: "breakfast", minStayArrival: 3, cancellationPolicy: null, minStayWasRead: true },
+    ]);
+    assert.equal(r.plans[1].derivedAmount, 10);
+    assert.equal(r.plans[1].needsPercent, false);
+    assert.equal(r.plans[1].mealType, "breakfast");
+    assert.equal(r.plans[1].minStayArrival, 3);
+    assert.deepEqual(r.stillMissing, []);
+  });
+});

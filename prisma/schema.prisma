@@ -336,10 +336,26 @@ model RatePlan {
   // pushed to; Channex recomputes them whenever the parent moves.
   kind String @default("DERIVED") // PARENT | DERIVED
 
-  // Percent applied to the parent's rate. Positive is a surcharge (a one-night
-  // stay at +60%), negative a discount (a weekly rate at -15%). Null on the
-  // parent, which has nothing to derive from.
+  // How this plan's price follows the parent's. Exactly one of these is set on
+  // a derived plan; both are null on the parent, which has nothing to derive
+  // from.
+  //
+  // Percent applied to the parent's rate: positive is a surcharge (a one-night
+  // stay at +60%), negative a discount (a weekly rate at -15%).
   derivedPercent Float?
+
+  // A flat amount in the property's currency, added or subtracted. Breakfast
+  // is the case that needs this: it costs EUR 12 a night, not 10%, and
+  // encoding a fixed cost as a proportional one is right at EUR 120 and wrong
+  // at EUR 200 the moment a season rule moves the base. Booking.com's own
+  // "Price difference" control offers a currency and a percent side by side,
+  // so a plan mirrored from there can need either.
+  derivedAmount Float?
+
+  // What Channex calls meal_type. Booking.com carries the same thing as
+  // "Meals" on the rate plan - a breakfast plan whose meal type says none
+  // would advertise wrong on a channel that reads it from Channex.
+  mealType String?
 
   // This plan's own minimum stay on arrival, and the entire reason it exists as
   // a separate product. Provisioned with inherit_min_stay_arrival = false so the

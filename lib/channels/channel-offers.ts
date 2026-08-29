@@ -23,6 +23,8 @@ export interface PlanLike {
   title: string;
   kind: string; // PARENT | DERIVED
   derivedPercent: number | null;
+  /** Set instead of derivedPercent when the plan follows its parent by a flat amount. */
+  derivedAmount?: number | null;
   minStayArrival: number;
 }
 
@@ -78,7 +80,12 @@ export function offersForStay(
       title: p.title,
       // The parent has no percentage of its own; Airbnb's mirror is the
       // parent at 0%, so both resolve through the same call.
-      price: derivedPriceFor(parentPrice, p.kind === "PARENT" ? null : p.derivedPercent),
+      price: derivedPriceFor(
+        parentPrice,
+        p.kind === "PARENT"
+          ? null
+          : { derivedPercent: p.derivedPercent, derivedAmount: p.derivedAmount ?? null }
+      ),
       minStay: p.minStayArrival,
       derivedPercent: p.kind === "PARENT" ? null : p.derivedPercent,
     }))

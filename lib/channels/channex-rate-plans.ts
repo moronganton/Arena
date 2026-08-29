@@ -6,6 +6,8 @@ import {
   buildDerivedRatePlanPayload,
   buildParentRatePlanPayload,
   buildRatePlanUpdatePayload,
+  derivationOf,
+  describeDerivation,
   findTitleCollisions,
   isParent,
   retiredTitle,
@@ -57,7 +59,14 @@ export interface ProvisionRatePlansResult {
   propertyName: string;
   parentChannexRatePlanId: string | null;
   previousParentChannexRatePlanId: string;
-  created: { title: string; channexRatePlanId: string; derivedPercent: number | null; minStayArrival: number }[];
+  created: {
+    title: string;
+    channexRatePlanId: string;
+    derivedPercent: number | null;
+    derivedAmount: number | null;
+    minStayArrival: number;
+    mealType: string | null;
+  }[];
   steps: RatePlanStep[];
   /** Blockers. A non-empty list means nothing was attempted. */
   problems: string[];
@@ -206,7 +215,7 @@ export async function provisionRatePlanSet(
     });
     for (const spec of derivedSpecs) {
       result.steps.push({
-        step: `create derived "${spec.title}" (${spec.derivedPercent}% , min stay ${spec.minStayArrival})`,
+        step: `create derived "${spec.title}" (${describeDerivation(spec)}, min stay ${spec.minStayArrival})`,
         path: "/rate_plans",
         payload: buildDerivedRatePlanPayload(spec, "<parent id from step 1>", ctx),
         status: "planned",
@@ -280,7 +289,8 @@ export async function provisionRatePlanSet(
   result.parentChannexRatePlanId = parentId;
   result.created.push({
     title: parentSpec.title, channexRatePlanId: parentId,
-    derivedPercent: null, minStayArrival: parentSpec.minStayArrival,
+    derivedPercent: null, derivedAmount: null, minStayArrival: parentSpec.minStayArrival,
+    mealType: parentSpec.mealType ?? null,
   });
 
   // --- 2. derived children ---
@@ -295,7 +305,8 @@ export async function provisionRatePlanSet(
       });
       result.created.push({
         title: spec.title, channexRatePlanId: created.data.id,
-        derivedPercent: spec.derivedPercent, minStayArrival: spec.minStayArrival,
+        derivedPercent: spec.derivedPercent, derivedAmount: spec.derivedAmount ?? null,
+        minStayArrival: spec.minStayArrival, mealType: spec.mealType ?? null,
       });
     } catch (err) {
       const e = err as ChannexError;
@@ -318,8 +329,10 @@ export async function provisionRatePlanSet(
         channexListingId: opts.channexListingId,
         channexRatePlanId: c.channexRatePlanId,
         title: c.title,
-        kind: c.derivedPercent === null ? "PARENT" : "DERIVED",
+        kind: c.derivedPercent === null && c.derivedAmount === null ? "PARENT" : "DERIVED",
         derivedPercent: c.derivedPercent,
+        derivedAmount: c.derivedAmount,
+        mealType: c.mealType,
         minStayArrival: c.minStayArrival,
         position: i,
       })),
@@ -425,7 +438,16 @@ export async function updateRatePlan(
     where: { id: ratePlanId },
     data: {
       ...(changes.title !== undefined ? { title: changes.title.trim() } : {}),
-      ...(changes.derivedPercent !== undefined ? { derivedPercent: changes.derivedPercent } : {}),
+      // Setting one clears the other: a plan follows its parent by exactly one
+      // of them, and leaving a stale percent behind an amount would make
+      // derivationOf pick the wrong one on the next read.
+      ...(changes.derivedPercent !== undefined
+        ? { derivedPercent: changes.derivedPercent, derivedAmount: null }
+        : {}),
+      ...(changes.derivedAmount !== undefined
+        ? { derivedAmount: changes.derivedAmount, derivedPercent: null }
+        : {}),
+      ...(changes.mealType !== undefined ? { mealType: changes.mealType } : {}),
       ...(changes.minStayArrival !== undefined ? { minStayArrival: changes.minStayArrival } : {}),
     },
   });
@@ -446,7 +468,7 @@ export async function addDerivedRatePlan(
     spec: RatePlanSpec;
   }
 ): Promise<{ ok: boolean; channexRatePlanId?: string; error?: string; details?: unknown; problems?: string[] }> {
-  if (opts.spec.derivedPercent === null) {
+  if (derivationOf(opts.spec) === null) {
     return { ok: false, problems: ["a new plan must have a percentage - there can only be one parent"] };
   }
 
@@ -457,7 +479,13 @@ export async function addDerivedRatePlan(
   }
 
   const problems = validateRatePlanChanges(
-    { title: opts.spec.title, derivedPercent: opts.spec.derivedPercent, minStayArrival: opts.spec.minStayArrival },
+    {
+      title: opts.spec.title,
+      derivedPercent: opts.spec.derivedPercent,
+      derivedAmount: opts.spec.derivedAmount ?? null,
+      minStayArrival: opts.spec.minStayArrival,
+      mealType: opts.spec.mealType ?? null,
+    },
     false,
     existing.map((p) => p.title)
   );
@@ -485,6 +513,8 @@ export async function addDerivedRatePlan(
       title: opts.spec.title.trim(),
       kind: "DERIVED",
       derivedPercent: opts.spec.derivedPercent,
+      derivedAmount: opts.spec.derivedAmount ?? null,
+      mealType: opts.spec.mealType ?? null,
       minStayArrival: opts.spec.minStayArrival,
       position: existing.length,
     },

@@ -1,4 +1,4 @@
-import { validateRatePlanSet, type RatePlanSpec } from "./channels/rate-plan-spec";
+import { derivationOf, validateRatePlanSet, type RatePlanSpec } from "./channels/rate-plan-spec";
 
 // Turning "a screenshot of the Booking.com rate plans page" into a rate plan
 // family this app can actually create.
@@ -22,6 +22,8 @@ import { validateRatePlanSet, type RatePlanSpec } from "./channels/rate-plan-spe
 export interface RawExtractedPlan {
   title?: unknown;
   percentOfStandard?: unknown; // negative = cheaper, positive = dearer, 0/null = the base
+  amountOfStandard?: unknown; // the same, stated in money instead of percent
+  mealPlan?: unknown; // "Breakfast" / "No meals"
   isStandard?: unknown;
   minStay?: unknown;
   cancellationPolicy?: unknown;
@@ -60,9 +62,9 @@ export function reviewProblems(plans: ImportedPlan[]): string[] {
   // much. Reported before anything else and on its own: until a human supplies
   // the number, it is indistinguishable from a second parent, and complaining
   // about two parents would name a problem the operator does not have.
-  const pending = plans.filter((p) => p.needsPercent && p.derivedPercent === null);
+  const pending = plans.filter((p) => p.needsPercent && derivationOf(p) === null);
   if (pending.length > 0) {
-    const base = plans.find((p) => !p.needsPercent && p.derivedPercent === null)?.title ?? "your main rate";
+    const base = plans.find((p) => !p.needsPercent && derivationOf(p) === null)?.title ?? "your main rate";
     for (const p of pending) {
       problems.push(
         `"${p.title}": the channel doesn't say how this is priced against "${base}". Enter the percentage - negative if it is cheaper.`
@@ -71,7 +73,7 @@ export function reviewProblems(plans: ImportedPlan[]): string[] {
     return problems;
   }
 
-  const parents = plans.filter((p) => p.derivedPercent === null);
+  const parents = plans.filter((p) => derivationOf(p) === null);
   if (parents.length === 0) {
     problems.push(
       "None of these looks like your main rate. One plan must be the standard rate that the others are a percentage of."
@@ -156,9 +158,19 @@ export function normalizeExtraction(raw: unknown): ImportResult {
 
     const isStandard = item?.isStandard === true;
     const pct = asPercent(item?.percentOfStandard);
-    // The parent is defined by the ABSENCE of a percentage, which is also how
-    // rate-plan-spec decides. A "0%" child would be a duplicate of its parent.
-    const derivedPercent = isStandard || pct === null || pct === 0 ? null : pct;
+    const amt = asPercent(item?.amountOfStandard);
+    // The parent is defined by the ABSENCE of a price difference, which is also
+    // how rate-plan-spec decides. A zero difference would be a duplicate of the
+    // parent whichever unit it is in.
+    //
+    // An amount wins when both arrive: a screenshot showing "RON 10 more
+    // expensive" has said the amount outright, and any percentage alongside it
+    // was inferred rather than read.
+    const derivedAmount = isStandard || amt === null || amt === 0 ? null : amt;
+    const derivedPercent =
+      derivedAmount !== null || isStandard || pct === null || pct === 0 ? null : pct;
+    const meal = asString(item?.mealPlan);
+    const mealType = meal && /breakfast/i.test(meal) ? "breakfast" : null;
 
     const readMin = item?.readMinStay === true;
     const rawMin = typeof item?.minStay === "number" ? Math.trunc(item.minStay) : null;
@@ -178,6 +190,8 @@ export function normalizeExtraction(raw: unknown): ImportResult {
     plans.push({
       title,
       derivedPercent,
+      derivedAmount,
+      mealType,
       minStayArrival,
       cancellationPolicy: asString(item?.cancellationPolicy),
       minStayWasRead,
@@ -190,7 +204,7 @@ export function normalizeExtraction(raw: unknown): ImportResult {
 
   // A screenshot rarely arrives in provisioning order, and the parent must be
   // created before anything deriving from it.
-  const parentIndex = plans.findIndex((p) => p.derivedPercent === null);
+  const parentIndex = plans.findIndex((p) => derivationOf(p) === null);
   if (parentIndex > 0) plans.unshift(...plans.splice(parentIndex, 1));
 
   if (!plans.some((p) => p.cancellationPolicy)) {
@@ -257,7 +271,7 @@ export function mergeExtractionIntoPlans(
   const plans = channelPlans.map((p) => {
     const match = byKey.get(matchKey(p.title));
     if (!match) {
-      if (p.needsPercent && p.derivedPercent === null) stillMissing.push(p.title);
+      if (p.needsPercent && derivationOf(p) === null) stillMissing.push(p.title);
       return p;
     }
     usedKeys.add(matchKey(p.title));
@@ -269,10 +283,14 @@ export function mergeExtractionIntoPlans(
     // parent receives its price from the pricing rules and has nothing to
     // derive from, so a screenshot claiming a percentage for it is wrong
     // about which plan is the base - a claim the channel already settled.
-    if (p.needsPercent && p.derivedPercent === null && match.derivedPercent !== null) {
-      next.derivedPercent = match.derivedPercent;
+    const found = derivationOf(match);
+    if (p.needsPercent && derivationOf(p) === null && found !== null) {
+      next.derivedPercent = found.kind === "percent" ? found.value : null;
+      next.derivedAmount = found.kind === "amount" ? found.value : null;
       next.needsPercent = false;
-      gained.push(`${match.derivedPercent > 0 ? "+" : ""}${match.derivedPercent}%`);
+      gained.push(
+        `${found.value > 0 ? "+" : ""}${found.value}${found.kind === "percent" ? "%" : ""}`
+      );
     }
 
     // A minimum stay is taken only when the screenshot genuinely showed one.
@@ -291,7 +309,14 @@ export function mergeExtractionIntoPlans(
     }
 
     if (gained.length > 0) filled.push(`${p.title}: ${gained.join(", ")}`);
-    if (next.needsPercent && next.derivedPercent === null) stillMissing.push(p.title);
+    // A meal plan is a fact about the product, not a number, so it is taken
+    // whenever the screenshot has one and the channel did not.
+    if (!p.mealType && match.mealType) {
+      next.mealType = match.mealType;
+      gained.push(match.mealType);
+    }
+
+    if (next.needsPercent && derivationOf(next) === null) stillMissing.push(p.title);
     return next;
   });
 

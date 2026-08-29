@@ -32,7 +32,9 @@ Read every rate plan visible and return ONLY a JSON array (no markdown fence, no
   {
     "title": the rate plan's name exactly as written,
     "isStandard": true only for the plan the others are priced relative to (usually literally "Standard Rate", and its price column says something like "Managed by your Calendar" rather than a percentage),
-    "percentOfStandard": for every OTHER plan, how its price relates to the standard one. Booking.com writes this as prose like "10% cheaper than Standard Rate" - return the number as negative when cheaper and positive when more expensive, or null if no relationship is shown,
+    "percentOfStandard": for every OTHER plan, how its price relates to the standard one WHEN STATED AS A PERCENTAGE. Booking.com writes this as prose like "10% cheaper than Standard Rate" or "10% more expensive than Standard Rate" - return the number as negative when cheaper and positive when more expensive. null if the difference is a money amount rather than a percentage, or if none is shown,
+    "amountOfStandard": the same relationship WHEN STATED AS A MONEY AMOUNT rather than a percentage - Booking.com writes "RON 10 more expensive than Standard Rate" or "EUR 12 cheaper than Standard Rate". Return just the number, negative when cheaper and positive when more expensive. null if the difference is a percentage or none is shown. Never fill both this and percentOfStandard for the same plan,
+    "mealPlan": what the "Meal plan" column says for this plan - "Breakfast" when breakfast is included, "No meals" when it is not, or null if the column is not visible,
     "minStay": the minimum length of stay IF one is genuinely shown for that plan, otherwise null,
     "readMinStay": true ONLY if you actually saw a minimum stay value for that plan. Booking.com very often shows "No minimum length of stay" or says stay rules are managed on the calendar - in that case this MUST be false and minStay MUST be null. Do not infer a minimum from the plan's name,
     "cancellationPolicy": the cancellation policy text shown for that plan (e.g. "Flexible - 1 day", "Non-refundable"), or null
@@ -42,7 +44,8 @@ Read every rate plan visible and return ONLY a JSON array (no markdown fence, no
 Rules:
 - Report only what is visible. Never invent a minimum stay, a percentage, or a plan.
 - If a value is cut off or unreadable, use null rather than a guess.
-- Ignore rows that are room types rather than rate plans.`;
+- Ignore rows that are room types rather than rate plans.
+- A price difference is either a percentage or a money amount, never both. Read whichever Booking.com actually shows.`;
 
 export async function POST(req: NextRequest) {
   const session = await auth();

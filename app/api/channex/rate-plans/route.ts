@@ -41,8 +41,11 @@ const provisionSchema = z.object({
   addPlan: z
     .object({
       title: z.string().min(1),
-      derivedPercent: z.number(),
+      // One of these, matching how Booking.com states a price difference.
+      derivedPercent: z.number().nullable().optional(),
+      derivedAmount: z.number().nullable().optional(),
       minStayArrival: z.number().int().min(1),
+      mealType: z.string().nullable().optional(),
     })
     .optional(),
   // The family to create, when it is not the default one - what the operator
@@ -54,7 +57,9 @@ const provisionSchema = z.object({
       z.object({
         title: z.string().min(1),
         derivedPercent: z.number().nullable(),
+        derivedAmount: z.number().nullable().optional(),
         minStayArrival: z.number().int().min(1),
+        mealType: z.string().nullable().optional(),
       })
     )
     .min(1)
@@ -147,7 +152,11 @@ export async function POST(req: NextRequest) {
       channexRoomTypeId: guard.channexRoomTypeId,
       currency: property.currency,
       occupancy: property.maxGuests,
-      spec: { ...addPlan, derivedPercent: addPlan.derivedPercent },
+      spec: {
+        ...addPlan,
+        derivedPercent: addPlan.derivedPercent ?? null,
+        derivedAmount: addPlan.derivedAmount ?? null,
+      },
     });
     if (!res.ok) {
       return NextResponse.json(

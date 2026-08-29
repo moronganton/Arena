@@ -23,6 +23,8 @@ interface RatePlan {
   title: string;
   kind: string; // PARENT | DERIVED
   derivedPercent: number | null;
+  derivedAmount: number | null;
+  mealType: string | null;
   minStayArrival: number;
   position: number;
   active: boolean;
@@ -172,6 +174,7 @@ export default function RatePlansPanel({
           <PlanEditor
             plan={parent}
             busy={busy}
+            currency={previewCurrency}
             onCancel={() => setEditing(null)}
             onSave={(body) =>
               send(`/api/channex/rate-plans/${parent.id}`, {
@@ -198,6 +201,7 @@ export default function RatePlansPanel({
                 key={p.id}
                 plan={p}
                 busy={busy}
+                currency={previewCurrency}
                 onCancel={() => setEditing(null)}
                 onSave={(body) =>
                   send(`/api/channex/rate-plans/${p.id}`, {
@@ -227,8 +231,9 @@ export default function RatePlansPanel({
       {adding ? (
         <div className="pl-4 border-l-2 border-slate-100">
           <PlanEditor
-            plan={{ id: "new", channexRatePlanId: null, title: "", kind: "DERIVED", derivedPercent: -10, minStayArrival: 2, position: 0, active: true }}
+            plan={{ id: "new", channexRatePlanId: null, title: "", kind: "DERIVED", derivedPercent: -10, derivedAmount: null, mealType: null, minStayArrival: 2, position: 0, active: true }}
             busy={busy}
+            currency={previewCurrency}
             isNew
             onCancel={() => setAdding(false)}
             onSave={(body) =>
@@ -353,7 +358,9 @@ function PlanRow({
 }) {
   const isParent = plan.kind === "PARENT";
   const pct = plan.derivedPercent;
-  const quoted = preview ? derivedPriceFor(preview.base, isParent ? null : pct) : null;
+  const quoted = preview
+    ? derivedPriceFor(preview.base, isParent ? null : { derivedPercent: plan.derivedPercent, derivedAmount: plan.derivedAmount })
+    : null;
 
   return (
     <div className="bg-white border border-slate-100 rounded-xl p-3 flex items-center gap-3">
@@ -423,12 +430,25 @@ function PlanRow({
               pct !== null && pct < 0 ? "text-emerald-600" : "text-amber-600"
             }`}
           >
-            {pct !== null && pct < 0
-              ? `${Math.abs(pct)}% cheaper than parent`
-              : `${pct}% dearer than parent`}
+            {plan.derivedAmount !== null && plan.derivedAmount !== undefined
+              ? plan.derivedAmount < 0
+                ? `${preview?.currency ?? ""} ${Math.abs(plan.derivedAmount)} cheaper than parent`.trim()
+                : `${preview?.currency ?? ""} ${plan.derivedAmount} dearer than parent`.trim()
+              : pct !== null && pct < 0
+                ? `${Math.abs(pct)}% cheaper than parent`
+                : `${pct}% dearer than parent`}
           </span>
         )}
       </div>
+
+      {plan.mealType === "breakfast" && (
+        <span
+          title="Breakfast is included in this rate"
+          className="text-[9px] font-bold tracking-wide px-1.5 py-0.5 rounded border bg-amber-50 text-amber-800 border-amber-200 self-center shrink-0"
+        >
+          BREAKFAST
+        </span>
+      )}
 
       <div className="flex items-center gap-1 shrink-0">
         {onEdit && (
@@ -454,21 +474,38 @@ function PlanRow({
 // The parent's percentage is deliberately absent rather than disabled-and-
 // empty: it does not have one, and showing a greyed field implies it could.
 function PlanEditor({
-  plan, busy, isNew, onCancel, onSave,
+  plan, busy, isNew, onCancel, onSave, currency,
 }: {
   plan: RatePlan;
+  /** Shown on the amount option, so the unit is the property's own money. */
+  currency?: string;
   busy: boolean;
   isNew?: boolean;
   onCancel: () => void;
-  onSave: (body: { title: string; derivedPercent?: number; minStayArrival: number }) => void;
+  onSave: (body: {
+    title: string;
+    derivedPercent?: number | null;
+    derivedAmount?: number | null;
+    minStayArrival: number;
+    mealType?: string | null;
+  }) => void;
 }) {
   const isParent = plan.kind === "PARENT";
   const [title, setTitle] = useState(plan.title);
-  const [pct, setPct] = useState(String(plan.derivedPercent ?? ""));
+  // Percent or a flat amount, the same two Booking.com's own "Price
+  // difference" control offers. A plan holds exactly one, so the toggle picks
+  // which field the value means rather than showing two boxes to fill.
+  const [unit, setUnit] = useState<"percent" | "amount">(
+    plan.derivedAmount !== null && plan.derivedAmount !== undefined ? "amount" : "percent"
+  );
+  const [diff, setDiff] = useState(
+    String((plan.derivedAmount ?? plan.derivedPercent) ?? "")
+  );
   const [minStay, setMinStay] = useState(String(plan.minStayArrival));
+  const [breakfast, setBreakfast] = useState(plan.mealType === "breakfast");
 
-  const parsedPct = Number(pct);
-  const pctValid = isParent || (pct.trim() !== "" && Number.isFinite(parsedPct));
+  const parsedDiff = Number(diff);
+  const diffValid = isParent || (diff.trim() !== "" && Number.isFinite(parsedDiff));
 
   return (
     <div className="bg-white border-2 border-indigo-200 rounded-xl p-3 space-y-3">
@@ -485,15 +522,33 @@ function PlanEditor({
 
         {!isParent && (
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">% of parent</label>
-            <input
-              type="number"
-              value={pct}
-              onChange={(e) => setPct(e.target.value)}
-              placeholder="-15"
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-            <p className="text-[11px] text-slate-500 mt-1">Negative discounts, positive surcharges.</p>
+            <label className="block text-xs font-medium text-slate-600 mb-1">
+              Cheaper / dearer than the main rate
+            </label>
+            <div className="flex gap-1.5">
+              <input
+                type="number"
+                value={diff}
+                onChange={(e) => setDiff(e.target.value)}
+                placeholder={unit === "amount" ? "12" : "-15"}
+                className="flex-1 min-w-0 border border-slate-200 rounded-lg px-3 py-2 text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+              <select
+                value={unit}
+                onChange={(e) => setUnit(e.target.value as "percent" | "amount")}
+                aria-label="Price difference unit"
+                className="border border-slate-200 rounded-lg px-2 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="percent">%</option>
+                <option value="amount">{currency ?? "EUR"}</option>
+              </select>
+            </div>
+            <p className="text-[11px] text-slate-500 mt-1">
+              Negative is cheaper, positive is dearer.{" "}
+              {unit === "amount"
+                ? "A fixed amount stays the same whatever the night costs — right for breakfast."
+                : "A percentage moves with the price."}
+            </p>
           </div>
         )}
 
@@ -509,6 +564,18 @@ function PlanEditor({
         </div>
       </div>
 
+      {!isParent && (
+        <label className="flex items-center gap-2 text-xs text-slate-600">
+          <input
+            type="checkbox"
+            checked={breakfast}
+            onChange={(e) => setBreakfast(e.target.checked)}
+            className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+          />
+          Breakfast is included in this rate
+        </label>
+      )}
+
       {isParent && (
         <p className="text-xs text-slate-500">
           The parent&apos;s price comes from your pricing rules — there is no percentage to set here.
@@ -518,12 +585,20 @@ function PlanEditor({
 
       <div className="flex gap-2">
         <button
-          disabled={busy || !title.trim() || !pctValid}
+          disabled={busy || !title.trim() || !diffValid}
           onClick={() =>
             onSave({
               title: title.trim(),
-              ...(isParent ? {} : { derivedPercent: parsedPct }),
+              // Exactly one of these is sent; the server clears the other, so a
+              // plan switched from a percent to an amount does not keep a
+              // stale percent behind it.
+              ...(isParent
+                ? {}
+                : unit === "amount"
+                  ? { derivedAmount: parsedDiff }
+                  : { derivedPercent: parsedDiff }),
               minStayArrival: Number(minStay) || 1,
+              ...(isParent ? {} : { mealType: breakfast ? "breakfast" : "none" }),
             })
           }
           className="flex items-center gap-1.5 bg-indigo-600 text-white text-sm font-medium px-3 py-2 rounded-lg disabled:opacity-50"
