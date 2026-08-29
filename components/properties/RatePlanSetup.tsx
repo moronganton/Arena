@@ -556,7 +556,12 @@ export default function RatePlanSetup({
                 type="number"
                 min="1"
                 value={p.minStayArrival}
-                onChange={(e) => update(p.key, { minStayArrival: Math.max(1, Number(e.target.value) || 1) })}
+                onChange={(e) =>
+                  // Floored: the API takes an integer, and "2.5" typed into a
+                  // number input reaches it as 2.5 and comes back a 400 whose
+                  // message says nothing about which field was wrong.
+                  update(p.key, { minStayArrival: Math.max(1, Math.floor(Number(e.target.value)) || 1) })
+                }
                 className={`w-20 border rounded-lg px-2.5 py-1.5 text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
                   p.minStayWasRead ? "border-slate-200" : "border-amber-300 bg-amber-50"
                 }`}
