@@ -123,8 +123,17 @@ export default function RatePlanSetup({
         }),
       });
       const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        setError((data?.problems ?? []).join("; ") || data?.error || "Couldn't create these rate plans");
+      // Two gates, not one. The endpoint reports a failed apply in the body as
+      // well as the status, and trusting res.ok alone is exactly what sent the
+      // operator silently back to the start of setup: a rejected apply looked
+      // like success, the re-read found no plans, and this screen remounted
+      // with nothing explaining why.
+      if (!res.ok || data?.applied === false) {
+        setError(
+          (data?.problems ?? []).join("; ") ||
+            data?.error ||
+            "Channex didn't accept these rate plans."
+        );
         return;
       }
       onCreated();

@@ -100,18 +100,41 @@ interface ChannexRatePlanRow {
 // Titles already on this property. Read rather than assumed, because the
 // collision this prevents is raised by Channex at create time and would
 // otherwise be discovered halfway through building a family.
+// Filtered server-side and paged, because neither is optional here.
+//
+// This used to GET /rate_plans unfiltered and filter the result in memory.
+// Channex paginates at 10 by default, so that only ever saw the first ten rate
+// plans in the whole ACCOUNT - and once one property had seven of them, a
+// second property's plans were never on that page. The collision check then
+// found nothing, provisioning tried to create a title that already existed,
+// and Channex rejected the whole apply with "Duplication in Rate Plan title is
+// not allowed". Silent, and it only appeared once an account got big enough to
+// have a second property.
+const PAGE_LIMIT = 100;
+const MAX_PAGES = 20; // 2000 plans for one property is a runaway, not a portfolio
+
 async function fetchExistingTitles(
   channexPropertyId: string
 ): Promise<{ titles: string[]; byTitle: Map<string, string> }> {
-  const res = await channexGet<ChannexRatePlanRow[]>("/rate_plans");
-  const rows = (res.data ?? []).filter(
-    (r) => r.relationships?.property?.data?.id === channexPropertyId
-  );
   const byTitle = new Map<string, string>();
-  for (const r of rows) {
-    const t = r.attributes?.title;
-    if (t) byTitle.set(t.trim().toLowerCase(), r.id);
+
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const res = await channexGet<ChannexRatePlanRow[]>(
+      `/rate_plans?filter[property_id]=${encodeURIComponent(channexPropertyId)}` +
+        `&pagination[page]=${page}&pagination[limit]=${PAGE_LIMIT}`
+    );
+    const rows = res.data ?? [];
+    for (const r of rows) {
+      // The filter is server-side now, but a stray row would poison the
+      // collision map, so the property is still checked when it is reported.
+      const owner = r.relationships?.property?.data?.id;
+      if (owner && owner !== channexPropertyId) continue;
+      const t = r.attributes?.title;
+      if (t) byTitle.set(t.trim().toLowerCase(), r.id);
+    }
+    if (rows.length < PAGE_LIMIT) break;
   }
+
   return { titles: [...byTitle.keys()], byTitle };
 }
 

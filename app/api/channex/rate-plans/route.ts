@@ -148,11 +148,25 @@ export async function POST(req: NextRequest) {
       ? "FAILED - see steps"
       : "dry run - nothing was created on Channex";
 
+  // A requested apply that did not apply is a FAILURE, and must not leave with
+  // a 2xx. It used to: callers saw res.ok, reported success, re-read, found no
+  // plans, and bounced the operator back to the start of setup with no error
+  // anywhere - the failing step was in a body nobody was reading.
+  const failedApply = apply && !result.applied;
+  const firstFailure = result.steps.find((s) => s.status === "failed");
+
   return NextResponse.json({
     status,
+    ...(failedApply
+      ? {
+          error:
+            firstFailure?.error?.message ??
+            "Channex rejected these rate plans - see steps for the exact response.",
+        }
+      : {}),
     ...result,
     nextStep: result.applied
       ? `Confirm prices land on ${result.parentChannexRatePlanId} after the next drain-ari cycle, then POST { deleteRatePlanId: "${result.previousParentChannexRatePlanId}" } to remove the old plan.`
       : "Send apply: true to create these on Channex.",
-  });
+  }, { status: failedApply ? 502 : 200 });
 }
