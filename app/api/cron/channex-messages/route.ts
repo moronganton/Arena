@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { pollChannexMessages } from "@/lib/channels/channex-messages";
+import { pollChannexMessages , messagePollFailure } from "@/lib/channels/channex-messages";
 import { startCronRun, closeStaleCronRuns } from "@/lib/cron-run";
 
 // Collects new guest messages from Channex on a schedule.
@@ -30,7 +30,8 @@ export async function GET(req: NextRequest) {
   await closeStaleCronRuns();
   return startCronRun("channex-messages", async () => {
     const r = await pollChannexMessages();
-    if (r.errors.length) throw new Error(r.errors.join("; "));
+    const failure = messagePollFailure(r);
+    if (failure) throw new Error(failure);
     return { checked: r.reservationsChecked, imported: r.imported, unsupported: r.unsupported };
   });
 }

@@ -207,6 +207,13 @@ export interface ChannexMessagePollResult {
   reservationsChecked: number;
   imported: number;
   unsupported: number;
+  /**
+   * Bookings whose message thread the API key may no longer read - a 403.
+   * Counted apart from errors because it is permanent and per-booking: the
+   * channel that carried the booking has been disconnected or removed, so no
+   * amount of retrying makes the thread readable again.
+   */
+  forbidden: number;
   errors: string[];
 }
 
@@ -223,7 +230,9 @@ export async function pollChannexMessages(): Promise<ChannexMessagePollResult> {
     take: MESSAGE_POLL_MAX_RESERVATIONS,
   });
 
-  const result: ChannexMessagePollResult = { reservationsChecked: 0, imported: 0, unsupported: 0, errors: [] };
+  const result: ChannexMessagePollResult = {
+    reservationsChecked: 0, imported: 0, unsupported: 0, forbidden: 0, errors: [],
+  };
   let lastCallAt = 0;
 
   for (const r of reservations) {
@@ -253,10 +262,41 @@ export async function pollChannexMessages(): Promise<ChannexMessagePollResult> {
       }
       // 404 means the booking is gone from Channex's side - nothing to do.
       if (e.status === 404) continue;
+      // 403 is permanent for this booking: its channel has been disconnected
+      // or removed, so the key may no longer read that thread. Treated like
+      // the two above rather than as a run failure - eight such bookings on
+      // this account failed every run for a day, which is not an outage, it
+      // is eight threads that will never be readable. A credentials problem
+      // looks different and is caught below: there, EVERY booking is
+      // forbidden and none succeeds.
+      if (e.status === 403) {
+        result.forbidden++;
+        continue;
+      }
       console.error(`[channex-messages] poll failed for booking ${bookingId}:`, err);
       result.errors.push(`${bookingId}: ${e.message}`);
     }
   }
 
   return result;
+}
+
+/**
+ * Whether a message poll should be reported as a failed run.
+ *
+ * A per-booking 403 is not a failure: its channel is gone and that thread is
+ * unreadable for good. Eight of those turned this cron permanently red, which
+ * is worse than useless - a job that is always failing tells you nothing on
+ * the day it fails for a real reason.
+ *
+ * But the same status means something else entirely when it is ALL of them:
+ * a key that has lost access, or an app uninstalled. That is an outage and
+ * has to be loud. The two are told apart by whether anything succeeded.
+ */
+export function messagePollFailure(result: ChannexMessagePollResult): string | null {
+  if (result.errors.length > 0) return result.errors.join("; ");
+  if (result.forbidden > 0 && result.reservationsChecked === 0 && result.unsupported === 0) {
+    return `every message thread was forbidden (${result.forbidden}) - the API key may have lost access to the Messages app`;
+  }
+  return null;
 }
