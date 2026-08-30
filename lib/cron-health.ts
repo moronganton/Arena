@@ -31,6 +31,9 @@ export const EXPECTED_INTERVAL_MINUTES: Record<string, number> = {
   "channex-revisions": 15,
   "sync-reservations": 30,
   "channex-full-sync": 1440,
+  // Every 15 minutes; a booking lost to the resolution race is worth finding
+  // in minutes, not hours.
+  "channex-reconcile-bookings": 15,
 };
 
 // Which of those jobs THIS environment is actually pinged for.
