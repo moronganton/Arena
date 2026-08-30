@@ -205,8 +205,34 @@ export async function pushAriForDateRange(propertyId: string, dateFrom: Date, da
 }
 
 const FULL_SYNC_HORIZON_DAYS = 500; // certification's own number, not the 365-day routine-push horizon
-const FULL_SYNC_CHUNK_DAYS = 100;
 const FULL_SYNC_MIN_MS_BETWEEN_CALLS = 6500; // same pacing as ari-drain.ts, for the same reason
+
+// A full sync is TWO calls, not one per chunk of days.
+//
+// This used to walk the 500 days in 100-day chunks, which made ten calls and
+// ten task ids. Certification asks for exactly two - "1 x 500 days for
+// Availability (All Rooms), 1 x 500 days Rates & restrictions (All Rates)" -
+// so ten reads as an integration that cannot batch, which is the thing tests
+// 3 to 8 are checking for.
+//
+// The chunking was caution about payload size, and the rate-limits page
+// settles it: "Channex can handle up to 10mb per json call". Five hundred days
+// across two rate plans is about a thousand values, a few hundred kilobytes.
+// So the split is by SIZE and not by days - it never fires for a real
+// property, and a portfolio with a dozen rate plans still cannot post
+// something Channex will refuse.
+const MAX_PAYLOAD_BYTES = 8_000_000; // 10MB is the documented ceiling; leave headroom for encoding
+
+/** Split values into the fewest batches that each stay under the size ceiling. */
+export function batchBySize<T>(values: T[], maxBytes = MAX_PAYLOAD_BYTES): T[][] {
+  if (values.length === 0) return [];
+  if (JSON.stringify(values).length <= maxBytes) return [values];
+  // Halving rather than measuring each append: this path is for a property
+  // large enough that it should not exist, and correctness matters more than
+  // packing it optimally.
+  const mid = Math.ceil(values.length / 2);
+  return [...batchBySize(values.slice(0, mid), maxBytes), ...batchBySize(values.slice(mid), maxBytes)];
+}
 
 function addDaysUtc(d: Date, n: number): Date {
   const r = new Date(d);
@@ -231,22 +257,46 @@ export async function runFullSyncForProperty(propertyId: string, propertyName: s
 
   const taskIds: string[] = [];
   let callsFailed = 0;
+
+  // Built once for the whole window, then posted whole. buildAriValues
+  // already emits one value per date per rate plan, which is what "all rates"
+  // means here.
+  const values = await buildAriValues(propertyId, from, to);
+  if (values.length === 0) return { propertyId, propertyName, taskIds, callsFailed };
+
+  const restrictionBatches = batchBySize(values);
+  const availabilityBatches = batchBySize(await buildAvailabilityValues(propertyId, values));
+
   let lastCallAt = 0;
-
-  for (let cursor = from; cursor < to; ) {
-    const chunkEnd = addDaysUtc(cursor, FULL_SYNC_CHUNK_DAYS) < to ? addDaysUtc(cursor, FULL_SYNC_CHUNK_DAYS) : to;
-
+  const paced = async <T>(fn: () => Promise<T>): Promise<T> => {
     const wait = lastCallAt === 0 ? 0 : FULL_SYNC_MIN_MS_BETWEEN_CALLS - (Date.now() - lastCallAt);
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
     lastCallAt = Date.now();
+    return fn();
+  };
 
+  for (const batch of restrictionBatches) {
     try {
-      taskIds.push(...(await pushAriForDateRange(propertyId, cursor, chunkEnd)));
+      const res = await paced(() =>
+        channexPost<Array<{ id: string; type: string }>>("/restrictions", { values: batch })
+      );
+      taskIds.push(...(res.data ?? []).map((t) => t.id));
     } catch (err) {
       callsFailed++;
-      console.error(`[channex-ari] full sync ${propertyName} ${cursor.toISOString()}..${chunkEnd.toISOString()} failed:`, err);
+      console.error(`[channex-ari] full sync restrictions ${propertyName} failed:`, err);
     }
-    cursor = chunkEnd;
+  }
+
+  for (const batch of availabilityBatches) {
+    try {
+      const res = await paced(() =>
+        channexPost<Array<{ id: string; type: string }>>("/availability", { values: batch })
+      );
+      taskIds.push(...(res.data ?? []).map((t) => t.id));
+    } catch (err) {
+      callsFailed++;
+      console.error(`[channex-ari] full sync availability ${propertyName} failed:`, err);
+    }
   }
 
   return { propertyId, propertyName, taskIds, callsFailed };
