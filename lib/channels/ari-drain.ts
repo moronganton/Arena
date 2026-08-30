@@ -159,7 +159,9 @@ export async function drainAriOutbox(): Promise<DrainSummary> {
         summary.taskIds.push(...taskIds);
         await prisma.ariOutbox.updateMany({
           where: { id: { in: contributing.map((r) => r.id) } },
-          data: { status: "DONE", lastError: null },
+          // Stored, not just returned. Every row settled by this call records
+          // the same task ids, because they were settled by the same call.
+          data: { status: "DONE", lastError: null, taskIds: JSON.stringify(taskIds) },
         });
         summary.rowsDone += contributing.length;
       } catch (err) {

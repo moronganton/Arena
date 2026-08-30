@@ -394,6 +394,13 @@ model AriOutbox {
   status    String   @default("PENDING") // PENDING | PROCESSING | DONE | FAILED
   attempts  Int      @default(0)
   lastError String?
+
+  // The Channex task ids returned by the call that settled this row, as a
+  // JSON array. Kept because a task id is the only handle on what Channex
+  // actually received: it is what certification is graded on, and what
+  // answers "did this price really reach the channel" after the fact. The
+  // drain used to return them to its caller and drop them on the floor.
+  taskIds   String?
   // A failed row is not retried before this - exponential backoff needs
   // somewhere to record "when", not just "how many times". Null means
   // eligible immediately (a fresh PENDING row, or a row that has never
