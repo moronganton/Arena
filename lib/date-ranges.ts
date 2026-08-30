@@ -27,3 +27,17 @@ export function groupContiguousDates(dates: string[]): DateRange[] {
   }
   return ranges;
 }
+
+/**
+ * The day after a date key.
+ *
+ * Ranges in this app are half-open - a stay's checkOut and a block's endDate
+ * are both the morning after the last night. A calendar selection is a set of
+ * NIGHTS, so turning one into a range means adding a day to its last night,
+ * and getting that wrong silently drops or adds a night at the end.
+ */
+export function addDayKey(dateKey: string): string {
+  return new Date(new Date(`${dateKey}T00:00:00.000Z`).getTime() + DAY_MS)
+    .toISOString()
+    .slice(0, 10);
+}

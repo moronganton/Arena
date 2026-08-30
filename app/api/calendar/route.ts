@@ -93,6 +93,43 @@ export async function DELETE(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const id = searchParams.get("id");
+
+  // Clearing by DATE RANGE, because a calendar knows which nights are
+  // selected and not which block rows cover them. A range can span several
+  // blocks, or part of one, so overlapping blocks are removed and the
+  // untouched remainder written back - reopening a Tuesday must not reopen
+  // the whole fortnight it sat in.
+  const propertyId = searchParams.get("propertyId");
+  const from = searchParams.get("from");
+  const to = searchParams.get("to");
+  if (!id && propertyId && from && to) {
+    const property = await prisma.property.findFirst({
+      where: { id: propertyId, ownerId: session!.user!.id },
+      select: { id: true },
+    });
+    if (!property) return NextResponse.json({ error: "Property not found" }, { status: 404 });
+
+    const start = new Date(from);
+    const end = new Date(to);
+    const overlapping = await prisma.calendarBlock.findMany({
+      where: { propertyId, startDate: { lt: end }, endDate: { gt: start } },
+    });
+
+    const keep: { startDate: Date; endDate: Date; reason: string | null }[] = [];
+    for (const b of overlapping) {
+      if (b.startDate < start) keep.push({ startDate: b.startDate, endDate: start, reason: b.reason });
+      if (b.endDate > end) keep.push({ startDate: end, endDate: b.endDate, reason: b.reason });
+    }
+
+    await prisma.$transaction([
+      prisma.calendarBlock.deleteMany({ where: { id: { in: overlapping.map((b) => b.id) } } }),
+      ...keep.map((k) => prisma.calendarBlock.create({ data: { propertyId, ...k } })),
+    ]);
+
+    await enqueueAriUpdate(propertyId, start, end, "AVAILABILITY");
+    return NextResponse.json({ success: true, cleared: overlapping.length, kept: keep.length });
+  }
+
   if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
 
   const block = await prisma.calendarBlock.findFirst({

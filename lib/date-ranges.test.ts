@@ -1,6 +1,6 @@
-import { test, describe } from "node:test";
+import { test, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { groupContiguousDates } from "./date-ranges";
+import { groupContiguousDates, addDayKey } from "./date-ranges";
 
 describe("groupContiguousDates", () => {
   test("a single date is a one-day range", () => {
@@ -42,5 +42,31 @@ describe("groupContiguousDates", () => {
 
   test("empty input yields no ranges", () => {
     assert.deepEqual(groupContiguousDates([]), []);
+  });
+});
+
+describe("addDayKey", () => {
+  it("moves to the next day", () => {
+    assert.equal(addDayKey("2026-11-22"), "2026-11-23");
+  });
+
+  it("crosses a month boundary", () => {
+    assert.equal(addDayKey("2026-11-30"), "2026-12-01");
+  });
+
+  it("crosses a year boundary", () => {
+    assert.equal(addDayKey("2026-12-31"), "2027-01-01");
+  });
+
+  it("handles a leap day", () => {
+    assert.equal(addDayKey("2028-02-28"), "2028-02-29");
+    assert.equal(addDayKey("2028-02-29"), "2028-03-01");
+  });
+
+  it("turns a selection's last night into a half-open range end", () => {
+    // A one-night selection is a range of exactly one night, not zero.
+    const [range] = groupContiguousDates(["2026-11-22"]);
+    assert.equal(range.start, "2026-11-22");
+    assert.equal(addDayKey(range.end), "2026-11-23");
   });
 });

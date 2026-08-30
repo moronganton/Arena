@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
-import { groupContiguousDates } from "@/lib/date-ranges";
+import { groupContiguousDates, addDayKey } from "@/lib/date-ranges";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, RefreshCw, CalendarDays, Info } from "lucide-react";
 import { formatCurrency, SOURCE_LABELS } from "@/lib/utils";
@@ -149,6 +149,12 @@ export default function PriceCalendarPanel({ property }: { property: PriceCalend
   // "Sep 4 - Sep 5, Sep 11 - Sep 12, +2 more" - the selection described the
   // way the operator thinks of it, as runs of days rather than a date soup.
   const selRanges = groupContiguousDates(selectedKeys);
+  // One button, two meanings: a selection that is entirely closed offers to
+  // reopen, anything else offers to close. A mixed selection closes, which is
+  // the safe direction - reopening nights the operator did not mean to reopen
+  // puts a listing back on sale.
+  const allSelectedBlocked =
+    selectedKeys.length > 0 && selectedKeys.every((k) => rates[k]?.blocked === true);
   const selLabel =
     selRanges
       .slice(0, 3)
@@ -176,6 +182,59 @@ export default function PriceCalendarPanel({ property }: { property: PriceCalend
       else next.add(key);
       return next;
     });
+  }
+
+  // Closing dates for sale, and reopening them.
+  //
+  // POST /api/calendar has always created a block and enqueued the push -
+  // nothing in the app ever called it. So a date could be blocked by the API
+  // and never by a person, which is also why stop_sell reached Channex only
+  // for dates blocked some other way.
+  //
+  // Contiguous runs, not one call per night: a block is a date RANGE, and
+  // fourteen selected nights should be one row and one push, not fourteen.
+  async function setBlocked(blocked: boolean) {
+    if (selectedKeys.length === 0 || !propId) return;
+    setSaving(true); setSaveErr("");
+    try {
+      for (const range of selRanges) {
+        // A block runs to the morning after its last night, the same
+        // checkIn/checkOut convention the rest of the app uses.
+        const endExclusive = addDayKey(range.end);
+        const res = blocked
+          ? await fetch("/api/calendar", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                propertyId: propId,
+                startDate: range.start,
+                endDate: endExclusive,
+                reason: "Closed from the calendar",
+              }),
+            })
+          : await fetch(
+              `/api/calendar?propertyId=${encodeURIComponent(propId)}` +
+                `&from=${range.start}&to=${endExclusive}`,
+              { method: "DELETE" }
+            );
+        if (!res.ok) {
+          const detail = await res.json().catch(() => null);
+          throw new Error(
+            typeof detail?.error === "string"
+              ? detail.error
+              : blocked
+                ? "Could not close these dates."
+                : "Could not reopen these dates."
+          );
+        }
+      }
+      setSel(new Set());
+      load();
+    } catch (e) {
+      setSaveErr(e instanceof Error ? e.message : "That didn't work.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function saveOverride() {
@@ -438,6 +497,18 @@ export default function PriceCalendarPanel({ property }: { property: PriceCalend
                   className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2 rounded-xl text-sm font-medium transition"
                 >
                   {saving ? "Saving…" : "Save price"}
+                </button>
+                {/* Closing dates for sale. POST /api/calendar has always
+                    created the block and queued the push; nothing in the app
+                    ever called it, so a date could only be closed through the
+                    API - which meant stop_sell reached the channels only for
+                    dates blocked some other way. */}
+                <button
+                  onClick={() => setBlocked(!allSelectedBlocked)}
+                  disabled={saving}
+                  className="bg-white hover:bg-slate-50 disabled:opacity-50 text-slate-700 px-4 py-2 rounded-xl text-sm font-medium border border-slate-200 transition"
+                >
+                  {allSelectedBlocked ? "Reopen for sale" : "Close for sale"}
                 </button>
                 <button
                   onClick={() => setSel(new Set())}
