@@ -5,7 +5,9 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, MapPin, Bed, Bath, Users } from "lucide-react";
 import PropertyActions from "./PropertyActions";
-import { countDeleteBlockers, hasBlockers, describeBlockers } from "@/lib/properties/delete-property";
+import {
+  countDeleteBlockers, hasBlockers, describeBlockers, propertyPurgeAllowed,
+} from "@/lib/properties/delete-property";
 import PropertyListingTabs from "@/components/properties/PropertyListingTabs";
 import PropertyPhoto from "@/components/properties/PropertyPhoto";
 
@@ -36,7 +38,12 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
   // dialog can say what is holding the property rather than offering a button
   // that fails, which is how someone learns their reservations are the reason
   // only after pressing it.
-  const blockers = await countDeleteBlockers(id);
+  // Skipped entirely where permanent deletion is switched off - there is no
+  // point counting what is holding a property when nothing may delete it.
+  const canPurgeHere = propertyPurgeAllowed();
+  const blockers = canPurgeHere
+    ? await countDeleteBlockers(id)
+    : { reservations: 0, expenses: 0, perReservationCosts: 0, damageReports: 0 };
 
   const [upcomingReservations, templates] = await Promise.all([
     prisma.reservation.findMany({
@@ -207,7 +214,7 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
         </div>
         <PropertyActions
           id={property.id}
-          canDelete={!hasBlockers(blockers)}
+          canDelete={canPurgeHere && !hasBlockers(blockers)}
           holds={hasBlockers(blockers) ? describeBlockers(blockers) : null}
         />
       </div>

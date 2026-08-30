@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { deletePropertyForGood, describeBlockers } from "@/lib/properties/delete-property";
+import { deletePropertyForGood, describeBlockers, propertyPurgeAllowed } from "@/lib/properties/delete-property";
 import { enqueueAriUpdate, defaultHorizon } from "@/lib/channels/ari-outbox";
 import { upsertCityTax, deleteChannexTax } from "@/lib/channels/channex-taxes";
 import { isAcceptableImageSrc } from "@/lib/image";
@@ -147,6 +147,9 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   if (new URL(req.url).searchParams.get("purge") === "true") {
     const res = await deletePropertyForGood(id, session!.user!.id);
     if (!res.ok) {
+      // 403 when the environment forbids it, which is a different thing from
+      // a property that cannot be found or is holding records.
+      const status = !propertyPurgeAllowed() ? 403 : res.blockers ? 409 : 404;
       return NextResponse.json(
         {
           error: res.blockers
@@ -154,7 +157,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
             : res.error,
           blockers: res.blockers,
         },
-        { status: res.blockers ? 409 : 404 }
+        { status }
       );
     }
     return NextResponse.json({ success: true, deleted: true, channexNote: res.channexNote });

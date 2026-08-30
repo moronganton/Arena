@@ -21,6 +21,21 @@ import { channexDelete, ChannexError } from "@/lib/channels/channex-core";
 //      so the order below is not tidiness - a delete in the wrong order fails
 //      on a foreign key halfway through and leaves the property half gone.
 
+/**
+ * Whether permanent deletion is allowed in this environment at all.
+ *
+ * Off unless explicitly switched on, and checked on the server rather than by
+ * hiding a button - a hidden button still leaves the endpoint answering, which
+ * is not a safety control. Production has live listings whose reservations,
+ * expenses and channel mappings a mis-click must not be able to reach, so the
+ * capability stays in the codebase, tested, and simply refuses to run there.
+ *
+ * Set ALLOW_PROPERTY_PURGE=true only where losing a property is recoverable.
+ */
+export function propertyPurgeAllowed(): boolean {
+  return process.env.ALLOW_PROPERTY_PURGE === "true";
+}
+
 export interface DeleteBlockers {
   reservations: number;
   expenses: number;
@@ -65,6 +80,17 @@ export async function deletePropertyForGood(
   propertyId: string,
   ownerId: string
 ): Promise<DeletePropertyResult> {
+  // Checked first, before anything is read or counted: an environment that
+  // does not permit this should not even reveal whether the property exists.
+  if (!propertyPurgeAllowed()) {
+    return {
+      ok: false,
+      error:
+        "Deleting a property permanently is switched off in this environment. " +
+        "It can be hidden from your listings instead.",
+    };
+  }
+
   const property = await prisma.property.findFirst({
     where: { id: propertyId, ownerId },
     select: { id: true, channexListing: { select: { channexPropertyId: true } } },
