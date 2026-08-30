@@ -20,7 +20,12 @@ export interface RestrictionValue {
   date: string;
   availability: number;
   stop_sell: boolean;
-  rate: number; // minor units (cents)
+  /**
+   * Minor units (cents). Absent on a derived plan: Channex computes its rate
+   * from the parent's, and sending one explicitly would replace the
+   * derivation with a fixed number that stops following the parent.
+   */
+  rate?: number;
   min_stay_arrival: number;
 }
 
@@ -36,7 +41,7 @@ export async function buildAriValues(
   dateFrom: Date,
   dateTo: Date
 ): Promise<RestrictionValue[]> {
-  const [listing, property, rules, blocks, stays] = await Promise.all([
+  const [listing, property, rules, blocks, stays, plans] = await Promise.all([
     prisma.channexListing.findUnique({ where: { propertyId } }),
     prisma.property.findUniqueOrThrow({ where: { id: propertyId }, select: { basePrice: true } }),
     // Ordered even though resolvePrice now sorts for itself: an unordered
@@ -62,6 +67,15 @@ export async function buildAriValues(
       },
       select: { checkIn: true, checkOut: true },
     }),
+    // Every plan this property sells, not only the one prices are pushed to.
+    // A derived plan does not inherit its minimum stay - that is the whole
+    // reason it is a separate product - so nothing else will ever set its
+    // per-date restrictions.
+    prisma.ratePlan.findMany({
+      where: { channexListing: { propertyId }, active: true, channexRatePlanId: { not: null } },
+      orderBy: { position: "asc" },
+      select: { channexRatePlanId: true, kind: true, minStayArrival: true },
+    }),
   ]);
   if (!listing) throw new Error(`buildAriValues: no ChannexListing for property ${propertyId}`);
 
@@ -74,19 +88,63 @@ export async function buildAriValues(
     stays
   );
 
-  return days.map((d) => ({
-    property_id: listing.channexPropertyId,
-    room_type_id: listing.channexRoomTypeId,
-    rate_plan_id: listing.channexRatePlanId,
-    date: d.date,
-    availability: d.available ? 1 : 0,
-    // A host-blocked date must also be closed for sale, not merely show 0
-    // available rooms - confirmed this is a distinct field, not implied by
-    // availability alone.
-    stop_sell: !d.available,
-    rate: Math.round(d.price * 100),
-    min_stay_arrival: d.minStay,
-  }));
+  // One value per date PER RATE PLAN, all in the one array this endpoint
+  // takes. Until now this pushed only to the parent, so a family's derived
+  // plans kept whatever weekly default they were created with: block a date
+  // and the non-refundable plan went on selling it; raise a minimum stay for
+  // Christmas and only the standard rate honoured it. Channex recomputes a
+  // derived plan's PRICE, and nothing else about it.
+  //
+  // A property with no RatePlan rows yet - provisioned, family not built -
+  // still pushes to the listing's own plan, exactly as before.
+  const targets =
+    plans.length > 0
+      ? plans.map((p) => ({
+          id: p.channexRatePlanId!,
+          isParent: p.kind === "PARENT",
+          floor: p.minStayArrival,
+        }))
+      : [{ id: listing.channexRatePlanId, isParent: true, floor: 1 }];
+
+  const values: RestrictionValue[] = [];
+  for (const d of days) {
+    for (const t of targets) {
+      values.push({
+        property_id: listing.channexPropertyId,
+        room_type_id: listing.channexRoomTypeId,
+        rate_plan_id: t.id,
+        date: d.date,
+        availability: d.available ? 1 : 0,
+        // A host-blocked date must also be closed for sale, not merely show 0
+        // available rooms - confirmed this is a distinct field, not implied by
+        // availability alone.
+        stop_sell: !d.available,
+        // Only the parent carries a price. A derived plan's rate is computed
+        // by Channex from its derived_option, and sending an explicit one
+        // would override that - turning a plan that follows the parent into a
+        // fixed number that silently stops following it.
+        ...(t.isParent ? { rate: Math.round(d.price * 100) } : {}),
+        // The stricter of the two. A plan's own minimum is what makes it a
+        // separate product - a weekly rate must not start selling three
+        // nights because a date rule said three - but a date that demands
+        // more than the plan's floor must still raise it.
+        min_stay_arrival: t.isParent ? d.minStay : Math.max(t.floor, d.minStay),
+      });
+    }
+  }
+  return values;
+}
+
+/**
+ * The priced rows, one per date.
+ *
+ * buildAriValues returns one row per date PER RATE PLAN, which is what the
+ * push needs and not what a screen showing "the price on this night" needs -
+ * it would see the same date once per plan. Only the parent carries a rate,
+ * so that is also the filter for "one row per date".
+ */
+export function pricedValues(values: RestrictionValue[]): Array<RestrictionValue & { rate: number }> {
+  return values.filter((v): v is RestrictionValue & { rate: number } => v.rate !== undefined);
 }
 
 export interface AvailabilityValue {
@@ -108,7 +166,12 @@ export interface AvailabilityValue {
 async function buildAvailabilityValues(propertyId: string, restrictionValues: RestrictionValue[]): Promise<AvailabilityValue[]> {
   const listing = await prisma.channexListing.findUnique({ where: { propertyId }, select: { channexRoomTypeId: true } });
   if (!listing) throw new Error(`buildAvailabilityValues: no ChannexListing for property ${propertyId}`);
-  return restrictionValues.map((v) => ({
+  // Availability is a property of the ROOM TYPE, not of a rate plan, so it
+  // needs one row per date. The restriction values now carry one row per date
+  // per plan, and mapping them straight through would send the same date once
+  // per plan - identical rows, a payload several times larger than it needs to
+  // be, against an endpoint with its own rate-limit budget.
+  return pricedValues(restrictionValues).map((v) => ({
     property_id: v.property_id,
     room_type_id: listing.channexRoomTypeId,
     date: v.date,

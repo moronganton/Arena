@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireDebugAccess } from "@/lib/debug-auth";
 import { requireChannexProperty } from "@/lib/channels/channex-property-guard";
-import { buildAriValues } from "@/lib/channels/channex-ari";
+import { buildAriValues, pricedValues } from "@/lib/channels/channex-ari";
 import { derivedPriceFor } from "@/lib/channels/rate-plan-spec";
 
 // What a date range actually resolves to, and what each rate plan quotes for it.
@@ -78,7 +78,8 @@ export async function GET(req: NextRequest) {
     ratePlans: plans.map((p) => ({
       title: p.title, kind: p.kind, derivedPercent: p.derivedPercent, minStayArrival: p.minStayArrival,
     })),
-    days: values.map((v) => ({
+    // One row per date - buildAriValues now emits one per date per rate plan.
+    days: pricedValues(values).map((v) => ({
       date: v.date,
       // buildAriValues works in minor units because that is what Channex takes.
       parentPrice: v.rate / 100,

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { requireChannexProperty } from "@/lib/channels/channex-property-guard";
-import { buildAriValues } from "@/lib/channels/channex-ari";
+import { buildAriValues, pricedValues } from "@/lib/channels/channex-ari";
 import { channexGet } from "@/lib/channels/channex-core";
 import { connectedChannels, type ChannelConnectionLike } from "@/lib/channels/channel-offers";
 
@@ -81,7 +81,9 @@ export async function GET(req: NextRequest) {
     // null means "not determined", which the UI must render differently from
     // an empty list - one is ignorance, the other is a fact.
     connectedChannels: channels,
-    week: values.map((v) => ({
+    // One row per date. buildAriValues emits one per date per rate plan, so
+    // mapping it straight through would repeat every night once per plan.
+    week: pricedValues(values).map((v) => ({
       date: v.date,
       dow: DOW[new Date(`${v.date}T00:00:00.000Z`).getUTCDay()],
       // buildAriValues works in minor units because that is what Channex takes.
